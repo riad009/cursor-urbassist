@@ -1,298 +1,512 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { AppLayout, Header } from "@/components/layout"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { useProjectStore } from "@/store/projectStore"
+import React, { useState } from "react";
+import Navigation from "@/components/layout/Navigation";
 import {
   Plus,
   Search,
-  FolderOpen,
-  MoreVertical,
+  Filter,
+  Grid3X3,
+  List,
+  MoreHorizontal,
   Calendar,
   MapPin,
-  Building2,
-  ArrowRight,
+  ArrowUpRight,
   Trash2,
-  Edit,
+  Edit3,
   Copy,
-} from "lucide-react"
-import Link from "next/link"
+  Star,
+  StarOff,
+  FolderOpen,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  Building2,
+  Home,
+  TreePine,
+  Warehouse,
+} from "lucide-react";
+import Link from "next/link";
+import { cn } from "@/lib/utils";
 
-const demoProjects = [
+interface Project {
+  id: number;
+  name: string;
+  description: string;
+  status: "draft" | "in-progress" | "review" | "completed";
+  type: "residential" | "commercial" | "extension" | "renovation";
+  location: string;
+  area: string;
+  createdAt: string;
+  updatedAt: string;
+  progress: number;
+  starred: boolean;
+  thumbnail: string;
+}
+
+const projectsData: Project[] = [
   {
-    id: "1",
-    name: "Maison Individuelle - Rue des Lilas",
-    description: "Single family home with garden and garage",
-    parcelArea: 450,
-    maxBuildableArea: 180,
+    id: 1,
+    name: "Villa Méditerranée",
+    description: "Luxury residential villa with pool and garden",
     status: "in-progress",
-    location: "Lyon, France",
-    createdAt: new Date("2024-01-15"),
-    updatedAt: new Date("2024-02-05"),
+    type: "residential",
+    location: "Nice, France",
+    area: "280 m²",
+    createdAt: "2026-01-15",
+    updatedAt: "2 hours ago",
+    progress: 75,
+    starred: true,
+    thumbnail: "🏠",
   },
   {
-    id: "2",
-    name: "Extension Garage - Avenue du Parc",
-    description: "20m² garage extension with storage",
-    parcelArea: 320,
-    maxBuildableArea: 35,
+    id: 2,
+    name: "Commercial Center Aurora",
+    description: "Modern commercial complex with retail spaces",
     status: "review",
-    location: "Paris, France",
-    createdAt: new Date("2024-01-20"),
-    updatedAt: new Date("2024-02-01"),
+    type: "commercial",
+    location: "Lyon, France",
+    area: "1,500 m²",
+    createdAt: "2026-01-10",
+    updatedAt: "Yesterday",
+    progress: 90,
+    starred: true,
+    thumbnail: "🏢",
   },
   {
-    id: "3",
-    name: "Rénovation Façade - Place du Marché",
-    description: "Complete facade renovation with insulation",
-    parcelArea: 200,
-    maxBuildableArea: 200,
+    id: 3,
+    name: "Garden Extension Project",
+    description: "Backyard extension with landscaping",
     status: "completed",
-    location: "Marseille, France",
-    createdAt: new Date("2023-12-10"),
-    updatedAt: new Date("2024-01-28"),
+    type: "extension",
+    location: "Paris, France",
+    area: "85 m²",
+    createdAt: "2025-12-20",
+    updatedAt: "3 days ago",
+    progress: 100,
+    starred: false,
+    thumbnail: "🌳",
   },
   {
-    id: "4",
-    name: "Immeuble Collectif - Quartier Nord",
-    description: "Multi-family residential building - 12 units",
-    parcelArea: 1200,
-    maxBuildableArea: 480,
-    status: "in-progress",
-    location: "Bordeaux, France",
-    createdAt: new Date("2024-01-05"),
-    updatedAt: new Date("2024-02-06"),
+    id: 4,
+    name: "Warehouse Renovation",
+    description: "Industrial space converted to loft apartments",
+    status: "draft",
+    type: "renovation",
+    location: "Marseille, France",
+    area: "450 m²",
+    createdAt: "2026-02-01",
+    updatedAt: "1 week ago",
+    progress: 10,
+    starred: false,
+    thumbnail: "🏭",
   },
-]
+  {
+    id: 5,
+    name: "Coastal Residence",
+    description: "Beach house with panoramic sea views",
+    status: "in-progress",
+    type: "residential",
+    location: "Cannes, France",
+    area: "320 m²",
+    createdAt: "2026-01-25",
+    updatedAt: "5 hours ago",
+    progress: 45,
+    starred: true,
+    thumbnail: "🏖️",
+  },
+  {
+    id: 6,
+    name: "Urban Apartment Complex",
+    description: "Multi-family residential building",
+    status: "review",
+    type: "residential",
+    location: "Bordeaux, France",
+    area: "2,100 m²",
+    createdAt: "2026-01-05",
+    updatedAt: "2 days ago",
+    progress: 85,
+    starred: false,
+    thumbnail: "🏘️",
+  },
+];
+
+const statusConfig = {
+  draft: { label: "Draft", color: "bg-slate-500/20 text-slate-400", icon: Edit3 },
+  "in-progress": { label: "In Progress", color: "bg-blue-500/20 text-blue-400", icon: Clock },
+  review: { label: "Review", color: "bg-amber-500/20 text-amber-400", icon: AlertCircle },
+  completed: { label: "Completed", color: "bg-emerald-500/20 text-emerald-400", icon: CheckCircle2 },
+};
+
+const typeConfig = {
+  residential: { label: "Residential", icon: Home, color: "text-blue-400" },
+  commercial: { label: "Commercial", icon: Building2, color: "text-purple-400" },
+  extension: { label: "Extension", icon: TreePine, color: "text-emerald-400" },
+  renovation: { label: "Renovation", icon: Warehouse, color: "text-orange-400" },
+};
 
 export default function ProjectsPage() {
-  const [searchQuery, setSearchQuery] = useState("")
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [newProjectName, setNewProjectName] = useState("")
-  const [newProjectDescription, setNewProjectDescription] = useState("")
-  const { createProject } = useProjectStore()
+  const [projects, setProjects] = useState<Project[]>(projectsData);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [showNewModal, setShowNewModal] = useState(false);
 
-  const filteredProjects = demoProjects.filter(
-    (project) =>
-      project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.location.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredProjects = projects.filter((project) => {
+    const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      project.location.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = filterStatus === "all" || project.status === filterStatus;
+    return matchesSearch && matchesFilter;
+  });
 
-  const handleCreateProject = () => {
-    if (newProjectName.trim()) {
-      createProject(newProjectName, newProjectDescription)
-      setIsCreateOpen(false)
-      setNewProjectName("")
-      setNewProjectDescription("")
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed":
-        return "success"
-      case "review":
-        return "warning"
-      case "in-progress":
-        return "info"
-      default:
-        return "default"
-    }
-  }
+  const toggleStar = (id: number) => {
+    setProjects(projects.map(p => 
+      p.id === id ? { ...p, starred: !p.starred } : p
+    ));
+  };
 
   return (
-    <AppLayout>
-      <Header
-        title="Projects"
-        description="Manage your construction projects"
-        action={{
-          label: "New Project",
-          onClick: () => setIsCreateOpen(true),
-        }}
-      />
+    <Navigation>
+      <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Projects</h1>
+            <p className="text-slate-400 mt-1">Manage and organize your construction projects</p>
+          </div>
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+          >
+            <Plus className="w-5 h-5" />
+            New Project
+          </button>
+        </div>
 
-      <div className="p-6 space-y-6">
-        {/* Search and Filters */}
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <Input
+        {/* Filters & Search */}
+        <div className="flex flex-col sm:flex-row gap-4">
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+            <input
+              type="text"
               placeholder="Search projects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="w-full pl-12 pr-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
             />
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              All Status
-            </Button>
-            <Button variant="outline" size="sm">
-              Sort by Date
-            </Button>
+
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <div className="flex bg-slate-800/50 rounded-xl p-1 border border-white/10">
+              <button
+                onClick={() => setFilterStatus("all")}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                  filterStatus === "all" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
+                )}
+              >
+                All
+              </button>
+              {Object.entries(statusConfig).map(([key, config]) => (
+                <button
+                  key={key}
+                  onClick={() => setFilterStatus(key)}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                    filterStatus === key ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* View Toggle */}
+          <div className="flex bg-slate-800/50 rounded-xl p-1 border border-white/10">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                viewMode === "grid" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              <Grid3X3 className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                viewMode === "list" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
+              )}
+            >
+              <List className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
-        {/* Projects Grid */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredProjects.map((project) => (
-            <Card
-              key={project.id}
-              className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg line-clamp-1">
-                      {project.name}
-                    </CardTitle>
-                    <CardDescription className="line-clamp-2">
-                      {project.description}
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStatusColor(project.status) as "success" | "warning" | "info" | "default"}>
-                    {project.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <MapPin className="h-4 w-4" />
-                  {project.location}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-lg bg-gray-50 p-3">
-                    <p className="text-xs text-gray-500">Parcel Area</p>
-                    <p className="text-lg font-semibold">{project.parcelArea} m²</p>
-                  </div>
-                  <div className="rounded-lg bg-blue-50 p-3">
-                    <p className="text-xs text-blue-600">Buildable</p>
-                    <p className="text-lg font-semibold text-blue-700">
-                      {project.maxBuildableArea} m²
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                  <div className="flex items-center gap-1 text-xs text-gray-400">
-                    <Calendar className="h-3 w-3" />
-                    {project.updatedAt.toLocaleDateString()}
-                  </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="ghost" size="icon-sm">
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm">
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon-sm" className="text-red-500">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Link href="/editor">
-                  <Button className="w-full" variant="outline">
-                    Open Editor
-                    <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          ))}
-
-          {/* Create New Project Card */}
-          <Card
-            className="border-2 border-dashed border-gray-200 hover:border-blue-400 transition-colors cursor-pointer group"
-            onClick={() => setIsCreateOpen(true)}
-          >
-            <CardContent className="flex flex-col items-center justify-center h-full min-h-[300px] text-gray-400 group-hover:text-blue-500 transition-colors">
-              <div className="w-16 h-16 rounded-full bg-gray-100 group-hover:bg-blue-100 flex items-center justify-center mb-4 transition-colors">
-                <Plus className="h-8 w-8" />
+        {/* Stats Bar */}
+        <div className="flex gap-4 overflow-x-auto pb-2">
+          {Object.entries(statusConfig).map(([key, config]) => {
+            const count = projects.filter(p => p.status === key).length;
+            return (
+              <div
+                key={key}
+                className="flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-800/30 border border-white/5 min-w-fit"
+              >
+                <config.icon className={cn("w-4 h-4", config.color.split(" ")[1])} />
+                <span className="text-sm text-white font-medium">{config.label}</span>
+                <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", config.color)}>
+                  {count}
+                </span>
               </div>
-              <p className="font-medium">Create New Project</p>
-              <p className="text-sm">Start a new construction design</p>
-            </CardContent>
-          </Card>
+            );
+          })}
         </div>
 
-        {/* Empty State */}
-        {filteredProjects.length === 0 && (
-          <div className="text-center py-12">
-            <FolderOpen className="h-16 w-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-1">No projects found</h3>
-            <p className="text-gray-500 mb-4">
-              {searchQuery
-                ? "Try adjusting your search terms"
-                : "Get started by creating your first project"}
-            </p>
-            <Button onClick={() => setIsCreateOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Create Project
-            </Button>
+        {/* Projects Grid/List */}
+        {filteredProjects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <FolderOpen className="w-16 h-16 text-slate-600 mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">No projects found</h3>
+            <p className="text-slate-400 mb-6">Try adjusting your search or filter</p>
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500 text-white font-semibold hover:bg-blue-600 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              Create New Project
+            </button>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredProjects.map((project) => {
+              const status = statusConfig[project.status];
+              const type = typeConfig[project.type];
+              return (
+                <div
+                  key={project.id}
+                  className="group relative bg-slate-800/50 border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-all hover:-translate-y-1"
+                >
+                  {/* Header */}
+                  <div className="relative h-32 bg-gradient-to-br from-slate-700/50 to-slate-800/50 p-4">
+                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="relative flex items-start justify-between">
+                      <div className="w-14 h-14 rounded-xl bg-slate-700/50 flex items-center justify-center text-3xl">
+                        {project.thumbnail}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => toggleStar(project.id)}
+                          className={cn(
+                            "p-2 rounded-lg transition-colors",
+                            project.starred ? "text-amber-400" : "text-slate-500 hover:text-white"
+                          )}
+                        >
+                          {project.starred ? <Star className="w-5 h-5 fill-current" /> : <StarOff className="w-5 h-5" />}
+                        </button>
+                        <button className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors">
+                          <MoreHorizontal className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="absolute bottom-4 left-4">
+                      <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium", status.color)}>
+                        {status.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="p-4">
+                    <Link href={`/editor?project=${project.id}`}>
+                      <h3 className="text-lg font-semibold text-white mb-1 group-hover:text-blue-400 transition-colors">
+                        {project.name}
+                      </h3>
+                    </Link>
+                    <p className="text-sm text-slate-400 line-clamp-2 mb-4">{project.description}</p>
+
+                    <div className="flex items-center gap-4 text-xs text-slate-500 mb-4">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5" />
+                        {project.location}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <type.icon className={cn("w-3.5 h-3.5", type.color)} />
+                        {project.area}
+                      </span>
+                    </div>
+
+                    {/* Progress */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">Progress</span>
+                        <span className="text-white font-medium">{project.progress}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            project.progress === 100
+                              ? "bg-gradient-to-r from-emerald-500 to-teal-500"
+                              : "bg-gradient-to-r from-blue-500 to-purple-500"
+                          )}
+                          style={{ width: `${project.progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
+                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {project.updatedAt}
+                      </span>
+                      <Link
+                        href={`/editor?project=${project.id}`}
+                        className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 font-medium"
+                      >
+                        Open
+                        <ArrowUpRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* List View */
+          <div className="space-y-3">
+            {filteredProjects.map((project) => {
+              const status = statusConfig[project.status];
+              const type = typeConfig[project.type];
+              return (
+                <div
+                  key={project.id}
+                  className="group flex items-center gap-4 p-4 bg-slate-800/50 border border-white/10 rounded-xl hover:border-white/20 transition-all"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-slate-700/50 flex items-center justify-center text-2xl flex-shrink-0">
+                    {project.thumbnail}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <Link href={`/editor?project=${project.id}`}>
+                        <h3 className="font-semibold text-white group-hover:text-blue-400 transition-colors truncate">
+                          {project.name}
+                        </h3>
+                      </Link>
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", status.color)}>
+                        {status.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5" />
+                        {project.location}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <type.icon className={cn("w-3.5 h-3.5", type.color)} />
+                        {type.label}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5" />
+                        {project.area}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-slate-500">Progress</span>
+                        <span className="text-white">{project.progress}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+                          style={{ width: `${project.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleStar(project.id)}
+                      className={cn(
+                        "p-2 rounded-lg transition-colors",
+                        project.starred ? "text-amber-400" : "text-slate-500 hover:text-white"
+                      )}
+                    >
+                      {project.starred ? <Star className="w-5 h-5 fill-current" /> : <StarOff className="w-5 h-5" />}
+                    </button>
+                    <Link
+                      href={`/editor?project=${project.id}`}
+                      className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+                    >
+                      <ArrowUpRight className="w-5 h-5" />
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Create Project Dialog */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Project</DialogTitle>
-            <DialogDescription>
-              Start a new construction project. You can add details later.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label htmlFor="project-name">Project Name</Label>
-              <Input
-                id="project-name"
-                placeholder="e.g., Maison Individuelle - Rue des Lilas"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                className="mt-1"
-              />
+      {/* New Project Modal */}
+      {showNewModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg p-6 shadow-2xl">
+            <h2 className="text-xl font-bold text-white mb-6">Create New Project</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Project Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Villa Méditerranée"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Project Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(typeConfig).map(([key, config]) => (
+                    <button
+                      key={key}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-slate-800 border border-white/10 hover:border-blue-500/50 transition-colors text-left"
+                    >
+                      <config.icon className={cn("w-5 h-5", config.color)} />
+                      <span className="text-white font-medium">{config.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Location</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Paris, France"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="project-description">Description</Label>
-              <Textarea
-                id="project-description"
-                placeholder="Brief description of the project..."
-                value={newProjectDescription}
-                onChange={(e) => setNewProjectDescription(e.target.value)}
-                className="mt-1"
-              />
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowNewModal(false)}
+                className="flex-1 px-5 py-2.5 rounded-xl bg-slate-800 text-white font-medium hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => setShowNewModal(false)}
+                className="flex-1 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+              >
+                Create Project
+              </button>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateProject}>
-              <Building2 className="h-4 w-4 mr-1" />
-              Create Project
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </AppLayout>
-  )
+        </div>
+      )}
+    </Navigation>
+  );
 }

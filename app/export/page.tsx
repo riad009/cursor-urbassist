@@ -1,527 +1,631 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { AppLayout, Header } from "@/components/layout"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Progress } from "@/components/ui/progress"
-import { PDFExportPanel } from "@/components/export/PDFExportPanel"
-import { PDFExportConfig } from "@/lib/pdfExport"
+import React, { useState } from "react";
+import Navigation from "@/components/layout/Navigation";
 import {
-  FileText,
-  Image as ImageIcon,
   Download,
-  FileCheck,
+  FileText,
+  Image,
+  File,
+  Check,
+  Loader2,
+  Settings,
   Printer,
-  Share2,
-  CheckCircle,
-  Clock,
-  AlertCircle,
+  Mail,
+  Cloud,
+  FolderDown,
+  Maximize,
+  Grid3X3,
+  Palette,
+  Type,
+  MapPin,
+  Calendar,
+  User,
   Building2,
   Ruler,
-  Map,
-  Eye,
-} from "lucide-react"
+  Info,
+  ChevronRight,
+  FileCheck,
+  FilePlus,
+  FileImage,
+  FileSpreadsheet,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const exportDocuments = [
+interface ExportFormat {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  formats: string[];
+  color: string;
+}
+
+interface ExportOption {
+  id: string;
+  label: string;
+  checked: boolean;
+}
+
+const exportFormats: ExportFormat[] = [
   {
-    id: 1,
-    name: "Site Plan (Plan de Masse)",
-    description: "Complete site plan with dimensions and setbacks",
-    type: "PDF",
-    status: "ready",
-    icon: Map,
-  },
-  {
-    id: 2,
-    name: "Floor Plans",
-    description: "Detailed floor plans for all levels",
-    type: "PDF",
-    status: "ready",
-    icon: Building2,
-  },
-  {
-    id: 3,
-    name: "Elevation Views",
-    description: "North, South, East, West elevations",
-    type: "PDF",
-    status: "generating",
-    icon: Ruler,
-  },
-  {
-    id: 4,
-    name: "Landscape Integration",
-    description: "Photo montage with project visualization",
-    type: "PNG",
-    status: "ready",
-    icon: ImageIcon,
-  },
-  {
-    id: 5,
-    name: "Technical Specifications",
-    description: "Construction details and materials",
-    type: "PDF",
-    status: "pending",
+    id: "plans",
+    name: "Architectural Plans",
+    description: "Detailed construction drawings",
     icon: FileText,
+    formats: ["PDF", "DWG", "DXF"],
+    color: "from-blue-500 to-cyan-500",
   },
   {
-    id: 6,
-    name: "Regulatory Compliance Report",
-    description: "PLU compliance analysis and calculations",
-    type: "PDF",
-    status: "ready",
-    icon: FileCheck,
+    id: "images",
+    name: "Rendered Images",
+    description: "High-quality visualizations",
+    icon: Image,
+    formats: ["PNG", "JPG", "TIFF"],
+    color: "from-violet-500 to-purple-500",
   },
-]
+  {
+    id: "documents",
+    name: "Documentation",
+    description: "Reports and specifications",
+    icon: File,
+    formats: ["PDF", "DOCX", "TXT"],
+    color: "from-emerald-500 to-teal-500",
+  },
+  {
+    id: "data",
+    name: "Project Data",
+    description: "Calculations and measurements",
+    icon: FileSpreadsheet,
+    formats: ["XLSX", "CSV", "JSON"],
+    color: "from-amber-500 to-orange-500",
+  },
+];
+
+const paperSizes = [
+  { id: "a4", name: "A4", dimensions: "210 × 297 mm" },
+  { id: "a3", name: "A3", dimensions: "297 × 420 mm", recommended: true },
+  { id: "a2", name: "A2", dimensions: "420 × 594 mm" },
+  { id: "a1", name: "A1", dimensions: "594 × 841 mm" },
+  { id: "a0", name: "A0", dimensions: "841 × 1189 mm" },
+];
+
+const scales = [
+  { id: "1:50", name: "1:50", description: "Detail drawings" },
+  { id: "1:100", name: "1:100", description: "Floor plans", recommended: true },
+  { id: "1:200", name: "1:200", description: "Site plans" },
+  { id: "1:500", name: "1:500", description: "Master plans" },
+];
 
 export default function ExportPage() {
-  const [selectedDocs, setSelectedDocs] = useState<number[]>([])
-  const [isExporting, setIsExporting] = useState(false)
-  const [exportProgress, setExportProgress] = useState(0)
-  const [activeTab, setActiveTab] = useState("pdf-a3")
+  const [selectedFormat, setSelectedFormat] = useState<string>("plans");
+  const [selectedPaper, setSelectedPaper] = useState("a3");
+  const [selectedScale, setSelectedScale] = useState("1:100");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportComplete, setExportComplete] = useState(false);
+  const [outputFormat, setOutputFormat] = useState("PDF");
 
-  const toggleDocument = (id: number) => {
-    setSelectedDocs((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
-    )
-  }
+  const [includeOptions, setIncludeOptions] = useState<ExportOption[]>([
+    { id: "title", label: "Project Title Block", checked: true },
+    { id: "scale", label: "Scale Indicator", checked: true },
+    { id: "north", label: "North Arrow", checked: true },
+    { id: "dimensions", label: "Dimensions", checked: true },
+    { id: "grid", label: "Grid Lines", checked: false },
+    { id: "annotations", label: "Annotations", checked: true },
+    { id: "legend", label: "Legend", checked: true },
+    { id: "date", label: "Date & Revision", checked: true },
+  ]);
 
-  const selectAll = () => {
-    const readyDocs = exportDocuments
-      .filter((d) => d.status === "ready")
-      .map((d) => d.id)
-    setSelectedDocs(readyDocs)
-  }
+  const [projectInfo, setProjectInfo] = useState({
+    projectName: "Villa Méditerranée",
+    clientName: "Jean Dupont",
+    location: "Nice, France",
+    architect: "roms09 Studio",
+    date: new Date().toLocaleDateString(),
+    revision: "Rev. A",
+  });
+
+  const toggleOption = (id: string) => {
+    setIncludeOptions(options =>
+      options.map(opt => opt.id === id ? { ...opt, checked: !opt.checked } : opt)
+    );
+  };
 
   const handleExport = async () => {
-    setIsExporting(true)
-    setExportProgress(0)
-
-    // Simulate export progress
-    for (let i = 0; i <= 100; i += 10) {
-      await new Promise((r) => setTimeout(r, 200))
-      setExportProgress(i)
-    }
-
-    // Trigger download
-    const link = document.createElement("a")
-    link.href = "#"
-    link.download = "project-documents.zip"
-    // In production, this would be a real file URL
+    setIsExporting(true);
     
-    setIsExporting(false)
-  }
-
-  const handlePDFExport = async (config: PDFExportConfig) => {
-    setIsExporting(true)
-    setExportProgress(0)
-
-    // Simulate PDF generation with progress
-    for (let i = 0; i <= 100; i += 5) {
-      await new Promise((r) => setTimeout(r, 100))
-      setExportProgress(i)
-    }
-
-    // In production, this would generate a real PDF using the config
-    // For now, create a download link with metadata
-    const metadata = {
-      ...config,
-      generatedAt: new Date().toISOString(),
-      calibration: `Scale ${config.scale} - Format ${config.format}`,
+    try {
+      // Create a canvas element to generate the export
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Set canvas size based on paper selection (at 72 DPI for preview)
+      const sizes: Record<string, {w: number, h: number}> = {
+        a4: { w: 595, h: 842 },
+        a3: { w: 842, h: 1190 },
+        a2: { w: 1190, h: 1684 },
+        a1: { w: 1684, h: 2384 },
+        a0: { w: 2384, h: 3370 },
+      };
+      
+      const size = sizes[selectedPaper] || sizes.a3;
+      canvas.width = size.w;
+      canvas.height = size.h;
+      
+      if (ctx) {
+        // White background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Border
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+        
+        // Title block
+        const titleBlockHeight = 80;
+        const titleBlockWidth = canvas.width / 2;
+        ctx.strokeRect(canvas.width - titleBlockWidth - 20, canvas.height - titleBlockHeight - 20, titleBlockWidth, titleBlockHeight);
+        
+        // Title text
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(projectInfo.projectName, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight);
+        
+        ctx.font = '12px Arial';
+        ctx.fillText(`Client: ${projectInfo.clientName}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 20);
+        ctx.fillText(`Location: ${projectInfo.location}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 35);
+        ctx.fillText(`Scale: ${selectedScale}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 50);
+        ctx.fillText(`Date: ${projectInfo.date}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 65);
+        ctx.fillText(projectInfo.architect, canvas.width - 150, canvas.height - 30);
+        
+        // Main content area placeholder
+        ctx.strokeStyle = '#cccccc';
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - titleBlockHeight - 80);
+        ctx.setLineDash([]);
+        
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#666666';
+        ctx.textAlign = 'center';
+        ctx.fillText('Architectural Plan - ' + selectedFormat.toUpperCase(), canvas.width / 2, canvas.height / 2);
+        ctx.fillText(selectedScale, canvas.width / 2, canvas.height / 2 + 25);
+        
+        // Scale bar
+        if (includeOptions.find(o => o.id === 'scale' && o.checked)) {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(40, canvas.height - titleBlockHeight - 50, 100, 5);
+          ctx.font = '10px Arial';
+          ctx.textAlign = 'left';
+          ctx.fillText('1m', 145, canvas.height - titleBlockHeight - 45);
+        }
+        
+        // North arrow
+        if (includeOptions.find(o => o.id === 'north' && o.checked)) {
+          ctx.save();
+          ctx.translate(canvas.width - 60, 60);
+          ctx.beginPath();
+          ctx.moveTo(0, -20);
+          ctx.lineTo(-10, 10);
+          ctx.lineTo(0, 5);
+          ctx.lineTo(10, 10);
+          ctx.closePath();
+          ctx.fill();
+          ctx.font = 'bold 12px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('N', 0, -25);
+          ctx.restore();
+        }
+      }
+      
+      // Generate download based on format
+      if (outputFormat === 'PNG' || outputFormat === 'JPG') {
+        const mimeType = outputFormat === 'PNG' ? 'image/png' : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(mimeType, 0.95);
+        const link = document.createElement('a');
+        link.download = `${projectInfo.projectName.replace(/\\s+/g, '_')}_${selectedPaper.toUpperCase()}.${outputFormat.toLowerCase()}`;
+        link.href = dataUrl;
+        link.click();
+      } else if (outputFormat === 'PDF') {
+        // For PDF, we'll create a simple text-based PDF
+        const pdfContent = `%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${size.w} ${size.h}] /Contents 4 0 R >> endobj
+4 0 obj << /Length 200 >> stream
+BT
+/F1 24 Tf
+50 ${size.h - 50} Td
+(${projectInfo.projectName}) Tj
+0 -30 Td
+/F1 14 Tf
+(Client: ${projectInfo.clientName}) Tj
+0 -20 Td
+(Location: ${projectInfo.location}) Tj
+0 -20 Td
+(Scale: ${selectedScale}) Tj
+0 -20 Td
+(Date: ${projectInfo.date}) Tj
+ET
+endstream endobj
+xref
+0 5
+trailer << /Size 5 /Root 1 0 R >>
+%%EOF`;
+        
+        const blob = new Blob([pdfContent], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `${projectInfo.projectName.replace(/\\s+/g, '_')}_${selectedPaper.toUpperCase()}.pdf`;
+        link.href = url;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // For other formats, export as PNG
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `${projectInfo.projectName.replace(/\\s+/g, '_')}_${selectedPaper.toUpperCase()}.png`;
+        link.href = dataUrl;
+        link.click();
+      }
+      
+    } catch (error) {
+      console.error('Export error:', error);
     }
     
-    console.log("PDF Export Config:", metadata)
-    
-    // Create a placeholder PDF download
-    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `${config.projectName.replace(/\s+/g, "_")}_${config.title.replace(/\s+/g, "_")}_${config.scale}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-    
-    setIsExporting(false)
-    setExportProgress(0)
-  }
+    setIsExporting(false);
+    setExportComplete(true);
+  };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "ready":
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case "generating":
-        return <Clock className="h-4 w-4 text-amber-500 animate-pulse" />
-      case "pending":
-        return <AlertCircle className="h-4 w-4 text-gray-400" />
-      default:
-        return null
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "ready":
-        return <Badge variant="success">Ready</Badge>
-      case "generating":
-        return <Badge variant="warning">Generating</Badge>
-      case "pending":
-        return <Badge variant="default">Pending</Badge>
-      default:
-        return null
-    }
-  }
+  const activeFormat = exportFormats.find(f => f.id === selectedFormat)!;
 
   return (
-    <AppLayout>
-      <Header
-        title="Export Documents"
-        description="Generate and download regulatory deliverables"
-      />
-
-      <div className="p-6 space-y-6">
-        {/* Main Export Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 max-w-md">
-            <TabsTrigger value="pdf-a3">PDF A3 Calibré</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-            <TabsTrigger value="images">Images</TabsTrigger>
-          </TabsList>
-
-          {/* PDF A3 Export Tab */}
-          <TabsContent value="pdf-a3" className="mt-6">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <PDFExportPanel
-                projectName="Projet Construction"
-                projectAddress="123 Rue Example, 75001 Paris"
-                clientName="Client Demo"
-                onExport={handlePDFExport}
-              />
-              
-              {/* Preview Panel */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Aperçu du Document</CardTitle>
-                  <CardDescription>
-                    Prévisualisation du plan avec cartouche et échelle
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="aspect-[1.414/1] bg-white border-2 border-gray-300 rounded-lg p-4 relative">
-                    {/* A3 Preview mockup */}
-                    <div className="absolute inset-4 border border-gray-200 bg-gray-50 rounded flex items-center justify-center">
-                      <div className="text-center text-gray-400">
-                        <Map className="h-12 w-12 mx-auto mb-2" />
-                        <p className="text-sm">Zone de dessin</p>
-                        <p className="text-xs">Plan de masse</p>
-                      </div>
-                    </div>
-                    
-                    {/* North Arrow */}
-                    <div className="absolute top-6 right-6 w-10 h-10 flex items-center justify-center">
-                      <div className="text-center">
-                        <div className="text-lg font-bold">N</div>
-                        <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-gray-800 mx-auto" />
-                      </div>
-                    </div>
-                    
-                    {/* Scale Bar */}
-                    <div className="absolute bottom-16 left-6 bg-white p-2 rounded border">
-                      <div className="flex gap-0.5">
-                        <div className="w-5 h-2 bg-gray-800" />
-                        <div className="w-5 h-2 border border-gray-800" />
-                        <div className="w-5 h-2 bg-gray-800" />
-                        <div className="w-5 h-2 border border-gray-800" />
-                      </div>
-                      <div className="flex justify-between text-[8px] text-gray-600 mt-0.5">
-                        <span>0</span>
-                        <span>5m</span>
-                        <span>10m</span>
-                      </div>
-                    </div>
-                    
-                    {/* Title Block */}
-                    <div className="absolute bottom-0 left-0 right-0 h-12 border-t-2 border-gray-300 bg-white grid grid-cols-4 text-xs">
-                      <div className="border-r border-gray-200 p-1">
-                        <div className="text-[8px] text-gray-400">Projet</div>
-                        <div className="font-medium truncate">Projet Construction</div>
-                      </div>
-                      <div className="border-r border-gray-200 p-1">
-                        <div className="text-[8px] text-gray-400">Échelle</div>
-                        <div className="font-medium">1:100</div>
-                      </div>
-                      <div className="border-r border-gray-200 p-1">
-                        <div className="text-[8px] text-gray-400">Date</div>
-                        <div className="font-medium">{new Date().toLocaleDateString('fr-FR')}</div>
-                      </div>
-                      <div className="p-1">
-                        <div className="text-[8px] text-gray-400">N° Plan</div>
-                        <div className="font-medium">001-A</div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Progress */}
-                  {isExporting && (
-                    <div className="mt-4 space-y-2">
-                      <Progress value={exportProgress} />
-                      <p className="text-xs text-center text-gray-500">
-                        Génération du PDF calibré... {exportProgress}%
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* Documents Tab */}
-          <TabsContent value="documents" className="mt-6">
-            <div className="grid gap-6 lg:grid-cols-3">
-          {/* Documents List */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Available Documents</CardTitle>
-                  <CardDescription>
-                    Select documents to include in your export package
-                  </CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={selectAll}>
-                  Select All Ready
-                </Button>
+    <Navigation>
+      <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
+                <Download className="w-5 h-5 text-white" />
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {exportDocuments.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                      selectedDocs.includes(doc.id)
-                        ? "border-blue-500 bg-blue-50"
-                        : doc.status === "ready"
-                        ? "border-gray-200 hover:border-gray-300"
-                        : "border-gray-100 bg-gray-50 opacity-60"
-                    }`}
-                    onClick={() => doc.status === "ready" && toggleDocument(doc.id)}
+              <h1 className="text-2xl font-bold text-white">Export Center</h1>
+            </div>
+            <p className="text-slate-400">Generate professional documents and deliverables</p>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Left Column - Format & Settings */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Export Type Selection */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-white">Export Type</h2>
+              <div className="grid sm:grid-cols-2 gap-4">
+                {exportFormats.map((format) => (
+                  <button
+                    key={format.id}
+                    onClick={() => {
+                      setSelectedFormat(format.id);
+                      setOutputFormat(format.formats[0]);
+                    }}
+                    className={cn(
+                      "p-4 rounded-xl border text-left transition-all",
+                      selectedFormat === format.id
+                        ? "border-blue-500/50 bg-blue-500/10"
+                        : "border-white/10 bg-slate-800/50 hover:border-white/20"
+                    )}
                   >
-                    <div
-                      className={`p-3 rounded-lg ${
-                        selectedDocs.includes(doc.id) ? "bg-blue-100" : "bg-gray-100"
-                      }`}
-                    >
-                      <doc.icon
-                        className={`h-5 w-5 ${
-                          selectedDocs.includes(doc.id)
-                            ? "text-blue-600"
-                            : "text-gray-500"
-                        }`}
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-gray-900">{doc.name}</p>
-                        {getStatusBadge(doc.status)}
+                    <div className="flex items-start gap-4">
+                      <div className={cn(
+                        "w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br",
+                        format.color
+                      )}>
+                        <format.icon className="w-6 h-6 text-white" />
                       </div>
-                      <p className="text-sm text-gray-500 truncate">
-                        {doc.description}
-                      </p>
+                      <div className="flex-1">
+                        <p className="font-semibold text-white">{format.name}</p>
+                        <p className="text-sm text-slate-400 mt-0.5">{format.description}</p>
+                        <div className="flex gap-2 mt-2">
+                          {format.formats.map(f => (
+                            <span key={f} className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300">
+                              {f}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {selectedFormat === format.id && (
+                        <Check className="w-5 h-5 text-blue-400" />
+                      )}
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <Badge variant="info" className="text-xs">
-                        {doc.type}
-                      </Badge>
-                      {getStatusIcon(doc.status)}
-                    </div>
-                  </div>
+                  </button>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Export Panel */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Export Package</CardTitle>
-              <CardDescription>
-                {selectedDocs.length} document{selectedDocs.length !== 1 && "s"} selected
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Selected Summary */}
-              <div className="space-y-2">
-                {selectedDocs.length === 0 ? (
-                  <div className="text-center py-6 text-gray-400">
-                    <FileText className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No documents selected</p>
-                  </div>
-                ) : (
-                  selectedDocs.map((id) => {
-                    const doc = exportDocuments.find((d) => d.id === id)
-                    if (!doc) return null
-                    return (
-                      <div
-                        key={id}
-                        className="flex items-center gap-2 text-sm p-2 bg-blue-50 rounded-lg"
+            {/* Output Format */}
+            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+              <h3 className="text-sm font-semibold text-white">Output Format</h3>
+              <div className="flex gap-2">
+                {activeFormat.formats.map((format) => (
+                  <button
+                    key={format}
+                    onClick={() => setOutputFormat(format)}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                      outputFormat === format
+                        ? "bg-blue-500 text-white"
+                        : "bg-slate-700 text-slate-400 hover:text-white"
+                    )}
+                  >
+                    {format}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Paper Size & Scale (for Plans) */}
+            {selectedFormat === "plans" && (
+              <div className="grid sm:grid-cols-2 gap-4">
+                {/* Paper Size */}
+                <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Maximize className="w-4 h-4 text-blue-400" />
+                    Paper Size
+                  </h3>
+                  <div className="space-y-2">
+                    {paperSizes.map((size) => (
+                      <button
+                        key={size.id}
+                        onClick={() => setSelectedPaper(size.id)}
+                        className={cn(
+                          "w-full flex items-center justify-between p-3 rounded-xl transition-colors",
+                          selectedPaper === size.id
+                            ? "bg-blue-500/20 border border-blue-500/50"
+                            : "bg-slate-700/50 border border-transparent hover:border-white/10"
+                        )}
                       >
-                        <doc.icon className="h-4 w-4 text-blue-600" />
-                        <span className="truncate">{doc.name}</span>
+                        <div className="flex items-center gap-3">
+                          <span className={cn(
+                            "font-semibold",
+                            selectedPaper === size.id ? "text-blue-400" : "text-white"
+                          )}>{size.name}</span>
+                          {size.recommended && (
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm text-slate-400">{size.dimensions}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Scale */}
+                <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Ruler className="w-4 h-4 text-purple-400" />
+                    Drawing Scale
+                  </h3>
+                  <div className="space-y-2">
+                    {scales.map((scale) => (
+                      <button
+                        key={scale.id}
+                        onClick={() => setSelectedScale(scale.id)}
+                        className={cn(
+                          "w-full flex items-center justify-between p-3 rounded-xl transition-colors",
+                          selectedScale === scale.id
+                            ? "bg-purple-500/20 border border-purple-500/50"
+                            : "bg-slate-700/50 border border-transparent hover:border-white/10"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={cn(
+                            "font-semibold",
+                            selectedScale === scale.id ? "text-purple-400" : "text-white"
+                          )}>{scale.name}</span>
+                          {scale.recommended && (
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm text-slate-400">{scale.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Include Options */}
+            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Settings className="w-4 h-4 text-slate-400" />
+                Include in Export
+              </h3>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {includeOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => toggleOption(option.id)}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-xl transition-colors text-left",
+                      option.checked
+                        ? "bg-blue-500/10 border border-blue-500/30"
+                        : "bg-slate-700/30 border border-transparent hover:border-white/10"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-5 h-5 rounded flex items-center justify-center",
+                      option.checked ? "bg-blue-500" : "bg-slate-600"
+                    )}>
+                      {option.checked && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <span className={cn(
+                      "text-sm",
+                      option.checked ? "text-white" : "text-slate-400"
+                    )}>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column - Preview & Actions */}
+          <div className="space-y-4">
+            {/* Project Info (Auto-populate) */}
+            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-400" />
+                Document Info
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Project Name</label>
+                  <input
+                    type="text"
+                    value={projectInfo.projectName}
+                    onChange={(e) => setProjectInfo({ ...projectInfo, projectName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Client</label>
+                  <input
+                    type="text"
+                    value={projectInfo.clientName}
+                    onChange={(e) => setProjectInfo({ ...projectInfo, clientName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Location</label>
+                    <input
+                      type="text"
+                      value={projectInfo.location}
+                      onChange={(e) => setProjectInfo({ ...projectInfo, location: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Date</label>
+                    <input
+                      type="text"
+                      value={projectInfo.date}
+                      onChange={(e) => setProjectInfo({ ...projectInfo, date: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Architect / Studio</label>
+                  <input
+                    type="text"
+                    value={projectInfo.architect}
+                    onChange={(e) => setProjectInfo({ ...projectInfo, architect: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Preview */}
+            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
+              <h3 className="text-sm font-semibold text-white mb-4">Preview</h3>
+              <div className="aspect-[3/4] bg-white rounded-lg p-3 relative">
+                <div className="absolute inset-3 border border-slate-200 rounded">
+                  {/* Title Block Preview */}
+                  <div className="absolute bottom-0 right-0 w-1/2 border-t border-l border-slate-200 p-2 bg-slate-50">
+                    <div className="space-y-0.5">
+                      <p className="text-[6px] font-bold text-slate-800 truncate">{projectInfo.projectName}</p>
+                      <p className="text-[5px] text-slate-600 truncate">{projectInfo.clientName}</p>
+                      <div className="flex justify-between text-[4px] text-slate-500">
+                        <span>{projectInfo.date}</span>
+                        <span>{selectedScale}</span>
                       </div>
-                    )
-                  })
-                )}
-              </div>
-
-              {/* Export Options */}
-              <Tabs defaultValue="pdf" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="pdf">PDF Package</TabsTrigger>
-                  <TabsTrigger value="images">Images</TabsTrigger>
-                </TabsList>
-                <TabsContent value="pdf" className="pt-4">
-                  <p className="text-xs text-gray-500 mb-3">
-                    All documents will be combined into a single PDF file with
-                    table of contents.
-                  </p>
-                </TabsContent>
-                <TabsContent value="images" className="pt-4">
-                  <p className="text-xs text-gray-500 mb-3">
-                    Export high-resolution images (PNG) suitable for printing.
-                  </p>
-                </TabsContent>
-              </Tabs>
-
-              {/* Progress */}
-              {isExporting && (
-                <div className="space-y-2">
-                  <Progress value={exportProgress} />
-                  <p className="text-xs text-center text-gray-500">
-                    Generating documents... {exportProgress}%
-                  </p>
+                      <p className="text-[4px] text-slate-400">{projectInfo.architect}</p>
+                    </div>
+                  </div>
+                  {/* Content Area */}
+                  <div className="absolute top-4 left-4 right-4 bottom-12">
+                    <div className="w-full h-full border border-dashed border-slate-300 rounded flex items-center justify-center">
+                      <Building2 className="w-8 h-8 text-slate-300" />
+                    </div>
+                  </div>
+                  {/* Scale bar */}
+                  <div className="absolute bottom-14 left-4 flex items-center gap-1">
+                    <div className="w-8 h-0.5 bg-slate-400" />
+                    <span className="text-[4px] text-slate-400">1m</span>
+                  </div>
                 </div>
+                {/* Paper size label */}
+                <div className="absolute top-1 right-1 px-1.5 py-0.5 bg-slate-100 rounded text-[6px] text-slate-500 font-medium">
+                  {selectedPaper.toUpperCase()}
+                </div>
+              </div>
+            </div>
+
+            {/* Export Button */}
+            <button
+              onClick={handleExport}
+              disabled={isExporting}
+              className={cn(
+                "w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-semibold transition-all",
+                exportComplete
+                  ? "bg-emerald-500 text-white"
+                  : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/25"
               )}
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Generating...
+                </>
+              ) : exportComplete ? (
+                <>
+                  <Check className="w-5 h-5" />
+                  Export Complete!
+                </>
+              ) : (
+                <>
+                  <Download className="w-5 h-5" />
+                  Export {outputFormat}
+                </>
+              )}
+            </button>
 
-              {/* Actions */}
-              <div className="space-y-2">
-                <Button
-                  className="w-full"
-                  disabled={selectedDocs.length === 0 || isExporting}
-                  onClick={handleExport}
-                >
-                  <Download className="h-4 w-4 mr-1" />
-                  {isExporting ? "Generating..." : "Download Package"}
-                </Button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" size="sm" disabled={selectedDocs.length === 0}>
-                    <Eye className="h-4 w-4 mr-1" />
-                    Preview
-                  </Button>
-                  <Button variant="outline" size="sm" disabled={selectedDocs.length === 0}>
-                    <Printer className="h-4 w-4 mr-1" />
-                    Print
-                  </Button>
-                </div>
-
-                <Button
-                  variant="ghost"
-                  className="w-full"
-                  disabled={selectedDocs.length === 0}
-                >
-                  <Share2 className="h-4 w-4 mr-1" />
-                  Share with Client
-                </Button>
+            {exportComplete && (
+              <div className="flex gap-3">
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm font-medium hover:bg-slate-700 transition-colors">
+                  <FolderDown className="w-4 h-4" />
+                  Open Folder
+                </button>
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm font-medium hover:bg-slate-700 transition-colors">
+                  <Mail className="w-4 h-4" />
+                  Share
+                </button>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-          </TabsContent>
+            )}
 
-          {/* Images Tab */}
-          <TabsContent value="images" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Export Images Haute Résolution</CardTitle>
-                <CardDescription>
-                  Exportez vos plans et visuels en format image pour impression
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Button variant="outline" className="h-24 flex-col gap-2">
-                    <ImageIcon className="h-8 w-8" />
-                    <span>PNG (300 DPI)</span>
-                  </Button>
-                  <Button variant="outline" className="h-24 flex-col gap-2">
-                    <ImageIcon className="h-8 w-8" />
-                    <span>JPEG (Haute qualité)</span>
-                  </Button>
-                  <Button variant="outline" className="h-24 flex-col gap-2">
-                    <FileText className="h-8 w-8" />
-                    <span>SVG (Vectoriel)</span>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Quick Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm">Site Plan</p>
-                  <p className="text-2xl font-bold">A3 Format</p>
-                </div>
-                <Map className="h-8 w-8 text-blue-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 text-sm">Scale</p>
-                  <p className="text-2xl font-bold">1:100</p>
-                </div>
-                <Ruler className="h-8 w-8 text-green-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm">Visuals</p>
-                  <p className="text-2xl font-bold">4 Views</p>
-                </div>
-                <ImageIcon className="h-8 w-8 text-purple-200" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-orange-100 text-sm">Compliance</p>
-                  <p className="text-2xl font-bold">100%</p>
-                </div>
-                <FileCheck className="h-8 w-8 text-orange-200" />
-              </div>
-            </CardContent>
-          </Card>
+            {/* Quick Actions */}
+            <div className="space-y-2">
+              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-800/30 border border-white/5 hover:border-white/10 transition-colors">
+                <Printer className="w-5 h-5 text-slate-400" />
+                <span className="text-sm text-slate-300">Print Preview</span>
+                <ChevronRight className="w-4 h-4 text-slate-500 ml-auto" />
+              </button>
+              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-800/30 border border-white/5 hover:border-white/10 transition-colors">
+                <Cloud className="w-5 h-5 text-slate-400" />
+                <span className="text-sm text-slate-300">Save to Cloud</span>
+                <ChevronRight className="w-4 h-4 text-slate-500 ml-auto" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </AppLayout>
-  )
+    </Navigation>
+  );
 }

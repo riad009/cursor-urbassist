@@ -1,14 +1,7 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { AppLayout, Header } from "@/components/layout"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { formatArea, formatDistance } from "@/lib/utils"
+import React, { useState } from "react";
+import Navigation from "@/components/layout/Navigation";
 import {
   Calculator,
   Square,
@@ -16,517 +9,525 @@ import {
   Box,
   Percent,
   ArrowRight,
-  CheckCircle,
+  CheckCircle2,
   AlertTriangle,
   RefreshCw,
-} from "lucide-react"
+  History,
+  Save,
+  Copy,
+  Trash2,
+  ChevronDown,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type CalculationType = "surface" | "distance" | "volume" | "coverage";
 
 interface CalculationResult {
-  type: string
-  value: number
-  formatted: string
-  details?: object
+  type: CalculationType;
+  label: string;
+  value: string;
+  unit: string;
+  timestamp: Date;
 }
 
+const calculators = [
+  {
+    id: "surface",
+    title: "Surface Area",
+    description: "Calculate area of shapes",
+    icon: Square,
+    gradient: "from-blue-500 to-cyan-500",
+    unit: "m²",
+  },
+  {
+    id: "distance",
+    title: "Distance",
+    description: "Measure between points",
+    icon: Ruler,
+    gradient: "from-violet-500 to-purple-500",
+    unit: "m",
+  },
+  {
+    id: "volume",
+    title: "Volume",
+    description: "Calculate 3D volumes",
+    icon: Box,
+    gradient: "from-amber-500 to-orange-500",
+    unit: "m³",
+  },
+  {
+    id: "coverage",
+    title: "Coverage Ratio",
+    description: "Building coverage %",
+    icon: Percent,
+    gradient: "from-emerald-500 to-teal-500",
+    unit: "%",
+  },
+];
+
 export default function CalculationsPage() {
-  const [results, setResults] = useState<CalculationResult[]>([])
+  const [activeCalc, setActiveCalc] = useState<CalculationType>("surface");
+  const [results, setResults] = useState<CalculationResult[]>([]);
+  
+  // Surface inputs
+  const [surfaceLength, setSurfaceLength] = useState("");
+  const [surfaceWidth, setSurfaceWidth] = useState("");
+  const [surfaceShape, setSurfaceShape] = useState<"rectangle" | "circle" | "triangle">("rectangle");
+  
+  // Distance inputs
+  const [x1, setX1] = useState("");
+  const [y1, setY1] = useState("");
+  const [x2, setX2] = useState("");
+  const [y2, setY2] = useState("");
+  
+  // Volume inputs
+  const [volumeLength, setVolumeLength] = useState("");
+  const [volumeWidth, setVolumeWidth] = useState("");
+  const [volumeHeight, setVolumeHeight] = useState("");
+  
+  // Coverage inputs
+  const [buildingArea, setBuildingArea] = useState("");
+  const [plotArea, setPlotArea] = useState("");
+  const [maxCoverage, setMaxCoverage] = useState("50");
 
-  // Surface calculation state
-  const [surfaceWidth, setSurfaceWidth] = useState("")
-  const [surfaceHeight, setSurfaceHeight] = useState("")
+  const calculate = () => {
+    let value = 0;
+    let label = "";
+    let unit = "";
 
-  // Distance calculation state
-  const [distanceX1, setDistanceX1] = useState("")
-  const [distanceY1, setDistanceY1] = useState("")
-  const [distanceX2, setDistanceX2] = useState("")
-  const [distanceY2, setDistanceY2] = useState("")
-
-  // Volume calculation state
-  const [volumeFootprint, setVolumeFootprint] = useState("")
-  const [volumeFloors, setVolumeFloors] = useState("")
-  const [volumeFloorHeight, setVolumeFloorHeight] = useState("2.7")
-
-  // Coverage calculation state
-  const [parcelArea, setParcelArea] = useState("")
-  const [buildingFootprint, setBuildingFootprint] = useState("")
-  const [maxCES, setMaxCES] = useState("0.4")
-
-  const calculateSurface = async () => {
-    const width = parseFloat(surfaceWidth)
-    const height = parseFloat(surfaceHeight)
-
-    if (isNaN(width) || isNaN(height)) return
-
-    const response = await fetch("/api/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "surface",
-        data: { dimensions: { width, height } },
-        scale: 1,
-      }),
-    })
-
-    const data = await response.json()
-    if (data.success) {
-      setResults((prev) => [
-        {
-          type: "Surface",
-          value: data.calculation.areaMeters,
-          formatted: data.calculation.formatted,
-          details: data.calculation,
-        },
-        ...prev,
-      ])
+    switch (activeCalc) {
+      case "surface":
+        const l = parseFloat(surfaceLength) || 0;
+        const w = parseFloat(surfaceWidth) || 0;
+        if (surfaceShape === "rectangle") {
+          value = l * w;
+          label = `Rectangle ${l}m × ${w}m`;
+        } else if (surfaceShape === "circle") {
+          value = Math.PI * l * l;
+          label = `Circle radius ${l}m`;
+        } else {
+          value = (l * w) / 2;
+          label = `Triangle base ${l}m × height ${w}m`;
+        }
+        unit = "m²";
+        break;
+      case "distance":
+        const dx = (parseFloat(x2) || 0) - (parseFloat(x1) || 0);
+        const dy = (parseFloat(y2) || 0) - (parseFloat(y1) || 0);
+        value = Math.sqrt(dx * dx + dy * dy);
+        label = `Distance (${x1},${y1}) to (${x2},${y2})`;
+        unit = "m";
+        break;
+      case "volume":
+        const vl = parseFloat(volumeLength) || 0;
+        const vw = parseFloat(volumeWidth) || 0;
+        const vh = parseFloat(volumeHeight) || 0;
+        value = vl * vw * vh;
+        label = `Volume ${vl}m × ${vw}m × ${vh}m`;
+        unit = "m³";
+        break;
+      case "coverage":
+        const ba = parseFloat(buildingArea) || 0;
+        const pa = parseFloat(plotArea) || 0;
+        value = pa > 0 ? (ba / pa) * 100 : 0;
+        label = `Coverage ${ba}m² / ${pa}m²`;
+        unit = "%";
+        break;
     }
-  }
 
-  const calculateDistance = async () => {
-    const x1 = parseFloat(distanceX1)
-    const y1 = parseFloat(distanceY1)
-    const x2 = parseFloat(distanceX2)
-    const y2 = parseFloat(distanceY2)
+    const newResult: CalculationResult = {
+      type: activeCalc,
+      label,
+      value: value.toFixed(2),
+      unit,
+      timestamp: new Date(),
+    };
 
-    if ([x1, y1, x2, y2].some(isNaN)) return
+    setResults([newResult, ...results].slice(0, 10));
+  };
 
-    const response = await fetch("/api/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "distance",
-        data: {
-          points: [
-            { x: x1, y: y1 },
-            { x: x2, y: y2 },
-          ],
-        },
-        scale: 1,
-      }),
-    })
+  const clearInputs = () => {
+    setSurfaceLength("");
+    setSurfaceWidth("");
+    setX1("");
+    setY1("");
+    setX2("");
+    setY2("");
+    setVolumeLength("");
+    setVolumeWidth("");
+    setVolumeHeight("");
+    setBuildingArea("");
+    setPlotArea("");
+  };
 
-    const data = await response.json()
-    if (data.success) {
-      setResults((prev) => [
-        {
-          type: "Distance",
-          value: data.calculation.totalDistance,
-          formatted: data.calculation.formatted,
-          details: data.calculation,
-        },
-        ...prev,
-      ])
-    }
-  }
+  const copyResult = (result: CalculationResult) => {
+    navigator.clipboard.writeText(`${result.value} ${result.unit}`);
+  };
 
-  const calculateVolume = async () => {
-    const footprint = parseFloat(volumeFootprint)
-    const floors = parseFloat(volumeFloors)
-    const floorHeight = parseFloat(volumeFloorHeight)
-
-    if ([footprint, floors, floorHeight].some(isNaN)) return
-
-    const response = await fetch("/api/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "volume",
-        data: {
-          buildingFootprint: footprint,
-          buildingFloors: floors,
-          floorHeight,
-        },
-      }),
-    })
-
-    const data = await response.json()
-    if (data.success) {
-      setResults((prev) => [
-        {
-          type: "Volume",
-          value: data.calculation.volumeMeters,
-          formatted: data.calculation.formatted,
-          details: data.calculation,
-        },
-        ...prev,
-      ])
-    }
-  }
-
-  const calculateCoverage = async () => {
-    const parcel = parseFloat(parcelArea)
-    const building = parseFloat(buildingFootprint)
-    const maxRatio = parseFloat(maxCES)
-
-    if ([parcel, building].some(isNaN)) return
-
-    const response = await fetch("/api/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "coverage",
-        data: {
-          parcelArea: parcel,
-          buildingFootprint: building,
-        },
-      }),
-    })
-
-    const data = await response.json()
-    if (data.success) {
-      const isCompliant = data.calculation.coverageRatio <= maxRatio
-      setResults((prev) => [
-        {
-          type: "Coverage (CES)",
-          value: data.calculation.coverageRatio,
-          formatted: data.calculation.formatted,
-          details: { ...data.calculation, isCompliant, maxRatio },
-        },
-        ...prev,
-      ])
-    }
-  }
-
-  const clearResults = () => setResults([])
+  const activeCalculator = calculators.find(c => c.id === activeCalc)!;
 
   return (
-    <AppLayout>
-      <Header
-        title="Calculations"
-        description="Calculate surfaces, distances, volumes, and regulatory ratios"
-      />
+    <Navigation>
+      <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/25">
+              <Calculator className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-white">Calculations</h1>
+          </div>
+          <p className="text-slate-400">Precise measurements and calculations for your construction projects</p>
+        </div>
 
-      <div className="p-6 space-y-6">
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Calculator Panel */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calculator className="h-5 w-5 text-blue-600" />
-                Calculation Tools
-              </CardTitle>
-              <CardDescription>
-                Enter dimensions to calculate construction metrics
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="surface">
-                <TabsList className="grid grid-cols-4 mb-6">
-                  <TabsTrigger value="surface">
-                    <Square className="h-4 w-4 mr-1" />
-                    Surface
-                  </TabsTrigger>
-                  <TabsTrigger value="distance">
-                    <Ruler className="h-4 w-4 mr-1" />
-                    Distance
-                  </TabsTrigger>
-                  <TabsTrigger value="volume">
-                    <Box className="h-4 w-4 mr-1" />
-                    Volume
-                  </TabsTrigger>
-                  <TabsTrigger value="coverage">
-                    <Percent className="h-4 w-4 mr-1" />
-                    Coverage
-                  </TabsTrigger>
-                </TabsList>
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Calculator Selection */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Calculator Tabs */}
+            <div className="grid sm:grid-cols-4 gap-3">
+              {calculators.map((calc) => (
+                <button
+                  key={calc.id}
+                  onClick={() => setActiveCalc(calc.id as CalculationType)}
+                  className={cn(
+                    "p-4 rounded-xl border transition-all text-left",
+                    activeCalc === calc.id
+                      ? "bg-gradient-to-br " + calc.gradient + " border-transparent shadow-lg"
+                      : "bg-slate-800/50 border-white/10 hover:border-white/20"
+                  )}
+                >
+                  <calc.icon className={cn(
+                    "w-6 h-6 mb-2",
+                    activeCalc === calc.id ? "text-white" : "text-slate-400"
+                  )} />
+                  <p className={cn(
+                    "font-semibold",
+                    activeCalc === calc.id ? "text-white" : "text-slate-300"
+                  )}>{calc.title}</p>
+                  <p className={cn(
+                    "text-xs mt-0.5",
+                    activeCalc === calc.id ? "text-white/70" : "text-slate-500"
+                  )}>{calc.description}</p>
+                </button>
+              ))}
+            </div>
 
-                {/* Surface Calculator */}
-                <TabsContent value="surface" className="space-y-4">
-                  <div className="p-4 bg-blue-50 rounded-xl">
-                    <h4 className="font-medium text-blue-900 mb-4">
-                      Surface Area Calculation
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
+            {/* Calculator Input */}
+            <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <activeCalculator.icon className="w-5 h-5 text-blue-400" />
+                  {activeCalculator.title} Calculator
+                </h3>
+                <button
+                  onClick={clearInputs}
+                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white transition-colors"
+                >
+                  <RefreshCw className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Surface Inputs */}
+              {activeCalc === "surface" && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Shape</label>
+                    <div className="flex gap-2">
+                      {["rectangle", "circle", "triangle"].map((shape) => (
+                        <button
+                          key={shape}
+                          onClick={() => setSurfaceShape(shape as typeof surfaceShape)}
+                          className={cn(
+                            "flex-1 py-3 rounded-xl text-sm font-medium transition-colors capitalize",
+                            surfaceShape === shape
+                              ? "bg-blue-500 text-white"
+                              : "bg-slate-700 text-slate-400 hover:text-white"
+                          )}
+                        >
+                          {shape}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm text-slate-400 mb-2 block">
+                        {surfaceShape === "circle" ? "Radius (m)" : surfaceShape === "triangle" ? "Base (m)" : "Length (m)"}
+                      </label>
+                      <input
+                        type="number"
+                        value={surfaceLength}
+                        onChange={(e) => setSurfaceLength(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      />
+                    </div>
+                    {surfaceShape !== "circle" && (
                       <div>
-                        <Label htmlFor="width">Width (meters)</Label>
-                        <Input
-                          id="width"
+                        <label className="text-sm text-slate-400 mb-2 block">
+                          {surfaceShape === "triangle" ? "Height (m)" : "Width (m)"}
+                        </label>
+                        <input
                           type="number"
-                          step="0.01"
-                          placeholder="10.5"
                           value={surfaceWidth}
                           onChange={(e) => setSurfaceWidth(e.target.value)}
-                          className="mt-1"
+                          placeholder="0.00"
+                          className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                         />
                       </div>
-                      <div>
-                        <Label htmlFor="height">Length (meters)</Label>
-                        <Input
-                          id="height"
-                          type="number"
-                          step="0.01"
-                          placeholder="15.2"
-                          value={surfaceHeight}
-                          onChange={(e) => setSurfaceHeight(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                    </div>
-                    <Button className="w-full mt-4" onClick={calculateSurface}>
-                      Calculate Surface
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
+                    )}
                   </div>
-
-                  <div className="p-4 border border-gray-200 rounded-xl">
-                    <p className="text-sm text-gray-600">
-                      <strong>Formula:</strong> Area = Width × Length
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Result will be displayed in square meters (m²)
-                    </p>
-                  </div>
-                </TabsContent>
-
-                {/* Distance Calculator */}
-                <TabsContent value="distance" className="space-y-4">
-                  <div className="p-4 bg-green-50 rounded-xl">
-                    <h4 className="font-medium text-green-900 mb-4">
-                      Distance Calculation
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-green-700">Point A</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label htmlFor="x1" className="text-xs">X</Label>
-                            <Input
-                              id="x1"
-                              type="number"
-                              placeholder="0"
-                              value={distanceX1}
-                              onChange={(e) => setDistanceX1(e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="y1" className="text-xs">Y</Label>
-                            <Input
-                              id="y1"
-                              type="number"
-                              placeholder="0"
-                              value={distanceY1}
-                              onChange={(e) => setDistanceY1(e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-green-700">Point B</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label htmlFor="x2" className="text-xs">X</Label>
-                            <Input
-                              id="x2"
-                              type="number"
-                              placeholder="10"
-                              value={distanceX2}
-                              onChange={(e) => setDistanceX2(e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="y2" className="text-xs">Y</Label>
-                            <Input
-                              id="y2"
-                              type="number"
-                              placeholder="10"
-                              value={distanceY2}
-                              onChange={(e) => setDistanceY2(e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full bg-green-600 hover:bg-green-700"
-                      onClick={calculateDistance}
-                    >
-                      Calculate Distance
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                </TabsContent>
-
-                {/* Volume Calculator */}
-                <TabsContent value="volume" className="space-y-4">
-                  <div className="p-4 bg-purple-50 rounded-xl">
-                    <h4 className="font-medium text-purple-900 mb-4">
-                      Building Volume Calculation
-                    </h4>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <Label htmlFor="footprint">Footprint (m²)</Label>
-                        <Input
-                          id="footprint"
-                          type="number"
-                          step="0.01"
-                          placeholder="120"
-                          value={volumeFootprint}
-                          onChange={(e) => setVolumeFootprint(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="floors">Number of Floors</Label>
-                        <Input
-                          id="floors"
-                          type="number"
-                          placeholder="2"
-                          value={volumeFloors}
-                          onChange={(e) => setVolumeFloors(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="floorHeight">Floor Height (m)</Label>
-                        <Input
-                          id="floorHeight"
-                          type="number"
-                          step="0.1"
-                          placeholder="2.7"
-                          value={volumeFloorHeight}
-                          onChange={(e) => setVolumeFloorHeight(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full mt-4 bg-purple-600 hover:bg-purple-700"
-                      onClick={calculateVolume}
-                    >
-                      Calculate Volume
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                </TabsContent>
-
-                {/* Coverage Calculator */}
-                <TabsContent value="coverage" className="space-y-4">
-                  <div className="p-4 bg-orange-50 rounded-xl">
-                    <h4 className="font-medium text-orange-900 mb-4">
-                      CES - Ground Coverage Ratio
-                    </h4>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <Label htmlFor="parcel">Parcel Area (m²)</Label>
-                        <Input
-                          id="parcel"
-                          type="number"
-                          step="0.01"
-                          placeholder="500"
-                          value={parcelArea}
-                          onChange={(e) => setParcelArea(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="building">Building Footprint (m²)</Label>
-                        <Input
-                          id="building"
-                          type="number"
-                          step="0.01"
-                          placeholder="150"
-                          value={buildingFootprint}
-                          onChange={(e) => setBuildingFootprint(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="maxCes">Max CES (PLU)</Label>
-                        <Input
-                          id="maxCes"
-                          type="number"
-                          step="0.05"
-                          placeholder="0.40"
-                          value={maxCES}
-                          onChange={(e) => setMaxCES(e.target.value)}
-                          className="mt-1"
-                        />
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full mt-4 bg-orange-600 hover:bg-orange-700"
-                      onClick={calculateCoverage}
-                    >
-                      Check Compliance
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-
-                  <div className="p-4 border border-orange-200 rounded-xl bg-orange-50/50">
-                    <p className="text-sm text-orange-800">
-                      <strong>CES (Coefficient d'Emprise au Sol)</strong> is the ratio
-                      of building footprint to parcel area. French urban planning
-                      regulations typically limit this to 30-50%.
-                    </p>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Results Panel */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">Results</CardTitle>
-                <CardDescription>Calculation history</CardDescription>
-              </div>
-              {results.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={clearResults}>
-                  <RefreshCw className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              {results.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  <Calculator className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">No calculations yet</p>
-                  <p className="text-xs">Results will appear here</p>
                 </div>
-              ) : (
-                <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                  {results.map((result, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 rounded-xl border border-gray-200 bg-gray-50"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge variant="info">{result.type}</Badge>
-                        {result.details &&
-                          "isCompliant" in result.details &&
-                          (result.details.isCompliant ? (
-                            <Badge variant="success">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Compliant
-                            </Badge>
-                          ) : (
-                            <Badge variant="error">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Exceeds Limit
-                            </Badge>
-                          ))}
+              )}
+
+              {/* Distance Inputs */}
+              {activeCalc === "distance" && (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-xl bg-slate-700/50 border border-white/5">
+                      <p className="text-sm text-slate-400 mb-3">Point A</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">X</label>
+                          <input
+                            type="number"
+                            value={x1}
+                            onChange={(e) => setX1(e.target.value)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Y</label>
+                          <input
+                            type="number"
+                            value={y1}
+                            onChange={(e) => setY1(e.target.value)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          />
+                        </div>
                       </div>
-                      <p className="text-2xl font-bold text-gray-900">
-                        {result.formatted}
-                      </p>
-                      {result.details && "totalHeight" in result.details && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Total height: {(result.details as { totalHeight: number }).totalHeight}m
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-700/50 border border-white/5">
+                      <p className="text-sm text-slate-400 mb-3">Point B</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">X</label>
+                          <input
+                            type="number"
+                            value={x2}
+                            onChange={(e) => setX2(e.target.value)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Y</label>
+                          <input
+                            type="number"
+                            value={y2}
+                            onChange={(e) => setY2(e.target.value)}
+                            placeholder="0"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Volume Inputs */}
+              {activeCalc === "volume" && (
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Length (m)</label>
+                    <input
+                      type="number"
+                      value={volumeLength}
+                      onChange={(e) => setVolumeLength(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Width (m)</label>
+                    <input
+                      type="number"
+                      value={volumeWidth}
+                      onChange={(e) => setVolumeWidth(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Height (m)</label>
+                    <input
+                      type="number"
+                      value={volumeHeight}
+                      onChange={(e) => setVolumeHeight(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Coverage Inputs */}
+              {activeCalc === "coverage" && (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm text-slate-400 mb-2 block">Building Area (m²)</label>
+                      <input
+                        type="number"
+                        value={buildingArea}
+                        onChange={(e) => setBuildingArea(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-slate-400 mb-2 block">Plot Area (m²)</label>
+                      <input
+                        type="number"
+                        value={plotArea}
+                        onChange={(e) => setPlotArea(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Max Allowed Coverage (%)</label>
+                    <input
+                      type="number"
+                      value={maxCoverage}
+                      onChange={(e) => setMaxCoverage(e.target.value)}
+                      placeholder="50"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Calculate Button */}
+              <button
+                onClick={calculate}
+                className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+              >
+                <Calculator className="w-5 h-5" />
+                Calculate
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Formula Info */}
+            <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5">
+              <p className="text-sm text-slate-400">
+                {activeCalc === "surface" && surfaceShape === "rectangle" && "Formula: Area = Length × Width"}
+                {activeCalc === "surface" && surfaceShape === "circle" && "Formula: Area = π × r²"}
+                {activeCalc === "surface" && surfaceShape === "triangle" && "Formula: Area = (Base × Height) / 2"}
+                {activeCalc === "distance" && "Formula: Distance = √((x₂-x₁)² + (y₂-y₁)²)"}
+                {activeCalc === "volume" && "Formula: Volume = Length × Width × Height"}
+                {activeCalc === "coverage" && "Formula: Coverage = (Building Area / Plot Area) × 100"}
+              </p>
+            </div>
+          </div>
+
+          {/* Results History */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-400" />
+                Recent Results
+              </h3>
+              {results.length > 0 && (
+                <button
+                  onClick={() => setResults([])}
+                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-red-400 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {results.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-slate-800/30 border border-white/5 text-center">
+                <Calculator className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-slate-400">No calculations yet</p>
+                <p className="text-sm text-slate-500">Results will appear here</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {results.map((result, index) => {
+                  const calc = calculators.find(c => c.id === result.type)!;
+                  const isCoverageOk = result.type === "coverage" && parseFloat(result.value) <= parseFloat(maxCoverage);
+                  const isCoverageWarning = result.type === "coverage" && parseFloat(result.value) > parseFloat(maxCoverage);
+                  
+                  return (
+                    <div
+                      key={index}
+                      className={cn(
+                        "p-4 rounded-xl border transition-all",
+                        isCoverageWarning
+                          ? "bg-red-500/10 border-red-500/20"
+                          : "bg-slate-800/50 border-white/10"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br",
+                            calc.gradient
+                          )}>
+                            <calc.icon className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xl font-bold text-white">
+                                {result.value}
+                                <span className="text-sm font-normal text-slate-400 ml-1">{result.unit}</span>
+                              </p>
+                              {result.type === "coverage" && (
+                                isCoverageOk ? (
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                                ) : (
+                                  <AlertTriangle className="w-5 h-5 text-red-400" />
+                                )
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 truncate max-w-[180px]">{result.label}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => copyResult(result)}
+                          className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {isCoverageWarning && (
+                        <p className="text-xs text-red-400 mt-2">
+                          Exceeds max coverage of {maxCoverage}%
                         </p>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  );
+                })}
+              </div>
+            )}
+
+            {results.length > 0 && (
+              <button className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors">
+                <Save className="w-5 h-5" />
+                Save to Project
+              </button>
+            )}
+          </div>
         </div>
       </div>
-    </AppLayout>
-  )
+    </Navigation>
+  );
 }

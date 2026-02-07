@@ -1,405 +1,419 @@
-"use client"
+"use client";
 
-import { useState, useRef } from "react"
-import { AppLayout, Header } from "@/components/layout"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import React, { useState, useCallback } from "react";
+import Navigation from "@/components/layout/Navigation";
 import {
+  Image,
   Upload,
-  Image as ImageIcon,
+  Camera,
+  Layers,
+  Eye,
+  EyeOff,
   Move,
-  RotateCw,
   ZoomIn,
   ZoomOut,
-  Layers,
+  RotateCw,
+  FlipHorizontal,
+  Contrast,
+  Sun,
+  Palette,
   Download,
-  Eye,
-  Trash2,
-  Maximize,
-} from "lucide-react"
+  RefreshCw,
+  Sliders,
+  Maximize2,
+  Grid3X3,
+  Mountain,
+  Building2,
+  Trees,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
-interface SitePhoto {
-  id: string
-  name: string
-  dataUrl: string
-  analysis?: {
-    horizonLine: number
-    suggestedScale: number
-    orientation: string
-  }
+interface Layer {
+  id: string;
+  name: string;
+  type: "photo" | "design" | "overlay";
+  visible: boolean;
+  opacity: number;
+  icon: React.ElementType;
 }
 
 export default function LandscapePage() {
-  const [photos, setPhotos] = useState<SitePhoto[]>([])
-  const [selectedPhoto, setSelectedPhoto] = useState<SitePhoto | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const [overlayOpacity, setOverlayOpacity] = useState(0.7)
-  const [overlayScale, setOverlayScale] = useState(1)
-  const [overlayPosition, setOverlayPosition] = useState({ x: 50, y: 50 })
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [designOverlay, setDesignOverlay] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  
+  // View controls
+  const [zoom, setZoom] = useState(100);
+  const [rotation, setRotation] = useState(0);
+  const [flipX, setFlipX] = useState(false);
+  
+  // Adjustments
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [opacity, setOpacity] = useState(80);
+  
+  // Layers
+  const [layers, setLayers] = useState<Layer[]>([
+    { id: "photo", name: "Site Photo", type: "photo", visible: true, opacity: 100, icon: Mountain },
+    { id: "design", name: "Project Design", type: "design", visible: true, opacity: 80, icon: Building2 },
+    { id: "landscape", name: "Landscaping", type: "overlay", visible: true, opacity: 100, icon: Trees },
+  ]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }, []);
 
-    setIsUploading(true)
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
 
-    for (const file of Array.from(files)) {
-      const formData = new FormData()
-      formData.append("photo", file)
-
-      try {
-        const response = await fetch("/api/landscape", {
-          method: "POST",
-          body: formData,
-        })
-
-        const data = await response.json()
-
-        if (data.success) {
-          const newPhoto: SitePhoto = {
-            id: crypto.randomUUID(),
-            name: data.photo.name,
-            dataUrl: data.photo.dataUrl,
-            analysis: data.photo.analysis,
-          }
-          setPhotos((prev) => [...prev, newPhoto])
-          if (!selectedPhoto) {
-            setSelectedPhoto(newPhoto)
-          }
-        }
-      } catch (error) {
-        console.error("Upload failed:", error)
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setPhoto(event.target?.result as string);
+        };
+        reader.readAsDataURL(file);
       }
     }
+  }, []);
 
-    setIsUploading(false)
-  }
-
-  const deletePhoto = (id: string) => {
-    setPhotos((prev) => prev.filter((p) => p.id !== id))
-    if (selectedPhoto?.id === id) {
-      setSelectedPhoto(photos.find((p) => p.id !== id) || null)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setPhoto(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
     }
-  }
+  };
+
+  const toggleLayerVisibility = (id: string) => {
+    setLayers(layers.map(l =>
+      l.id === id ? { ...l, visible: !l.visible } : l
+    ));
+  };
+
+  const resetAdjustments = () => {
+    setZoom(100);
+    setRotation(0);
+    setFlipX(false);
+    setBrightness(100);
+    setContrast(100);
+    setOpacity(80);
+  };
 
   return (
-    <AppLayout>
-      <Header
-        title="Landscape Integration"
-        description="Visualize your project integrated into site photos"
-      />
-
-      <div className="p-6 space-y-6">
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Photo Gallery */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ImageIcon className="h-5 w-5 text-blue-600" />
-                Site Photos
-              </CardTitle>
-              <CardDescription>Upload photos of your construction site</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div
-                className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-blue-400 transition-colors cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
+    <Navigation>
+      <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/25">
+                <Image className="w-5 h-5 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-white">Landscape Integration</h1>
+            </div>
+            <p className="text-slate-400">Overlay your project design onto site photography</p>
+          </div>
+          {photo && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={resetAdjustments}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors"
               >
-                <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                <p className="text-sm font-medium text-gray-600">Upload Photos</p>
-                <p className="text-xs text-gray-400">JPG, PNG, WebP</p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  multiple
-                  className="hidden"
-                  onChange={handleFileUpload}
-                />
-              </div>
-
-              {isUploading && (
-                <div className="text-center py-2">
-                  <div className="animate-spin h-6 w-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto" />
-                  <p className="text-xs text-gray-500 mt-2">Uploading...</p>
-                </div>
-              )}
-
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {photos.map((photo) => (
-                  <div
-                    key={photo.id}
-                    className={`relative group rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
-                      selectedPhoto?.id === photo.id
-                        ? "border-blue-500 ring-2 ring-blue-200"
-                        : "border-transparent hover:border-gray-200"
-                    }`}
-                    onClick={() => setSelectedPhoto(photo)}
-                  >
-                    <img
-                      src={photo.dataUrl}
-                      alt={photo.name}
-                      className="w-full h-24 object-cover"
-                    />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="destructive"
-                        size="icon-sm"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          deletePhoto(photo.id)
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                      <p className="text-xs text-white truncate">{photo.name}</p>
-                    </div>
-                  </div>
-                ))}
-
-                {photos.length === 0 && !isUploading && (
-                  <div className="text-center py-8 text-gray-400">
-                    <ImageIcon className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No photos yet</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Main Viewer */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Landscape Viewer</CardTitle>
-                  <CardDescription>Integrate your 3D project into site photos</CardDescription>
-                </div>
-                {selectedPhoto && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
-                      <Eye className="h-4 w-4 mr-1" />
-                      Preview
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <Download className="h-4 w-4 mr-1" />
-                      Export
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {selectedPhoto ? (
-                <div className="space-y-4">
-                  {/* Image Canvas */}
-                  <div className="relative rounded-xl overflow-hidden bg-gray-100 aspect-video">
-                    <img
-                      src={selectedPhoto.dataUrl}
-                      alt={selectedPhoto.name}
-                      className="w-full h-full object-cover"
-                    />
-
-                    {/* Overlay placeholder */}
-                    <div
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: `${overlayPosition.x}%`,
-                        top: `${overlayPosition.y}%`,
-                        transform: `translate(-50%, -50%) scale(${overlayScale})`,
-                        opacity: overlayOpacity,
-                      }}
-                    >
-                      <div className="w-48 h-32 bg-blue-500/30 border-2 border-blue-500 rounded-lg flex items-center justify-center">
-                        <span className="text-blue-700 text-sm font-medium">
-                          Project Overlay
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Horizon line indicator */}
-                    {selectedPhoto.analysis && (
-                      <div
-                        className="absolute left-0 right-0 border-t-2 border-dashed border-yellow-500/50"
-                        style={{ top: `${selectedPhoto.analysis.horizonLine * 100}%` }}
-                      >
-                        <Badge className="absolute left-2 -translate-y-1/2 bg-yellow-500 text-xs">
-                          Horizon
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Controls */}
-                  <Tabs defaultValue="position">
-                    <TabsList>
-                      <TabsTrigger value="position">Position</TabsTrigger>
-                      <TabsTrigger value="appearance">Appearance</TabsTrigger>
-                      <TabsTrigger value="analysis">Analysis</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="position" className="space-y-4 pt-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label className="text-xs">Horizontal Position (%)</Label>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={overlayPosition.x}
-                              onChange={(e) =>
-                                setOverlayPosition((p) => ({
-                                  ...p,
-                                  x: Number(e.target.value),
-                                }))
-                              }
-                              className="flex-1"
-                            />
-                            <span className="text-sm w-12 text-right">
-                              {overlayPosition.x}%
-                            </span>
-                          </div>
-                        </div>
-                        <div>
-                          <Label className="text-xs">Vertical Position (%)</Label>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={overlayPosition.y}
-                              onChange={(e) =>
-                                setOverlayPosition((p) => ({
-                                  ...p,
-                                  y: Number(e.target.value),
-                                }))
-                              }
-                              className="flex-1"
-                            />
-                            <span className="text-sm w-12 text-right">
-                              {overlayPosition.y}%
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm">
-                          <Move className="h-4 w-4 mr-1" />
-                          Auto-Align
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <RotateCw className="h-4 w-4 mr-1" />
-                          Reset
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Maximize className="h-4 w-4 mr-1" />
-                          Fit to Horizon
-                        </Button>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="appearance" className="space-y-4 pt-4">
-                      <div>
-                        <Label className="text-xs">Scale</Label>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Button
-                            variant="outline"
-                            size="icon-sm"
-                            onClick={() => setOverlayScale((s) => Math.max(0.1, s - 0.1))}
-                          >
-                            <ZoomOut className="h-4 w-4" />
-                          </Button>
-                          <Input
-                            type="range"
-                            min="0.1"
-                            max="3"
-                            step="0.1"
-                            value={overlayScale}
-                            onChange={(e) => setOverlayScale(Number(e.target.value))}
-                            className="flex-1"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon-sm"
-                            onClick={() => setOverlayScale((s) => Math.min(3, s + 0.1))}
-                          >
-                            <ZoomIn className="h-4 w-4" />
-                          </Button>
-                          <span className="text-sm w-16 text-right">
-                            {(overlayScale * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label className="text-xs">Opacity</Label>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Layers className="h-4 w-4 text-gray-400" />
-                          <Input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={overlayOpacity}
-                            onChange={(e) => setOverlayOpacity(Number(e.target.value))}
-                            className="flex-1"
-                          />
-                          <span className="text-sm w-12 text-right">
-                            {(overlayOpacity * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="analysis" className="space-y-4 pt-4">
-                      {selectedPhoto.analysis && (
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="p-3 rounded-lg bg-gray-50">
-                            <p className="text-xs text-gray-500">Horizon Line</p>
-                            <p className="text-lg font-semibold">
-                              {(selectedPhoto.analysis.horizonLine * 100).toFixed(0)}%
-                            </p>
-                          </div>
-                          <div className="p-3 rounded-lg bg-gray-50">
-                            <p className="text-xs text-gray-500">Suggested Scale</p>
-                            <p className="text-lg font-semibold">
-                              {selectedPhoto.analysis.suggestedScale}x
-                            </p>
-                          </div>
-                          <div className="p-3 rounded-lg bg-gray-50">
-                            <p className="text-xs text-gray-500">Orientation</p>
-                            <p className="text-lg font-semibold capitalize">
-                              {selectedPhoto.analysis.orientation}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </TabsContent>
-                  </Tabs>
-                </div>
-              ) : (
-                <div className="aspect-video rounded-xl bg-gray-50 flex items-center justify-center">
-                  <div className="text-center text-gray-400">
-                    <ImageIcon className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg font-medium">No photo selected</p>
-                    <p className="text-sm">Upload and select a site photo to get started</p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                <RefreshCw className="w-4 h-4" />
+                Reset
+              </button>
+              <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:shadow-lg hover:shadow-emerald-500/25 transition-all">
+                <Download className="w-5 h-5" />
+                Export
+              </button>
+            </div>
+          )}
         </div>
+
+        {!photo ? (
+          /* Upload Section */
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              className={cn(
+                "relative border-2 border-dashed rounded-2xl p-12 text-center transition-all",
+                dragActive
+                  ? "border-emerald-500 bg-emerald-500/10"
+                  : "border-white/20 hover:border-white/40 bg-slate-800/30"
+              )}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <div className="space-y-4">
+                <div className="w-20 h-20 rounded-2xl bg-slate-700/50 flex items-center justify-center mx-auto">
+                  <Upload className="w-10 h-10 text-slate-400" />
+                </div>
+                <div>
+                  <p className="text-xl font-semibold text-white">Upload Site Photo</p>
+                  <p className="text-slate-400 mt-1">Drop your photo here or click to browse</p>
+                </div>
+                <p className="text-xs text-slate-500">Supports JPG, PNG, WebP up to 25MB</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+                <div className="flex items-center gap-3 mb-4">
+                  <Mountain className="w-6 h-6 text-emerald-400" />
+                  <h3 className="text-lg font-semibold text-white">Photo Integration</h3>
+                </div>
+                <p className="text-slate-300 mb-4">
+                  Upload a photo of your construction site to visualize how your project will look in its real environment.
+                </p>
+                <ul className="space-y-2">
+                  {[
+                    "Overlay architectural designs",
+                    "Adjust transparency and blend",
+                    "Add landscaping elements",
+                    "Export realistic previews",
+                  ].map((feature) => (
+                    <li key={feature} className="flex items-center gap-2 text-sm text-slate-400">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center">
+                  <Camera className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">Take Photo</p>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center">
+                  <Grid3X3 className="w-8 h-8 text-slate-500 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">From Project</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Editor Section */
+          <div className="grid lg:grid-cols-4 gap-6">
+            {/* Preview Area */}
+            <div className="lg:col-span-3 space-y-4">
+              <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-white/10">
+                {/* Main Photo */}
+                <div
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{
+                    transform: `scale(${zoom / 100}) rotate(${rotation}deg) scaleX(${flipX ? -1 : 1})`,
+                    filter: `brightness(${brightness}%) contrast(${contrast}%)`,
+                  }}
+                >
+                  <img
+                    src={photo}
+                    alt="Site"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+
+                {/* Design Overlay */}
+                {layers.find(l => l.id === "design")?.visible && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                    style={{ opacity: opacity / 100 }}
+                  >
+                    <div className="w-1/2 h-1/2 border-2 border-dashed border-blue-400/50 rounded-lg flex items-center justify-center bg-blue-500/10">
+                      <Building2 className="w-12 h-12 text-blue-400/50" />
+                      <p className="text-blue-400/50 ml-2">Design Layer</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Controls Overlay */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/80 backdrop-blur-lg border border-white/10">
+                  <button
+                    onClick={() => setZoom(Math.max(25, zoom - 25))}
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <span className="text-sm text-white min-w-[50px] text-center">{zoom}%</span>
+                  <button
+                    onClick={() => setZoom(Math.min(200, zoom + 25))}
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <div className="w-px h-4 bg-white/20" />
+                  <button
+                    onClick={() => setRotation((rotation + 90) % 360)}
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <RotateCw className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setFlipX(!flipX)}
+                    className={cn(
+                      "p-2 rounded-lg transition-colors",
+                      flipX ? "bg-blue-500/20 text-blue-400" : "hover:bg-white/10 text-slate-400 hover:text-white"
+                    )}
+                  >
+                    <FlipHorizontal className="w-4 h-4" />
+                  </button>
+                  <div className="w-px h-4 bg-white/20" />
+                  <button className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="flex gap-3">
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white font-medium hover:bg-slate-700/50 transition-colors">
+                  <Upload className="w-5 h-5 text-slate-400" />
+                  Change Photo
+                </button>
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white font-medium hover:bg-slate-700/50 transition-colors">
+                  <Building2 className="w-5 h-5 text-slate-400" />
+                  Import Design
+                </button>
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white font-medium hover:bg-slate-700/50 transition-colors">
+                  <Trees className="w-5 h-5 text-slate-400" />
+                  Add Landscaping
+                </button>
+              </div>
+            </div>
+
+            {/* Controls Panel */}
+            <div className="space-y-4">
+              {/* Layers */}
+              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                  <Layers className="w-4 h-4 text-blue-400" />
+                  Layers
+                </h3>
+                <div className="space-y-2">
+                  {layers.map((layer) => (
+                    <div
+                      key={layer.id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      <button
+                        onClick={() => toggleLayerVisibility(layer.id)}
+                        className={cn(
+                          "p-1.5 rounded transition-colors",
+                          layer.visible ? "text-white" : "text-slate-500"
+                        )}
+                      >
+                        {layer.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                      </button>
+                      <layer.icon className={cn(
+                        "w-4 h-4",
+                        layer.type === "photo" ? "text-emerald-400" :
+                        layer.type === "design" ? "text-blue-400" : "text-amber-400"
+                      )} />
+                      <span className={cn(
+                        "flex-1 text-sm",
+                        layer.visible ? "text-white" : "text-slate-500"
+                      )}>{layer.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Adjustments */}
+              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                  <Sliders className="w-4 h-4 text-purple-400" />
+                  Adjustments
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs text-slate-400 flex items-center gap-1">
+                        <Sun className="w-3 h-3" /> Brightness
+                      </label>
+                      <span className="text-xs text-slate-500">{brightness}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="200"
+                      value={brightness}
+                      onChange={(e) => setBrightness(Number(e.target.value))}
+                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs text-slate-400 flex items-center gap-1">
+                        <Contrast className="w-3 h-3" /> Contrast
+                      </label>
+                      <span className="text-xs text-slate-500">{contrast}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="200"
+                      value={contrast}
+                      onChange={(e) => setContrast(Number(e.target.value))}
+                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs text-slate-400 flex items-center gap-1">
+                        <Palette className="w-3 h-3" /> Overlay Opacity
+                      </label>
+                      <span className="text-xs text-slate-500">{opacity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={opacity}
+                      onChange={(e) => setOpacity(Number(e.target.value))}
+                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Add */}
+              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
+                <h3 className="text-sm font-semibold text-white mb-3">Quick Add</h3>
+                <div className="grid grid-cols-3 gap-2">
+                  {["🌳", "🌲", "🌴", "🌺", "🚗", "🪑"].map((emoji) => (
+                    <button
+                      key={emoji}
+                      className="aspect-square rounded-lg bg-slate-700/50 hover:bg-slate-600/50 transition-colors text-2xl flex items-center justify-center"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </AppLayout>
-  )
+    </Navigation>
+  );
 }
