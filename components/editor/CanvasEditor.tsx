@@ -1,0 +1,310 @@
+"use client"
+
+import { useEffect, useRef, useState, useCallback } from "react"
+import * as fabric from "fabric"
+import { useProjectStore } from "@/store/projectStore"
+import { calculatePolygonArea, calculateDistance } from "@/lib/utils"
+
+interface CanvasEditorProps {
+  width?: number
+  height?: number
+}
+
+export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fabricRef = useRef<fabric.Canvas | null>(null)
+  const [measurements, setMeasurements] = useState<{ area: number; perimeter: number }>({
+    area: 0,
+    perimeter: 0,
+  })
+  
+  const { 
+    selectedTool, 
+    gridEnabled, 
+    scale,
+    addElement,
+    setSelectedElement 
+  } = useProjectStore()
+
+  // Initialize canvas
+  useEffect(() => {
+    if (!canvasRef.current) return
+
+    const canvas = new fabric.Canvas(canvasRef.current, {
+      width,
+      height,
+      backgroundColor: "#f8fafc",
+      selection: true,
+      preserveObjectStacking: true,
+    })
+
+    fabricRef.current = canvas
+
+    // Draw grid
+    if (gridEnabled) {
+      drawGrid(canvas)
+    }
+
+    // Event handlers
+    canvas.on("selection:created", (e) => {
+      if (e.selected && e.selected[0]) {
+        handleObjectSelected(e.selected[0])
+      }
+    })
+
+    canvas.on("selection:updated", (e) => {
+      if (e.selected && e.selected[0]) {
+        handleObjectSelected(e.selected[0])
+      }
+    })
+
+    canvas.on("selection:cleared", () => {
+      setSelectedElement(null)
+      setMeasurements({ area: 0, perimeter: 0 })
+    })
+
+    canvas.on("object:modified", (e) => {
+      if (e.target) {
+        updateMeasurements(e.target)
+      }
+    })
+
+    return () => {
+      canvas.dispose()
+    }
+  }, [width, height, gridEnabled])
+
+  // Handle tool changes
+  useEffect(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    canvas.selection = true
+
+    switch (selectedTool) {
+      case "select":
+        canvas.defaultCursor = "default"
+        break
+      case "pan":
+        canvas.defaultCursor = "grab"
+        break
+      case "rectangle":
+      case "polygon":
+      case "line":
+        canvas.defaultCursor = "crosshair"
+        break
+      case "measure":
+        canvas.defaultCursor = "crosshair"
+        break
+      default:
+        canvas.defaultCursor = "default"
+    }
+  }, [selectedTool])
+
+  const drawGrid = (canvas: fabric.Canvas) => {
+    const gridSize = 20 * scale
+    const gridColor = "#e2e8f0"
+
+    for (let i = 0; i < canvas.width! / gridSize; i++) {
+      const line = new fabric.Line([i * gridSize, 0, i * gridSize, canvas.height!], {
+        stroke: gridColor,
+        selectable: false,
+        evented: false,
+        strokeWidth: i % 5 === 0 ? 1 : 0.5,
+      })
+      canvas.add(line)
+    }
+
+    for (let i = 0; i < canvas.height! / gridSize; i++) {
+      const line = new fabric.Line([0, i * gridSize, canvas.width!, i * gridSize], {
+        stroke: gridColor,
+        selectable: false,
+        evented: false,
+        strokeWidth: i % 5 === 0 ? 1 : 0.5,
+      })
+      canvas.add(line)
+    }
+  }
+
+  const handleObjectSelected = (obj: fabric.FabricObject) => {
+    updateMeasurements(obj)
+  }
+
+  const updateMeasurements = (obj: fabric.FabricObject) => {
+    let area = 0
+    let perimeter = 0
+
+    if (obj.type === "rect") {
+      const rect = obj as fabric.Rect
+      const w = (rect.width || 0) * (rect.scaleX || 1)
+      const h = (rect.height || 0) * (rect.scaleY || 1)
+      area = (w * h) / (scale * scale * 10000) // Convert to m²
+      perimeter = (2 * (w + h)) / (scale * 100) // Convert to m
+    } else if (obj.type === "polygon") {
+      const polygon = obj as fabric.Polygon
+      if (polygon.points) {
+        area = calculatePolygonArea(polygon.points) / (scale * scale * 10000)
+        for (let i = 0; i < polygon.points.length; i++) {
+          const p1 = polygon.points[i]
+          const p2 = polygon.points[(i + 1) % polygon.points.length]
+          perimeter += calculateDistance(p1, p2) / (scale * 100)
+        }
+      }
+    }
+
+    setMeasurements({ area, perimeter })
+  }
+
+  const addRectangle = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const rect = new fabric.Rect({
+      left: 100,
+      top: 100,
+      width: 200,
+      height: 150,
+      fill: "rgba(59, 130, 246, 0.3)",
+      stroke: "#3b82f6",
+      strokeWidth: 2,
+      rx: 4,
+      ry: 4,
+    })
+
+    canvas.add(rect)
+    canvas.setActiveObject(rect)
+    canvas.renderAll()
+
+    addElement({
+      id: crypto.randomUUID(),
+      type: "building",
+      name: "Building",
+      data: { fabricId: rect },
+      measurements: {},
+    })
+  }, [addElement])
+
+  const addPolygon = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const points = [
+      { x: 200, y: 100 },
+      { x: 350, y: 100 },
+      { x: 400, y: 200 },
+      { x: 350, y: 300 },
+      { x: 200, y: 300 },
+      { x: 150, y: 200 },
+    ]
+
+    const polygon = new fabric.Polygon(points, {
+      fill: "rgba(34, 197, 94, 0.3)",
+      stroke: "#22c55e",
+      strokeWidth: 2,
+    })
+
+    canvas.add(polygon)
+    canvas.setActiveObject(polygon)
+    canvas.renderAll()
+
+    addElement({
+      id: crypto.randomUUID(),
+      type: "boundary",
+      name: "Parcel Boundary",
+      data: { fabricId: polygon },
+      measurements: {},
+    })
+  }, [addElement])
+
+  const addLine = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const line = new fabric.Line([100, 100, 400, 100], {
+      stroke: "#ef4444",
+      strokeWidth: 3,
+      strokeDashArray: [10, 5],
+    })
+
+    canvas.add(line)
+    canvas.setActiveObject(line)
+    canvas.renderAll()
+
+    addElement({
+      id: crypto.randomUUID(),
+      type: "setback",
+      name: "Setback Line",
+      data: { fabricId: line },
+      measurements: {},
+    })
+  }, [addElement])
+
+  const addText = useCallback((text: string = "Label") => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const textObj = new fabric.IText(text, {
+      left: 200,
+      top: 200,
+      fontSize: 16,
+      fontFamily: "Inter, sans-serif",
+      fill: "#1f2937",
+    })
+
+    canvas.add(textObj)
+    canvas.setActiveObject(textObj)
+    canvas.renderAll()
+  }, [])
+
+  const deleteSelected = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const activeObjects = canvas.getActiveObjects()
+    activeObjects.forEach((obj) => {
+      canvas.remove(obj)
+    })
+    canvas.discardActiveObject()
+    canvas.renderAll()
+  }, [])
+
+  const clearCanvas = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    canvas.clear()
+    canvas.backgroundColor = "#f8fafc"
+    if (gridEnabled) {
+      drawGrid(canvas)
+    }
+    canvas.renderAll()
+  }, [gridEnabled])
+
+  const exportCanvas = useCallback(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const dataURL = canvas.toDataURL({
+      format: "png",
+      quality: 1,
+      multiplier: 2,
+    })
+
+    const link = document.createElement("a")
+    link.download = "project-plan.png"
+    link.href = dataURL
+    link.click()
+  }, [])
+
+  return {
+    canvasRef,
+    measurements,
+    addRectangle,
+    addPolygon,
+    addLine,
+    addText,
+    deleteSelected,
+    clearCanvas,
+    exportCanvas,
+  }
+}
