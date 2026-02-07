@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
+import { PDFExportPanel } from "@/components/export/PDFExportPanel"
+import { PDFExportConfig } from "@/lib/pdfExport"
 import {
   FileText,
   Image as ImageIcon,
@@ -78,6 +80,7 @@ export default function ExportPage() {
   const [selectedDocs, setSelectedDocs] = useState<number[]>([])
   const [isExporting, setIsExporting] = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
+  const [activeTab, setActiveTab] = useState("pdf-a3")
 
   const toggleDocument = (id: number) => {
     setSelectedDocs((prev) =>
@@ -109,6 +112,39 @@ export default function ExportPage() {
     // In production, this would be a real file URL
     
     setIsExporting(false)
+  }
+
+  const handlePDFExport = async (config: PDFExportConfig) => {
+    setIsExporting(true)
+    setExportProgress(0)
+
+    // Simulate PDF generation with progress
+    for (let i = 0; i <= 100; i += 5) {
+      await new Promise((r) => setTimeout(r, 100))
+      setExportProgress(i)
+    }
+
+    // In production, this would generate a real PDF using the config
+    // For now, create a download link with metadata
+    const metadata = {
+      ...config,
+      generatedAt: new Date().toISOString(),
+      calibration: `Scale ${config.scale} - Format ${config.format}`,
+    }
+    
+    console.log("PDF Export Config:", metadata)
+    
+    // Create a placeholder PDF download
+    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${config.projectName.replace(/\s+/g, "_")}_${config.title.replace(/\s+/g, "_")}_${config.scale}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    
+    setIsExporting(false)
+    setExportProgress(0)
   }
 
   const getStatusIcon = (status: string) => {
@@ -145,7 +181,104 @@ export default function ExportPage() {
       />
 
       <div className="p-6 space-y-6">
-        <div className="grid gap-6 lg:grid-cols-3">
+        {/* Main Export Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3 max-w-md">
+            <TabsTrigger value="pdf-a3">PDF A3 Calibré</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="images">Images</TabsTrigger>
+          </TabsList>
+
+          {/* PDF A3 Export Tab */}
+          <TabsContent value="pdf-a3" className="mt-6">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <PDFExportPanel
+                projectName="Projet Construction"
+                projectAddress="123 Rue Example, 75001 Paris"
+                clientName="Client Demo"
+                onExport={handlePDFExport}
+              />
+              
+              {/* Preview Panel */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Aperçu du Document</CardTitle>
+                  <CardDescription>
+                    Prévisualisation du plan avec cartouche et échelle
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="aspect-[1.414/1] bg-white border-2 border-gray-300 rounded-lg p-4 relative">
+                    {/* A3 Preview mockup */}
+                    <div className="absolute inset-4 border border-gray-200 bg-gray-50 rounded flex items-center justify-center">
+                      <div className="text-center text-gray-400">
+                        <Map className="h-12 w-12 mx-auto mb-2" />
+                        <p className="text-sm">Zone de dessin</p>
+                        <p className="text-xs">Plan de masse</p>
+                      </div>
+                    </div>
+                    
+                    {/* North Arrow */}
+                    <div className="absolute top-6 right-6 w-10 h-10 flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-lg font-bold">N</div>
+                        <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-l-transparent border-r-transparent border-b-gray-800 mx-auto" />
+                      </div>
+                    </div>
+                    
+                    {/* Scale Bar */}
+                    <div className="absolute bottom-16 left-6 bg-white p-2 rounded border">
+                      <div className="flex gap-0.5">
+                        <div className="w-5 h-2 bg-gray-800" />
+                        <div className="w-5 h-2 border border-gray-800" />
+                        <div className="w-5 h-2 bg-gray-800" />
+                        <div className="w-5 h-2 border border-gray-800" />
+                      </div>
+                      <div className="flex justify-between text-[8px] text-gray-600 mt-0.5">
+                        <span>0</span>
+                        <span>5m</span>
+                        <span>10m</span>
+                      </div>
+                    </div>
+                    
+                    {/* Title Block */}
+                    <div className="absolute bottom-0 left-0 right-0 h-12 border-t-2 border-gray-300 bg-white grid grid-cols-4 text-xs">
+                      <div className="border-r border-gray-200 p-1">
+                        <div className="text-[8px] text-gray-400">Projet</div>
+                        <div className="font-medium truncate">Projet Construction</div>
+                      </div>
+                      <div className="border-r border-gray-200 p-1">
+                        <div className="text-[8px] text-gray-400">Échelle</div>
+                        <div className="font-medium">1:100</div>
+                      </div>
+                      <div className="border-r border-gray-200 p-1">
+                        <div className="text-[8px] text-gray-400">Date</div>
+                        <div className="font-medium">{new Date().toLocaleDateString('fr-FR')}</div>
+                      </div>
+                      <div className="p-1">
+                        <div className="text-[8px] text-gray-400">N° Plan</div>
+                        <div className="font-medium">001-A</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Progress */}
+                  {isExporting && (
+                    <div className="mt-4 space-y-2">
+                      <Progress value={exportProgress} />
+                      <p className="text-xs text-center text-gray-500">
+                        Génération du PDF calibré... {exportProgress}%
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Documents Tab */}
+          <TabsContent value="documents" className="mt-6">
+            <div className="grid gap-6 lg:grid-cols-3">
           {/* Documents List */}
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -307,6 +440,36 @@ export default function ExportPage() {
             </CardContent>
           </Card>
         </div>
+          </TabsContent>
+
+          {/* Images Tab */}
+          <TabsContent value="images" className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Export Images Haute Résolution</CardTitle>
+                <CardDescription>
+                  Exportez vos plans et visuels en format image pour impression
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Button variant="outline" className="h-24 flex-col gap-2">
+                    <ImageIcon className="h-8 w-8" />
+                    <span>PNG (300 DPI)</span>
+                  </Button>
+                  <Button variant="outline" className="h-24 flex-col gap-2">
+                    <ImageIcon className="h-8 w-8" />
+                    <span>JPEG (Haute qualité)</span>
+                  </Button>
+                  <Button variant="outline" className="h-24 flex-col gap-2">
+                    <FileText className="h-8 w-8" />
+                    <span>SVG (Vectoriel)</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Quick Stats */}
         <div className="grid gap-4 md:grid-cols-4">

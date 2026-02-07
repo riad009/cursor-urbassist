@@ -4,11 +4,24 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import * as fabric from "fabric"
 import { useProjectStore } from "@/store/projectStore"
 import { calculatePolygonArea, calculateDistance } from "@/lib/utils"
+import { 
+  SHAPE_TEMPLATES, 
+  ShapeTemplate, 
+  snapToGrid, 
+  findAlignmentGuides,
+  calculateDimensions,
+  DEFAULT_GRID_SETTINGS,
+  type AlignmentGuide,
+  type DimensionLabel 
+} from "@/lib/drawingTools"
 
 interface CanvasEditorProps {
   width?: number
   height?: number
 }
+
+// Pixels per meter at scale 1:100
+const BASE_PIXELS_PER_METER = 10
 
 export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -17,6 +30,9 @@ export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) 
     area: 0,
     perimeter: 0,
   })
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([])
+  const [gridSettings, setGridSettings] = useState(DEFAULT_GRID_SETTINGS)
+  const [dimensionLabels, setDimensionLabels] = useState<DimensionLabel[]>([])
   
   const { 
     selectedTool, 
@@ -66,7 +82,74 @@ export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) 
     canvas.on("object:modified", (e) => {
       if (e.target) {
         updateMeasurements(e.target)
+        updateDimensionLabels(e.target)
       }
+    })
+
+    // Smart drawing: object moving with snap and alignment
+    canvas.on("object:moving", (e) => {
+      if (!e.target) return
+      
+      const target = e.target
+      let left = target.left || 0
+      let top = target.top || 0
+      
+      // Snap to grid
+      if (gridSettings.snapToGrid) {
+        const snapped = snapToGrid(left, top, gridSettings.size, scale * BASE_PIXELS_PER_METER)
+        left = snapped.x
+        top = snapped.y
+        target.set({ left, top })
+      }
+      
+      // Find alignment guides with other objects
+      if (gridSettings.autoAlign) {
+        const objects = canvas.getObjects().filter(obj => 
+          obj !== target && 
+          obj.selectable !== false &&
+          obj.type !== 'line'
+        )
+        
+        const currentBounds = {
+          left: left,
+          top: top,
+          width: (target.width || 0) * (target.scaleX || 1),
+          height: (target.height || 0) * (target.scaleY || 1),
+          id: (target as any).id || 'current'
+        }
+        
+        const otherBounds = objects.map(obj => ({
+          left: obj.left || 0,
+          top: obj.top || 0,
+          width: (obj.width || 0) * (obj.scaleX || 1),
+          height: (obj.height || 0) * (obj.scaleY || 1),
+          id: (obj as any).id || Math.random().toString()
+        }))
+        
+        const guides = findAlignmentGuides(currentBounds, otherBounds, gridSettings.alignThreshold)
+        setAlignmentGuides(guides)
+        
+        // Apply snapping to alignment guides
+        guides.forEach(guide => {
+          if (guide.type === 'vertical') {
+            const diff = Math.abs(left - guide.position)
+            if (diff < gridSettings.alignThreshold) {
+              target.set({ left: guide.position })
+            }
+          } else {
+            const diff = Math.abs(top - guide.position)
+            if (diff < gridSettings.alignThreshold) {
+              target.set({ top: guide.position })
+            }
+          }
+        })
+      }
+      
+      canvas.renderAll()
+    })
+    
+    canvas.on("object:moved", () => {
+      setAlignmentGuides([])
     })
 
     return () => {
@@ -153,6 +236,18 @@ export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) 
     }
 
     setMeasurements({ area, perimeter })
+  }
+
+  const updateDimensionLabels = (obj: fabric.FabricObject) => {
+    const pixelsPerMeter = scale * BASE_PIXELS_PER_METER
+    const bounds = {
+      left: obj.left || 0,
+      top: obj.top || 0,
+      width: (obj.width || 0) * (obj.scaleX || 1),
+      height: (obj.height || 0) * (obj.scaleY || 1),
+    }
+    const dims = calculateDimensions(bounds, pixelsPerMeter)
+    setDimensionLabels(dims)
   }
 
   const addRectangle = useCallback(() => {
@@ -256,6 +351,76 @@ export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) 
     canvas.renderAll()
   }, [])
 
+  // Add shape from template (smart drawing tool)
+  const addFromTemplate = useCallback((template: ShapeTemplate) => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    const pixelsPerMeter = scale * BASE_PIXELS_PER_METER
+    const widthPx = template.defaultWidth * pixelsPerMeter
+    const heightPx = template.defaultHeight * pixelsPerMeter
+
+    // Center position with snap to grid
+    let left = (width - widthPx) / 2
+    let top = (height - heightPx) / 2
+
+    if (gridSettings.snapToGrid) {
+      const snapped = snapToGrid(left, top, gridSettings.size, pixelsPerMeter)
+      left = snapped.x
+      top = snapped.y
+    }
+
+    const rect = new fabric.Rect({
+      left,
+      top,
+      width: widthPx,
+      height: heightPx,
+      fill: template.color,
+      stroke: template.strokeColor,
+      strokeWidth: template.strokeWidth,
+      opacity: template.opacity,
+      rx: 2,
+      ry: 2,
+    })
+
+    // Store template info on object
+    ;(rect as any).templateId = template.id
+    ;(rect as any).templateName = template.name
+    ;(rect as any).id = crypto.randomUUID()
+
+    canvas.add(rect)
+    canvas.setActiveObject(rect)
+    canvas.renderAll()
+
+    addElement({
+      id: (rect as any).id,
+      type: template.category,
+      name: template.name,
+      data: { fabricId: rect, template: template.id },
+      measurements: {
+        width: template.defaultWidth,
+        height: template.defaultHeight,
+        area: template.defaultWidth * template.defaultHeight,
+      },
+    })
+
+    // Update dimension labels
+    updateDimensionLabels(rect)
+  }, [addElement, scale, width, height, gridSettings.snapToGrid, gridSettings.size])
+
+  // Toggle grid settings
+  const toggleSnapToGrid = useCallback(() => {
+    setGridSettings(prev => ({ ...prev, snapToGrid: !prev.snapToGrid }))
+  }, [])
+
+  const toggleAutoAlign = useCallback(() => {
+    setGridSettings(prev => ({ ...prev, autoAlign: !prev.autoAlign }))
+  }, [])
+
+  const setGridSize = useCallback((size: number) => {
+    setGridSettings(prev => ({ ...prev, size }))
+  }, [])
+
   const deleteSelected = useCallback(() => {
     const canvas = fabricRef.current
     if (!canvas) return
@@ -299,12 +464,20 @@ export function CanvasEditor({ width = 1200, height = 800 }: CanvasEditorProps) 
   return {
     canvasRef,
     measurements,
+    alignmentGuides,
+    dimensionLabels,
+    gridSettings,
     addRectangle,
     addPolygon,
     addLine,
     addText,
+    addFromTemplate,
     deleteSelected,
     clearCanvas,
     exportCanvas,
+    toggleSnapToGrid,
+    toggleAutoAlign,
+    setGridSize,
+    templates: SHAPE_TEMPLATES,
   }
 }
