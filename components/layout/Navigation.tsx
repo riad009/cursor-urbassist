@@ -9,34 +9,43 @@ import {
   FolderKanban,
   PenTool,
   FileText,
+  FileCheck,
   Image,
   Calculator,
   Download,
   Menu,
+  MapPin,
   X,
   Sparkles,
   ChevronRight,
   Building2,
+  Box,
   User,
   Settings,
   Bell,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "from-blue-500 to-cyan-500" },
   { href: "/projects", label: "Projects", icon: FolderKanban, color: "from-violet-500 to-purple-500" },
   { href: "/editor", label: "Design Studio", icon: PenTool, color: "from-pink-500 to-rose-500" },
-  { href: "/facades", label: "Facades", icon: Building2, color: "from-cyan-500 to-blue-500" },
   { href: "/regulations", label: "AI Analysis", icon: FileText, color: "from-amber-500 to-orange-500" },
+  { href: "/feasibility", label: "Feasibility", icon: FileCheck, color: "from-emerald-500 to-teal-500" },
+  { href: "/terrain", label: "Terrain", icon: Building2, color: "from-orange-500 to-amber-500" },
+  { href: "/building-3d", label: "Building 3D", icon: Box, color: "from-amber-500 to-yellow-500" },
+  { href: "/location-plan", label: "Location Plan", icon: MapPin, color: "from-sky-500 to-blue-500" },
   { href: "/landscape", label: "Landscape", icon: Image, color: "from-emerald-500 to-teal-500" },
-  { href: "/calculations", label: "Calculations", icon: Calculator, color: "from-indigo-500 to-blue-500" },
+  { href: "/statement", label: "Statement", icon: Calculator, color: "from-indigo-500 to-blue-500" },
   { href: "/export", label: "Export", icon: Download, color: "from-slate-500 to-gray-500" },
+  { href: "/developer", label: "Developer", icon: Sparkles, color: "from-purple-500 to-pink-500" },
 ];
 
 export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <div className="min-h-screen">
@@ -53,9 +62,9 @@ export function Navigation({ children }: { children: React.ReactNode }) {
             </div>
             <div className="hidden sm:block">
               <h1 className="text-lg font-bold tracking-tight">
-                <span className="gradient-text">ArchStudio</span>
+                <span className="gradient-text">UrbAssist</span>
               </h1>
-              <p className="text-[10px] text-slate-400 -mt-1">by roms09</p>
+              <p className="text-[10px] text-slate-400 -mt-1">UrbAssist</p>
             </div>
           </Link>
 
@@ -97,13 +106,37 @@ export function Navigation({ children }: { children: React.ReactNode }) {
               <Settings className="w-5 h-5 text-slate-400" />
             </button>
             <div className="w-px h-8 bg-white/10" />
-            <button className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-medium hover:shadow-lg hover:shadow-purple-500/25 transition-all">
-              <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline">Upgrade Pro</span>
-            </button>
-            <button className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10">
-              <User className="w-4 h-4 text-slate-300" />
-            </button>
+            {user ? (
+              <>
+                <span className="hidden sm:inline px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-sm">
+                  {user.credits} credits
+                </span>
+                <Link
+                  href="/admin"
+                  className="hidden sm:inline px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-sm hover:bg-slate-700"
+                >
+                  Plans
+                </Link>
+                <button
+                  onClick={() => logout()}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10">
+                  <User className="w-4 h-4 text-slate-300" />
+                </div>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-medium hover:shadow-lg hover:shadow-purple-500/25"
+              >
+                <Sparkles className="w-4 h-4" />
+                Sign in
+              </Link>
+            )}
 
             {/* Mobile Menu Toggle */}
             <button

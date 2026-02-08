@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Navigation from "@/components/layout/Navigation";
+import { useAuth } from "@/lib/auth-context";
 import {
   Download,
   FileText,
@@ -97,7 +98,83 @@ const scales = [
   { id: "1:500", name: "1:500", description: "Master plans" },
 ];
 
+function CreditUsageTrigger() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ byFeature: Array<{ feature: string; totalCredits: number; count: number }>; byDocumentType: Array<{ type: string; credits: number }> } | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!open || data) return;
+    setLoading(true);
+    fetch("/api/credits?usage=true")
+      .then((r) => r.json())
+      .then((d) => setData(d.usage || null))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open, data]);
+  return (
+    <span className="inline-flex items-center gap-2 ml-2 relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="text-blue-400 hover:text-blue-300 text-sm font-medium"
+      >
+        View usage
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" aria-hidden onClick={() => setOpen(false)} />
+          <div className="fixed right-4 top-24 z-50 p-4 rounded-xl bg-slate-800 border border-white/10 shadow-xl max-w-sm w-full">
+            <h4 className="text-sm font-semibold text-white mb-2">Credit usage by feature</h4>
+            {loading ? (
+              <p className="text-slate-400 text-sm">Loading...</p>
+            ) : data ? (
+              <div className="space-y-2 text-sm">
+                {data.byFeature?.map((f) => (
+                  <div key={f.feature} className="flex justify-between text-slate-300">
+                    <span>{f.feature.replace(/_/g, " ")}</span>
+                    <span>{f.totalCredits} cr ({f.count})</span>
+                  </div>
+                ))}
+                {data.byDocumentType?.length > 0 && (
+                  <>
+                    <div className="border-t border-white/10 my-2 pt-2 text-slate-400">By document type</div>
+                    {data.byDocumentType.map((d) => (
+                      <div key={d.type} className="flex justify-between text-slate-300">
+                        <span>{d.type.replace(/_/g, " ")}</span>
+                        <span>{d.credits} cr</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            ) : (
+              <p className="text-slate-400 text-sm">No usage data</p>
+            )}
+            <button type="button" onClick={() => setOpen(false)} className="mt-2 text-slate-400 hover:text-white text-xs">Close</button>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
+const DOCUMENT_TYPES = [
+  { id: "LOCATION_PLAN", name: "Location Plan", credits: 2, description: "Aerial, IGN, cadastral views" },
+  { id: "SITE_PLAN", name: "Site Plan", credits: 3, description: "Site plan with footprints" },
+  { id: "SECTION", name: "Section", credits: 2, description: "Terrain section" },
+  { id: "ELEVATION", name: "Elevation", credits: 2, description: "Building elevation" },
+  { id: "LANDSCAPE_INSERTION", name: "Landscape Insertion", credits: 5, description: "Project-in-photo image" },
+  { id: "DESCRIPTIVE_STATEMENT", name: "Descriptive Statement", credits: 2, description: "AI-generated notice" },
+  { id: "FULL_PACKAGE", name: "Full Package", credits: 10, description: "All documents" },
+];
+
 export default function ExportPage() {
+  const { user, loading: authLoading } = useAuth();
+  const [projects, setProjects] = useState<{ id: string; name: string; address?: string | null }[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [selectedDocumentType, setSelectedDocumentType] = useState("LOCATION_PLAN");
+  const [apiExporting, setApiExporting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("plans");
   const [selectedPaper, setSelectedPaper] = useState("a3");
   const [selectedScale, setSelectedScale] = useState("1:100");
@@ -107,12 +184,12 @@ export default function ExportPage() {
 
   const [includeOptions, setIncludeOptions] = useState<ExportOption[]>([
     { id: "title", label: "Project Title Block", checked: true },
-    { id: "scale", label: "Scale Indicator", checked: true },
-    { id: "north", label: "North Arrow", checked: true },
-    { id: "dimensions", label: "Dimensions", checked: true },
+    { id: "scale", label: "Scale Indicator (mandatory)", checked: true },
+    { id: "north", label: "North Arrow (mandatory)", checked: true },
+    { id: "dimensions", label: "Dimensions (mandatory)", checked: true },
     { id: "grid", label: "Grid Lines", checked: false },
     { id: "annotations", label: "Annotations", checked: true },
-    { id: "legend", label: "Legend", checked: true },
+    { id: "legend", label: "Legend (mandatory)", checked: true },
     { id: "date", label: "Date & Revision", checked: true },
   ]);
 
@@ -124,6 +201,55 @@ export default function ExportPage() {
     date: new Date().toLocaleDateString(),
     revision: "Rev. A",
   });
+
+  useEffect(() => {
+    if (!user) return;
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((d) => setProjects(d.projects || []))
+      .catch(() => setProjects([]));
+  }, [user]);
+
+  const handleApiExport = async () => {
+    if (!selectedProjectId || !user) return;
+    setApiExporting(true);
+    setApiError(null);
+    try {
+      const res = await fetch("/api/documents/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          documentType: selectedDocumentType,
+          options: {
+            paperSize: selectedPaper.toUpperCase(),
+            scale: selectedScale,
+            include: Object.fromEntries(
+              includeOptions.map((o) => [o.id, o.checked])
+            ),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setApiError(data.error || "Export failed");
+        return;
+      }
+      if (data.document?.fileData) {
+        const link = document.createElement("a");
+        const isImage = (data.document as { isImage?: boolean }).isImage;
+        const mime = (data.document as { mimeType?: string }).mimeType || "application/pdf";
+        const ext = mime.includes("png") ? "png" : mime.includes("jpeg") || mime.includes("jpg") ? "jpg" : "pdf";
+        link.href = `data:${mime};base64,${data.document.fileData}`;
+        link.download = `${(data.document.name || "document").replace(/\s+/g, "-")}.${ext}`;
+        link.click();
+      }
+      setExportComplete(true);
+    } catch (e) {
+      setApiError("Export failed");
+    }
+    setApiExporting(false);
+  };
 
   const toggleOption = (id: string) => {
     setIncludeOptions(options =>
@@ -291,9 +417,69 @@ trailer << /Size 5 /Root 1 0 R >>
               </div>
               <h1 className="text-2xl font-bold text-white">Export Center</h1>
             </div>
-            <p className="text-slate-400">Generate professional documents and deliverables</p>
+            <p className="text-slate-400">
+              Generate professional documents and deliverables {user && `• ${user.credits} credits`}
+              {user && (
+                <CreditUsageTrigger />
+              )}
+            </p>
           </div>
         </div>
+
+        {user && projects.length > 0 && (
+          <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+            <h2 className="text-lg font-semibold text-white">Export Project Documents (Credit-based)</h2>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Project</label>
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                >
+                  <option value="">Select project</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Document Type</label>
+                <select
+                  value={selectedDocumentType}
+                  onChange={(e) => setSelectedDocumentType(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                >
+                  {DOCUMENT_TYPES.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name} ({d.credits} credits)</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={handleApiExport}
+                  disabled={!selectedProjectId || apiExporting}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50"
+                >
+                  {apiExporting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-5 h-5" />
+                      Export PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            {apiError && (
+              <p className="text-sm text-red-400">{apiError}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Left Column - Format & Settings */}

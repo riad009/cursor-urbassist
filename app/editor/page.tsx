@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import * as fabric from "fabric";
 import {
   MousePointer2,
@@ -29,10 +30,17 @@ import {
   Magnet,
   MapPin,
   RotateCcw,
+  Zap,
+  Compass,
+  Save,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel";
+type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd";
 
 interface LayerItem {
   id: string;
@@ -63,6 +71,7 @@ const tools = [
   { id: "circle", label: "Circle", icon: Circle, shortcut: "C" },
   { id: "measure", label: "Measure", icon: Ruler, shortcut: "M" },
   { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A" },
+  { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D" },
   { id: "text", label: "Text", icon: Type, shortcut: "T" },
   { id: "pan", label: "Pan", icon: Move, shortcut: "H" },
 ];
@@ -70,9 +79,27 @@ const tools = [
 const templates = [
   { id: "house", label: "House", icon: Home, color: "#3b82f6", width: 12, height: 8 },
   { id: "garage", label: "Garage", icon: Car, color: "#8b5cf6", width: 6, height: 5 },
+  { id: "parking", label: "Parking 2.5×5m", icon: Car, color: "#6b7280", width: 2.5, height: 5 },
   { id: "pool", label: "Pool", icon: Droplets, color: "#06b6d4", width: 10, height: 5 },
   { id: "garden", label: "Garden", icon: Trees, color: "#22c55e", width: 8, height: 8 },
   { id: "terrace", label: "Terrace", icon: Hexagon, color: "#ec4899", width: 6, height: 4 },
+];
+
+const SURFACE_TYPES = [
+  { id: "green", label: "Green", color: "#22c55e", fill: "rgba(34, 197, 94, 0.4)" },
+  { id: "gravel", label: "Gravel", color: "#a8a29e", fill: "rgba(168, 162, 158, 0.5)" },
+  { id: "concrete", label: "Concrete", color: "#78716c", fill: "rgba(120, 113, 108, 0.5)" },
+  { id: "asphalt", label: "Asphalt", color: "#44403c", fill: "rgba(68, 64, 60, 0.6)" },
+  { id: "building", label: "Building", color: "#3b82f6", fill: "rgba(59, 130, 246, 0.3)" },
+];
+
+const VRD_TYPES = [
+  { id: "electricity", label: "Électricité", color: "#fbbf24" },
+  { id: "water", label: "Eau potable", color: "#38bdf8" },
+  { id: "wastewater", label: "Assainissement", color: "#78716c" },
+  { id: "stormwater", label: "Eaux pluviales", color: "#0ea5e9" },
+  { id: "telecom", label: "Télécom", color: "#a78bfa" },
+  { id: "gas", label: "Gaz", color: "#f97316" },
 ];
 
 const colors = [
@@ -81,7 +108,15 @@ const colors = [
   "#1e293b", "#ffffff",
 ];
 
-export default function EditorPage() {
+interface ProjectOption {
+  id: string;
+  name: string;
+  address?: string | null;
+}
+
+function EditorPageContent() {
+  const searchParams = useSearchParams();
+  const projectIdFromUrl = searchParams.get("project");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
@@ -102,6 +137,236 @@ export default function EditorPage() {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
   const measurementLabelsRef = useRef<Map<string, fabric.FabricObject[]>>(new Map());
+  const [activeSurfaceType, setActiveSurfaceType] = useState(SURFACE_TYPES[4]); // building default
+  const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(projectIdFromUrl);
+  const [projectForEditor, setProjectForEditor] = useState<{ parcelArea: number; northAngle: number; minGreenPct: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [unnamedElementsWarning, setUnnamedElementsWarning] = useState<{ index: number; type: string }[] | null>(null);
+  const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
+  const [showCompliance, setShowCompliance] = useState(false);
+  const [canvasReady, setCanvasReady] = useState(false);
+
+  const updateLayers = useCallback((canvas: fabric.Canvas) => {
+    const objects = canvas.getObjects().filter(obj => {
+      const customObj = obj as any;
+      return !customObj.excludeFromExport && !customObj.isGrid && !customObj.isMeasurement && !customObj.isPolygonPreview;
+    });
+    const newLayers: LayerItem[] = objects.map((obj, index) => ({
+      id: (obj as any).id || `layer-${index}`,
+      name: (obj as any).elementName || (obj as any).name || ((obj as any).isParcel ? "Land Parcel" : obj.type || "Object"),
+      type: obj.type || "unknown",
+      visible: obj.visible ?? true,
+      locked: !obj.selectable,
+    }));
+    setLayers(newLayers.reverse());
+  }, []);
+
+  // Sync project from URL
+  useEffect(() => {
+    if (projectIdFromUrl) setCurrentProjectId(projectIdFromUrl);
+  }, [projectIdFromUrl]);
+
+  // Fetch projects list
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((d) => setProjects(d.projects || []))
+      .catch(() => setProjects([]));
+  }, []);
+
+  // Fetch project data for green table and north arrow (parcel area, north angle, min green %)
+  useEffect(() => {
+    if (!currentProjectId) {
+      setProjectForEditor(null);
+      return;
+    }
+    fetch(`/api/projects/${currentProjectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const project = d.project;
+        if (!project) {
+          setProjectForEditor(null);
+          return;
+        }
+        const ai = project.regulatoryAnalysis?.aiAnalysis as { minGreenPct?: number; greenSpaceRequirements?: string } | undefined;
+        let minGreenPct = 20;
+        if (typeof ai?.minGreenPct === "number") minGreenPct = ai.minGreenPct;
+        else if (typeof ai?.greenSpaceRequirements === "string" && /(\d+)\s*%/.test(ai.greenSpaceRequirements)) {
+          const m = ai.greenSpaceRequirements.match(/(\d+)\s*%/);
+          if (m) minGreenPct = parseInt(m[1], 10);
+        }
+        setProjectForEditor({
+          parcelArea: Number(project.parcelArea) || 500,
+          northAngle: Number(project.northAngle) ?? Number(project.sitePlanData?.northAngle) ?? 0,
+          minGreenPct,
+        });
+      })
+      .catch(() => setProjectForEditor(null));
+  }, [currentProjectId]);
+
+  // Load site plan when project selected
+  const loadSitePlan = useCallback((projectId: string) => {
+    fetch(`/api/projects/${projectId}/site-plan`)
+      .then((r) => r.json())
+      .then((data) => {
+        const canvas = fabricRef.current;
+        if (!canvas || !data.sitePlan?.canvasData) return;
+        try {
+          const json = typeof data.sitePlan.canvasData === "string"
+            ? JSON.parse(data.sitePlan.canvasData)
+            : data.sitePlan.canvasData;
+          canvas.loadFromJSON(json, () => {
+            const savedElements = Array.isArray(data.sitePlan?.elements) ? data.sitePlan.elements : [];
+            const objects = canvas.getObjects().filter(
+              (o) => !(o as any).isGrid && !(o as any).isMeasurement && !(o as any).isPolygonPreview
+            );
+            savedElements.forEach((el: { name?: string }, i: number) => {
+              if (objects[i] && el?.name) (objects[i] as any).elementName = el.name;
+            });
+            canvas.renderAll();
+            updateLayers(canvas);
+          });
+        } catch (_) {}
+      })
+      .catch(() => {});
+  }, [updateLayers]);
+
+  useEffect(() => {
+    if (currentProjectId && canvasReady) loadSitePlan(currentProjectId);
+  }, [currentProjectId, canvasReady, loadSitePlan]);
+
+  const saveSitePlan = useCallback(async () => {
+    if (!currentProjectId) return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    setUnnamedElementsWarning(null);
+    const drawable = canvas.getObjects().filter(
+      (o) => !(o as any).isGrid && !(o as any).isMeasurement && !(o as any).isPolygonPreview
+    );
+    const ppm = currentScale.pixelsPerMeter;
+    const toM = (p: number) => p / ppm;
+    const elements = drawable.map((o, index) => {
+      const name = String((o as any).elementName ?? (o as any).name ?? "").trim();
+      return {
+        type: o.type,
+        name: name || "Unnamed",
+        category: (o as any).templateType || (o as any).surfaceType === "building" ? "building" : undefined,
+        templateType: (o as any).templateType,
+        surfaceType: (o as any).surfaceType,
+        vrdType: (o as any).vrdType,
+        width: (o as any).width,
+        height: (o as any).height,
+        area: (o as any).width && (o as any).height
+          ? toM((o as any).width * (o.scaleX || 1)) * toM((o as any).height * (o.scaleY || 1))
+          : undefined,
+        _index: index,
+      };
+    });
+    const unnamed = elements
+      .map((e, i) => (e.name === "Unnamed" || !e.name ? { index: i + 1, type: e.type || "object" } : null))
+      .filter(Boolean) as { index: number; type: string }[];
+    if (unnamed.length > 0) {
+      setUnnamedElementsWarning(unnamed);
+      return;
+    }
+    setSaving(true);
+    try {
+      const elementsToSend = elements.map(({ _index, ...e }) => e);
+      const canvasData = canvas.toJSON();
+      let projected = 0;
+      elementsToSend.forEach((e) => {
+        if (e.area && (e.templateType || e.surfaceType === "building")) projected += e.area;
+      });
+      let footprintMax: number | null = null;
+      try {
+        const projRes = await fetch(`/api/projects/${currentProjectId}`);
+        const projData = await projRes.json();
+        const project = projRes.ok ? projData.project : null;
+        if (project?.parcelArea && project?.regulatoryAnalysis?.aiAnalysis) {
+          const ces = (project.regulatoryAnalysis.aiAnalysis as { maxCoverageRatio?: number }).maxCoverageRatio ?? 0.5;
+          footprintMax = project.parcelArea * ces;
+        }
+      } catch {
+        // ignore
+      }
+      const res = await fetch(`/api/projects/${currentProjectId}/site-plan`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          canvasData,
+          elements: elementsToSend,
+          footprintProjected: projected,
+          footprintMax: footprintMax ?? 200,
+          northAngle: projectForEditor?.northAngle ?? null,
+        }),
+      });
+      if (res.ok) {
+        const compRes = await fetch("/api/compliance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: currentProjectId,
+            elements: elementsToSend,
+          }),
+        });
+        const compData = await compRes.json();
+        if (compData.checks) {
+          setComplianceChecks(compData.checks);
+          setShowCompliance(true);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setSaving(false);
+  }, [currentProjectId, currentScale.pixelsPerMeter, projectForEditor?.northAngle]);
+
+  // Real-time compliance: debounced check on draw/move/change
+  const complianceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runComplianceCheck = useCallback(() => {
+    if (!currentProjectId) return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    if (complianceDebounceRef.current) clearTimeout(complianceDebounceRef.current);
+    complianceDebounceRef.current = setTimeout(async () => {
+      complianceDebounceRef.current = null;
+      const ppm = currentScale.pixelsPerMeter;
+      const toM = (p: number) => p / ppm;
+      const elements = canvas.getObjects()
+        .filter((o) => !(o as fabric.FabricObject & { isGrid?: boolean }).isGrid && !(o as fabric.FabricObject & { isMeasurement?: boolean }).isMeasurement && !(o as fabric.FabricObject & { isPolygonPreview?: boolean }).isPolygonPreview)
+        .map((o) => ({
+          type: o.type,
+          category: (o as fabric.FabricObject & { templateType?: string; surfaceType?: string }).templateType || (o as fabric.FabricObject & { surfaceType?: string }).surfaceType === "building" ? "building" : undefined,
+          templateType: (o as fabric.FabricObject & { templateType?: string }).templateType,
+          surfaceType: (o as fabric.FabricObject & { surfaceType?: string }).surfaceType,
+          vrdType: (o as fabric.FabricObject & { vrdType?: string }).vrdType,
+          left: o.left,
+          top: o.top,
+          width: (o as fabric.FabricObject & { width?: number }).width != null ? (o as fabric.FabricObject & { width?: number }).width! * (o.scaleX || 1) : undefined,
+          height: (o as fabric.FabricObject & { height?: number }).height != null ? (o as fabric.FabricObject & { height?: number }).height! * (o.scaleY || 1) : undefined,
+          height3d: (o as fabric.FabricObject & { height3d?: number }).height3d,
+          area: (o as fabric.FabricObject & { width?: number; height?: number }).width != null && (o as fabric.FabricObject & { height?: number }).height != null
+            ? toM((o as fabric.FabricObject & { width?: number }).width! * (o.scaleX || 1)) * toM((o as fabric.FabricObject & { height?: number }).height! * (o.scaleY || 1))
+            : undefined,
+        }));
+      try {
+        const compRes = await fetch("/api/compliance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: currentProjectId, elements }),
+        });
+        const compData = await compRes.json();
+        if (compData.checks) {
+          setComplianceChecks(compData.checks);
+          setShowCompliance(true);
+        }
+      } catch {
+        // ignore
+      }
+    }, 800);
+  }, [currentProjectId, currentScale.pixelsPerMeter]);
 
   // Convert pixels to meters based on scale
   const pixelsToMeters = useCallback((pixels: number) => {
@@ -439,21 +704,6 @@ export default function EditorPage() {
     }
   }, [currentScale, canvasSize]);
 
-  const updateLayers = useCallback((canvas: fabric.Canvas) => {
-    const objects = canvas.getObjects().filter(obj => {
-      const customObj = obj as any;
-      return !customObj.excludeFromExport && !customObj.isGrid && !customObj.isMeasurement && !customObj.isPolygonPreview;
-    });
-    const newLayers: LayerItem[] = objects.map((obj, index) => ({
-      id: (obj as any).id || `layer-${index}`,
-      name: (obj as any).isParcel ? "Land Parcel" : obj.type || "Object",
-      type: obj.type || "unknown",
-      visible: obj.visible ?? true,
-      locked: !obj.selectable,
-    }));
-    setLayers(newLayers.reverse());
-  }, []);
-
   // Initialize canvas
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -467,6 +717,7 @@ export default function EditorPage() {
     });
 
     fabricRef.current = canvas;
+    setCanvasReady(true);
 
     // Draw grid
     if (showGrid) {
@@ -490,37 +741,43 @@ export default function EditorPage() {
       setSelectedObject(null);
     });
 
-    // Object modification events - update measurements
+    // Object modification events - update measurements and run real-time compliance
     canvas.on("object:modified", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
       }
+      runComplianceCheck();
     });
 
     canvas.on("object:scaling", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
       }
+      runComplianceCheck();
     });
 
     canvas.on("object:moving", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
       }
+      runComplianceCheck();
     });
 
     canvas.on("object:added", () => {
       updateLayers(canvas);
+      runComplianceCheck();
     });
 
     canvas.on("object:removed", () => {
       updateLayers(canvas);
+      runComplianceCheck();
     });
 
     return () => {
+      setCanvasReady(false);
       canvas.dispose();
     };
-  }, [canvasSize, showGrid, drawGrid, updateObjectMeasurements, updateLayers]);
+  }, [canvasSize, showGrid, drawGrid, updateObjectMeasurements, updateLayers, runComplianceCheck]);
 
   // Mouse event handlers for drawing with live measurements
   useEffect(() => {
@@ -535,7 +792,7 @@ export default function EditorPage() {
         const distance = calculateDistance(drawingStart.x, drawingStart.y, pointer.x, pointer.y);
         
         // Update live measurement display based on tool
-        if (activeTool === "line" || activeTool === "measure") {
+        if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd") {
           setCurrentMeasurement(formatMeasurement(distance));
         } else if (activeTool === "rectangle") {
           const width = pixelsToMeters(Math.abs(pointer.x - drawingStart.x));
@@ -552,11 +809,12 @@ export default function EditorPage() {
 
         let newTempShape: fabric.FabricObject | null = null;
 
-        if (activeTool === "line" || activeTool === "measure") {
+        if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd") {
+          const vrdColor = activeTool === "vrd" ? activeVrdType.color : undefined;
           newTempShape = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
-            stroke: activeTool === "measure" ? "#22c55e" : activeColor,
+            stroke: activeTool === "measure" ? "#22c55e" : vrdColor || activeColor,
             strokeWidth: activeTool === "measure" ? 2 : strokeWidth,
-            strokeDashArray: activeTool === "measure" ? [5, 5] : undefined,
+            strokeDashArray: activeTool === "measure" || activeTool === "vrd" ? [8, 4] : undefined,
             selectable: false,
             evented: false,
           });
@@ -630,6 +888,19 @@ export default function EditorPage() {
           strokeWidth: strokeWidth,
         });
         (line as any).id = shapeId;
+        (line as any).elementName = "Line";
+        canvas.add(line);
+        addLineMeasurement(line, shapeId);
+      } else if (activeTool === "vrd") {
+        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+          stroke: activeVrdType.color,
+          strokeWidth: strokeWidth,
+          strokeDashArray: [8, 4],
+        });
+        (line as any).id = shapeId;
+        (line as any).isVrd = true;
+        (line as any).vrdType = activeVrdType.id;
+        (line as any).elementName = activeVrdType.label;
         canvas.add(line);
         addLineMeasurement(line, shapeId);
       } else if (activeTool === "measure") {
@@ -639,6 +910,7 @@ export default function EditorPage() {
           strokeDashArray: [5, 5],
         });
         (line as any).id = shapeId;
+        (line as any).elementName = "Measure";
         canvas.add(line);
         addLineMeasurement(line, shapeId);
       } else if (activeTool === "rectangle") {
@@ -653,11 +925,13 @@ export default function EditorPage() {
             top,
             width,
             height,
-            fill: "transparent",
-            stroke: activeColor,
+            fill: activeSurfaceType.fill,
+            stroke: activeSurfaceType.color,
             strokeWidth: strokeWidth,
           });
           (rect as any).id = shapeId;
+          (rect as any).surfaceType = activeSurfaceType.id;
+          (rect as any).elementName = activeSurfaceType.label || "Building";
           canvas.add(rect);
           addRectMeasurements(rect, shapeId);
         }
@@ -668,11 +942,13 @@ export default function EditorPage() {
             left: drawingStart.x - radiusPx,
             top: drawingStart.y - radiusPx,
             radius: radiusPx,
-            fill: "transparent",
-            stroke: activeColor,
+            fill: activeSurfaceType.fill,
+            stroke: activeSurfaceType.color,
             strokeWidth: strokeWidth,
           });
+          (circle as any).surfaceType = activeSurfaceType.id;
           (circle as any).id = shapeId;
+          (circle as any).elementName = activeSurfaceType.label || "Circle";
           canvas.add(circle);
           addCircleMeasurements(circle, shapeId);
         }
@@ -693,7 +969,7 @@ export default function EditorPage() {
       canvas.off("mouse:down", handleMouseDown);
       canvas.off("mouse:up", handleMouseUp);
     };
-  }, [activeTool, isDrawing, drawingStart, tempShape, activeColor, strokeWidth, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements]);
+  }, [activeTool, isDrawing, drawingStart, tempShape, activeColor, strokeWidth, activeVrdType, activeSurfaceType, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements]);
 
   // Handle polygon completion with double-click
   useEffect(() => {
@@ -716,8 +992,8 @@ export default function EditorPage() {
         const polygon = new fabric.Polygon(normalizedPoints, {
           left: centroidX,
           top: centroidY,
-          fill: activeTool === "parcel" ? "rgba(34, 197, 94, 0.1)" : "transparent",
-          stroke: activeTool === "parcel" ? "#22c55e" : activeColor,
+          fill: activeTool === "parcel" ? "rgba(34, 197, 94, 0.1)" : activeSurfaceType.fill,
+          stroke: activeTool === "parcel" ? "#22c55e" : activeSurfaceType.color,
           strokeWidth: activeTool === "parcel" ? 3 : strokeWidth,
           originX: "center",
           originY: "center",
@@ -725,6 +1001,8 @@ export default function EditorPage() {
         
         (polygon as any).id = shapeId;
         (polygon as any).isParcel = activeTool === "parcel";
+        (polygon as any).elementName = activeTool === "parcel" ? "Land Parcel" : (activeSurfaceType.label || "Polygon");
+        if (activeTool === "polygon") (polygon as any).surfaceType = activeSurfaceType.id;
         canvas.add(polygon);
         
         // Add measurements to all sides automatically
@@ -740,7 +1018,7 @@ export default function EditorPage() {
     return () => {
       canvas.off("mouse:dblclick", handleDoubleClick);
     };
-  }, [activeTool, polygonPoints, activeColor, strokeWidth, addPolygonMeasurements]);
+  }, [activeTool, polygonPoints, activeColor, strokeWidth, activeSurfaceType, addPolygonMeasurements]);
 
   // Draw polygon preview points and segments with live measurements
   useEffect(() => {
@@ -897,6 +1175,7 @@ export default function EditorPage() {
     
     (rect as any).id = shapeId;
     (rect as any).templateType = templateId;
+    (rect as any).elementName = template.label;
     canvas.add(rect);
     
     // Add label
@@ -952,6 +1231,7 @@ export default function EditorPage() {
     
     (polygon as any).id = shapeId;
     (polygon as any).isParcel = true;
+    (polygon as any).elementName = "Land Parcel";
     canvas.add(polygon);
     
     // Add measurements to all sides automatically
@@ -977,6 +1257,107 @@ export default function EditorPage() {
     canvas.renderAll();
   };
 
+  const addNorthArrow = () => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const center = canvas.getCenterPoint();
+    const arrowId = `north-arrow-${Date.now()}`;
+    const northAngle = projectForEditor?.northAngle ?? 0;
+    const size = metersToPixels(2);
+    const points = [
+      { x: 0, y: -size },
+      { x: -size * 0.4, y: size * 0.6 },
+      { x: 0, y: size * 0.3 },
+      { x: size * 0.4, y: size * 0.6 },
+    ];
+    const arrow = new fabric.Polygon(points, {
+      left: center.x - size * 0.5,
+      top: center.y - size * 1.2,
+      fill: "#1e293b",
+      stroke: "#64748b",
+      strokeWidth: 1,
+    });
+    (arrow as any).id = arrowId;
+    (arrow as any).isNorthArrow = true;
+    arrow.set({ angle: -northAngle });
+    const label = new fabric.Text("N", {
+      left: center.x - 6,
+      top: center.y - size * 1.5,
+      fontSize: 18,
+      fontFamily: "sans-serif",
+      fontWeight: "bold",
+      fill: "#1e293b",
+    });
+    (label as any).isMeasurement = true;
+    (label as any).parentId = arrowId;
+    canvas.add(arrow, label);
+    canvas.renderAll();
+  };
+
+  // Compute footprint summary from canvas objects
+  const footprintSummary = (() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return { existing: 0, projected: 0, max: 0, remaining: 0 };
+    const BUILDING_TEMPLATES = ["house", "garage", "terrace"];
+    let projected = 0;
+    canvas.getObjects().forEach((obj) => {
+      if ((obj as any).isGrid || (obj as any).isMeasurement) return;
+      const templateType = (obj as any).templateType;
+      const surfaceType = (obj as any).surfaceType;
+      if (templateType && BUILDING_TEMPLATES.includes(templateType)) {
+        const w = ((obj as any).width || 0) * (obj.scaleX || 1);
+        const h = ((obj as any).height || 0) * (obj.scaleY || 1);
+        projected += pixelsToMeters(w) * pixelsToMeters(h);
+      } else if (obj.type === "rect" && surfaceType === "building") {
+        const w = ((obj as any).width || 0) * (obj.scaleX || 1);
+        const h = ((obj as any).height || 0) * (obj.scaleY || 1);
+        projected += pixelsToMeters(w) * pixelsToMeters(h);
+      } else if (obj.type === "polygon" && surfaceType === "building" && (obj as fabric.Polygon).points) {
+        const pts = (obj as fabric.Polygon).points!;
+        let area = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const j = (i + 1) % pts.length;
+          area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+        }
+        const scale = currentScale.pixelsPerMeter * currentScale.pixelsPerMeter;
+        projected += Math.abs(area) / 2 / scale;
+      }
+    });
+    const max = 200; // Example max footprint m² - could come from parcel/PLU
+    const existing = 0; // Could be input by user
+    return { existing, projected, max, remaining: Math.max(0, max - existing - projected) };
+  })();
+
+  const surfaceAreasByType = (() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return { green: 0, gravel: 0, concrete: 0, asphalt: 0, building: 0, total: 0 };
+    const areas: Record<string, number> = { green: 0, gravel: 0, concrete: 0, asphalt: 0, building: 0 };
+    canvas.getObjects().forEach((obj) => {
+      if ((obj as any).isGrid || (obj as any).isMeasurement) return;
+      const surfaceType = (obj as any).surfaceType || "building";
+      const key = surfaceType in areas ? surfaceType : "building";
+      let area = 0;
+      if (obj.type === "rect") {
+        const w = ((obj as any).width || 0) * (obj.scaleX || 1);
+        const h = ((obj as any).height || 0) * (obj.scaleY || 1);
+        area = pixelsToMeters(w) * pixelsToMeters(h);
+      } else if (obj.type === "polygon" && (obj as fabric.Polygon).points) {
+        const pts = (obj as fabric.Polygon).points!;
+        for (let i = 0; i < pts.length; i++) {
+          const j = (i + 1) % pts.length;
+          area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+        }
+        area = Math.abs(area) / 2 / (currentScale.pixelsPerMeter * currentScale.pixelsPerMeter);
+      }
+      areas[key] = (areas[key] || 0) + area;
+    });
+    const total = Object.values(areas).reduce((s, a) => s + a, 0);
+    return { ...areas, total };
+  })();
+  const parcelAreaForGreen = projectForEditor?.parcelArea ?? 500;
+  const requiredGreenPct = projectForEditor?.minGreenPct ?? 20;
+  const greenPct = parcelAreaForGreen > 0 ? ((surfaceAreasByType.green ?? 0) / parcelAreaForGreen) * 100 : 0;
+
   return (
     <div className="h-screen bg-slate-950 flex flex-col overflow-hidden">
       {/* Top Bar */}
@@ -999,7 +1380,50 @@ export default function EditorPage() {
             <Layers className="w-4 h-4" />
             <span>Facades Editor</span>
           </Link>
+          <Link href="/projects" className="text-slate-400 hover:text-white text-sm">Projects</Link>
+          {projects.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select
+                value={currentProjectId || ""}
+                onChange={(e) => setCurrentProjectId(e.target.value || null)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+              >
+                <option value="">No project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {currentProjectId && (
+                <button
+                  onClick={saveSitePlan}
+                  disabled={saving}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {unnamedElementsWarning && unnamedElementsWarning.length > 0 && (
+          <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-200 text-sm">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <span>
+              Name all elements before saving. Unnamed: {unnamedElementsWarning.map((u) => `#${u.index} (${u.type})`).join(", ")}.
+              Select each and set a name in the Properties panel.
+            </span>
+            <button
+              type="button"
+              onClick={() => setUnnamedElementsWarning(null)}
+              className="ml-auto text-amber-400 hover:text-amber-300"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           {/* Scale selector */}
@@ -1110,6 +1534,15 @@ export default function EditorPage() {
 
           <div className="w-8 h-px bg-white/10 my-2" />
 
+          {/* North Arrow */}
+          <button
+            onClick={addNorthArrow}
+            className="w-12 h-12 rounded-xl flex items-center justify-center text-sky-400 hover:bg-sky-500/20 transition-all"
+            title="Add North Arrow"
+          >
+            <Compass className="w-5 h-5" />
+          </button>
+
           {/* Sample Parcel Button */}
           <button
             onClick={createSampleParcel}
@@ -1169,6 +1602,38 @@ export default function EditorPage() {
 
         {/* Right Panel */}
         <div className="w-72 bg-slate-900 border-l border-white/10 flex flex-col">
+          {/* Compliance Panel */}
+          {currentProjectId && (
+            <div className="border-b border-white/10">
+              <button
+                onClick={() => setShowCompliance(!showCompliance)}
+                className="w-full flex items-center justify-between p-3 text-left hover:bg-slate-800/50"
+              >
+                <span className="text-sm font-medium text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  Compliance
+                </span>
+                <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
+              </button>
+              {showCompliance && complianceChecks.length > 0 && (
+                <div className="p-3 pt-0 max-h-40 overflow-y-auto space-y-2">
+                  {complianceChecks.map((c, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "p-2 rounded-lg text-xs",
+                        c.status === "compliant" && "bg-emerald-500/10 text-emerald-400",
+                        c.status === "warning" && "bg-amber-500/10 text-amber-400",
+                        c.status === "violation" && "bg-red-500/10 text-red-400"
+                      )}
+                    >
+                      <span className="font-medium">{c.rule}</span>: {c.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {/* Layers Panel */}
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="p-4 border-b border-white/10">
@@ -1234,6 +1699,22 @@ export default function EditorPage() {
             {selectedObject ? (
               <div className="space-y-3">
                 <div>
+                  <label className="text-xs text-slate-500 block mb-1">Name (required)</label>
+                  <input
+                    type="text"
+                    value={String((selectedObject as any).elementName ?? (selectedObject as any).name ?? "")}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      (selectedObject as any).elementName = name;
+                      (selectedObject as any).name = name;
+                      fabricRef.current?.requestRenderAll();
+                      updateLayers(fabricRef.current!);
+                    }}
+                    placeholder="e.g. Main building"
+                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
                   <label className="text-xs text-slate-500 block mb-1">Type</label>
                   <p className="text-sm text-white capitalize">{selectedObject.type}</p>
                 </div>
@@ -1257,6 +1738,80 @@ export default function EditorPage() {
             ) : (
               <p className="text-sm text-slate-500">Select an object to view properties</p>
             )}
+
+            {/* Surface Type (for rect/polygon) */}
+            <div className="mt-4">
+              <label className="text-xs text-slate-500 block mb-2">Surface Type</label>
+              <div className="flex flex-wrap gap-1">
+                {SURFACE_TYPES.map((st) => (
+                  <button
+                    key={st.id}
+                    onClick={() => setActiveSurfaceType(st)}
+                    className={cn(
+                      "px-2 py-1 rounded text-xs font-medium transition-colors",
+                      activeSurfaceType.id === st.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100"
+                    )}
+                    style={{ backgroundColor: st.color + "40", color: st.color }}
+                    title={st.label}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* VRD Type (when VRD tool active) */}
+            {activeTool === "vrd" && (
+              <div className="mt-4">
+                <label className="text-xs text-slate-500 block mb-2">VRD Network</label>
+                <div className="flex flex-wrap gap-1">
+                  {VRD_TYPES.map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => setActiveVrdType(v)}
+                      className={cn(
+                        "px-2 py-1 rounded text-xs",
+                        activeVrdType.id === v.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100"
+                      )}
+                      style={{ backgroundColor: v.color + "40", color: v.color }}
+                      title={v.label}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Footprint Summary Table */}
+            <div className="mt-4 p-3 rounded-lg bg-slate-800/50 border border-white/5">
+              <label className="text-xs text-slate-500 block mb-2">Footprint (m²)</label>
+              <div className="text-xs space-y-1">
+                <div className="flex justify-between"><span className="text-slate-400">Existing</span><span className="text-white font-mono">{footprintSummary.existing.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Projected</span><span className="text-amber-400 font-mono">{footprintSummary.projected.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Max</span><span className="text-white font-mono">{footprintSummary.max.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Remaining</span><span className="text-emerald-400 font-mono">{footprintSummary.remaining.toFixed(0)}</span></div>
+              </div>
+            </div>
+
+            {/* Green space verification table (PLU) */}
+            <div className="mt-4 p-3 rounded-lg bg-slate-800/50 border border-white/5">
+              <label className="text-xs text-slate-500 block mb-2">Surface by type (PLU verification)</label>
+              <div className="text-xs space-y-1">
+                {(["green", "gravel", "concrete", "asphalt", "building"] as const).map((t) => (
+                  <div key={t} className="flex justify-between">
+                    <span className="text-slate-400 capitalize">{t}</span>
+                    <span className="text-white font-mono">{(surfaceAreasByType[t] ?? 0).toFixed(1)} m²</span>
+                  </div>
+                ))}
+                <div className="border-t border-white/10 mt-2 pt-2 flex justify-between">
+                  <span className="text-slate-400">Green % (min. {requiredGreenPct}% required)</span>
+                  <span className={cn("font-mono", greenPct >= requiredGreenPct ? "text-emerald-400" : "text-amber-400")}>
+                    {greenPct.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
 
             {/* Color Palette */}
             <div className="mt-4">
@@ -1292,5 +1847,17 @@ export default function EditorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function EditorPage() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <EditorPageContent />
+    </Suspense>
   );
 }

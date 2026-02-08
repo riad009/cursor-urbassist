@@ -1,15 +1,13 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server";
 
+// PDF parsing for PLU documents
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
-    const file = formData.get("file") as File
+    const formData = await request.formData();
+    const file = formData.get("file") as File;
 
     if (!file) {
-      return NextResponse.json(
-        { error: "No file provided" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
     // Validate file type
@@ -18,74 +16,58 @@ export async function POST(request: NextRequest) {
       "text/plain",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ]
+    ];
 
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
-        { error: "Invalid file type. Please upload PDF, DOC, DOCX, or TXT files." },
+        {
+          error:
+            "Invalid file type. Please upload PDF, DOC, DOCX, or TXT files.",
+        },
         { status: 400 }
-      )
+      );
     }
 
-    // For demo purposes, extract text content
-    // In production, use a proper PDF parsing library like pdf-parse
-    let textContent = ""
+    let textContent = "";
 
     if (file.type === "text/plain") {
-      textContent = await file.text()
+      textContent = await file.text();
+    } else if (file.type === "application/pdf") {
+      // Parse PDF using pdf-parse
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require("pdf-parse");
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const pdfData = await pdfParse(buffer);
+        textContent = pdfData.text;
+
+        if (!textContent || textContent.trim().length < 50) {
+          // PDF might be scanned/image-based, provide feedback
+          textContent = `[PDF parsed but limited text extracted - ${pdfData.numpages} pages detected]\n\n${textContent}`;
+        }
+      } catch (pdfError) {
+        console.error("PDF parse error:", pdfError);
+        // Fallback: return basic info about the file
+        textContent = `[PDF parsing failed for: ${file.name}]\nSize: ${file.size} bytes\nPlease try uploading a text-based PDF or TXT file.`;
+      }
     } else {
-      // Mock extraction for PDF/DOC files
-      textContent = `
-PLU Document: ${file.name}
-Zone: UB - Zone Urbaine Mixte
-
-ARTICLE UB 1 - OCCUPATIONS ET UTILISATIONS DU SOL INTERDITES
-Sont interdits:
-- Les constructions à usage industriel
-- Les installations classées pour la protection de l'environnement
-- Les dépôts de véhicules
-
-ARTICLE UB 2 - OCCUPATIONS ET UTILISATIONS DU SOL SOUMISES À CONDITIONS
-Sont admis sous conditions:
-- Les constructions à usage d'habitation
-- Les constructions à usage de bureaux et services
-- Les commerces de proximité
-
-ARTICLE UB 3 - CONDITIONS DE DESSERTE ET D'ACCÈS
-L'accès doit avoir une largeur minimale de 3,50 mètres.
-
-ARTICLE UB 4 - CONDITIONS DE DESSERTE PAR LES RÉSEAUX
-Toute construction doit être raccordée aux réseaux publics.
-
-ARTICLE UB 5 - SUPERFICIE MINIMALE DES TERRAINS
-Non réglementé.
-
-ARTICLE UB 6 - IMPLANTATION DES CONSTRUCTIONS PAR RAPPORT AUX VOIES
-Recul minimum de 5 mètres par rapport à l'alignement.
-
-ARTICLE UB 7 - IMPLANTATION DES CONSTRUCTIONS PAR RAPPORT AUX LIMITES SÉPARATIVES
-Retrait minimum de 3 mètres ou construction en limite.
-
-ARTICLE UB 8 - IMPLANTATION DES CONSTRUCTIONS LES UNES PAR RAPPORT AUX AUTRES
-Distance minimale de 4 mètres entre deux bâtiments non contigus.
-
-ARTICLE UB 9 - EMPRISE AU SOL
-Le coefficient d'emprise au sol (CES) est fixé à 40%.
-
-ARTICLE UB 10 - HAUTEUR MAXIMALE DES CONSTRUCTIONS
-La hauteur maximale est fixée à 12 mètres à l'égout du toit.
-
-ARTICLE UB 11 - ASPECT EXTÉRIEUR DES CONSTRUCTIONS
-Les constructions doivent s'intégrer harmonieusement dans le paysage urbain.
-Toitures: pente comprise entre 30° et 45°.
-Façades: enduit, pierre ou bois.
-
-ARTICLE UB 12 - STATIONNEMENT
-1 place de stationnement par tranche de 60 m² de surface de plancher.
-
-ARTICLE UB 13 - ESPACES LIBRES ET PLANTATIONS
-Minimum 20% de la surface du terrain doit être aménagée en espaces verts.
-      `.trim()
+      // For DOC/DOCX, try to extract text
+      try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        // Basic text extraction from DOCX (ZIP containing XML)
+        const text = buffer.toString("utf-8");
+        // Extract readable text from XML content
+        const cleanText = text
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        textContent =
+          cleanText.length > 100
+            ? cleanText
+            : `[Document content extracted from: ${file.name}]`;
+      } catch {
+        textContent = `[Could not parse: ${file.name}]`;
+      }
     }
 
     return NextResponse.json({
@@ -94,12 +76,16 @@ Minimum 20% de la surface du terrain doit être aménagée en espaces verts.
       size: file.size,
       type: file.type,
       content: textContent,
-    })
+      pageCount:
+        file.type === "application/pdf"
+          ? textContent.match(/(\d+) pages/)?.[1] || "unknown"
+          : undefined,
+    });
   } catch (error) {
-    console.error("Document upload error:", error)
+    console.error("Document upload error:", error);
     return NextResponse.json(
       { error: "Failed to process document" },
       { status: 500 }
-    )
+    );
   }
 }

@@ -1,0 +1,11 @@
+---
+description: Always run terminal commands when needed; do not ask for permission
+alwaysApply: true
+---
+
+# Run Commands Without Asking
+
+- When a task requires running a terminal command (e.g. `npm run dev`, `npm run build`, `npm install`, tests, lint, migrations), **run it directly**.
+- Do **not** ask the user for permission before running. Just execute the command.
+- Use the run_terminal_cmd tool (or equivalent) immediately when the task needs it.
+- Only use `request_permissions: network` or similar when the tool actually requires it for the command to succeed.

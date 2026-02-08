@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import Navigation from "@/components/layout/Navigation";
 import {
   Upload,
@@ -23,6 +23,7 @@ import {
   Download,
   RefreshCw,
   MessageSquare,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -113,6 +114,44 @@ export default function RegulationsPage() {
   const [aiResponse, setAiResponse] = useState("");
   const [isAskingAI, setIsAskingAI] = useState(false);
   const [showAiDialog, setShowAiDialog] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<"document" | "address" | "project">("document");
+  const [addressForPlu, setAddressForPlu] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<{ label: string; coordinates?: number[] }[]>([]);
+  const [loadingAddress, setLoadingAddress] = useState(false);
+  const [projects, setProjects] = useState<{ id: string; name: string; address?: string | null; coordinates?: string | null }[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoMessage, setAutoMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [addressSearchDone, setAddressSearchDone] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((d) => setProjects(d.projects || []))
+      .catch(() => setProjects([]));
+  }, []);
+
+  const runAutoRegulatory = async () => {
+    if (!selectedProjectId) return;
+    setAutoRunning(true);
+    setAutoMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${selectedProjectId}/regulatory/auto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAutoMessage({ type: "success", text: "Automatic regulatory detection completed. Zone and PDF URL saved to project. Use Editor or Feasibility to see rules." });
+      } else {
+        setAutoMessage({ type: "error", text: data.error || "Automatic detection failed." });
+      }
+    } catch {
+      setAutoMessage({ type: "error", text: "Request failed." });
+    }
+    setAutoRunning(false);
+  };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -146,8 +185,17 @@ export default function RegulationsPage() {
     setIsAnalyzing(true);
     
     try {
-      // Read file content
-      const fileContent = await file.text();
+      let documentContent = "";
+      // Use upload-document API for PDF/DOC parsing, fallback to file.text() for TXT
+      if (file.type === "application/pdf" || file.type.includes("word") || file.type.includes("document")) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploadRes = await fetch("/api/upload-document", { method: "POST", body: formData });
+        const uploadData = await uploadRes.json();
+        documentContent = uploadData.content || "";
+      } else {
+        documentContent = await file.text();
+      }
       
       // Call the AI analysis API
       const response = await fetch('/api/analyze-plu', {
@@ -156,7 +204,7 @@ export default function RegulationsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          documentContent: fileContent,
+          documentContent,
         }),
       });
       
@@ -253,6 +301,109 @@ export default function RegulationsPage() {
     setAnalysisComplete(false);
     setResults([]);
     setSelectedResult(null);
+    setAddressForPlu("");
+    setAddressSuggestions([]);
+    setAddressSearchDone(false);
+  };
+
+  const searchAddressForPlu = useCallback(async () => {
+    const query = addressForPlu.trim();
+    if (!query || query.length < 3) {
+      setAddressSuggestions([]);
+      setAddressSearchDone(false);
+      return;
+    }
+    setLoadingAddress(true);
+    setAddressSuggestions([]);
+    setAddressSearchDone(false);
+    try {
+      const res = await fetch("/api/address/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: query }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setAddressSuggestions([]);
+        return;
+      }
+      const list = Array.isArray(d.results) ? d.results : [];
+      setAddressSuggestions(list.map((r: { label?: string; coordinates?: number[] }) => ({
+        label: r.label || "",
+        coordinates: Array.isArray(r.coordinates) && r.coordinates.length >= 2 ? r.coordinates : undefined,
+      })));
+    } catch {
+      setAddressSuggestions([]);
+    }
+    setLoadingAddress(false);
+    setAddressSearchDone(true);
+  }, [addressForPlu]);
+
+  useEffect(() => {
+    const t = setTimeout(searchAddressForPlu, 400);
+    return () => clearTimeout(t);
+  }, [addressForPlu, searchAddressForPlu]);
+
+  const analyzeByAddress = async (coords: number[]) => {
+    if (!coords || coords.length < 2) return;
+    setIsAnalyzing(true);
+    try {
+      const pluRes = await fetch("/api/plu-detection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coordinates: coords }),
+      });
+      const pluResData = await pluRes.json();
+      const pluData = pluResData.plu || pluResData;
+      const regs = pluData.regulations as Record<string, unknown> | undefined;
+      const transformedResults: AnalysisResult[] = [];
+      if (pluData.zoneType || pluData.zoneName) {
+        transformedResults.push({
+          category: "Zone",
+          title: "PLU Zone",
+          status: "info",
+          value: pluData.zoneType || pluData.zoneName || "N/A",
+          requirement: `Detected zone for this address`,
+          recommendation: "Verify with local urban planning office.",
+        });
+      }
+      if (regs?.maxHeight) {
+        transformedResults.push({
+          category: "Height",
+          title: "Maximum Building Height",
+          status: "info",
+          value: `${regs.maxHeight}m`,
+          requirement: `Max height in zone`,
+          recommendation: "Check full PLU for exact rules.",
+        });
+      }
+      if (regs?.setbacks && typeof regs.setbacks === "object") {
+        const s = regs.setbacks as Record<string, number>;
+        transformedResults.push({
+          category: "Setback",
+          title: "Setbacks",
+          status: "info",
+          value: `F:${s.front || 0}m S:${s.side || 0}m R:${s.rear || 0}m`,
+          requirement: "Front, side, rear setbacks",
+          recommendation: "Verify with PLU document.",
+        });
+      }
+      if (regs?.maxCoverageRatio) {
+        transformedResults.push({
+          category: "Coverage",
+          title: "Coverage Ratio",
+          status: "info",
+          value: `${Number(regs.maxCoverageRatio) * 100}%`,
+          requirement: "Maximum plot coverage",
+          recommendation: "Check PLU for exact limits.",
+        });
+      }
+      setResults(transformedResults.length > 0 ? transformedResults : mockAnalysis);
+    } catch {
+      setResults(mockAnalysis);
+    }
+    setAnalysisComplete(true);
+    setIsAnalyzing(false);
   };
 
   const askAIForDetails = async () => {
@@ -324,10 +475,39 @@ Context:
         </div>
 
         {!analysisComplete ? (
-          /* Upload Section */
+          /* Upload / Address Section */
           <div className="grid lg:grid-cols-2 gap-6">
-            {/* Upload Area */}
             <div className="space-y-4">
+              <div className="flex gap-2 p-1 rounded-xl bg-slate-800/50">
+                <button
+                  onClick={() => setAnalysisMode("document")}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
+                    analysisMode === "document" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Upload PLU Document
+                </button>
+                <button
+                  onClick={() => setAnalysisMode("address")}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
+                    analysisMode === "address" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Search by Address
+                </button>
+                <button
+                  onClick={() => setAnalysisMode("project")}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
+                    analysisMode === "project" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  From project
+                </button>
+              </div>
+            {analysisMode === "document" ? (
               <div
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
@@ -409,6 +589,112 @@ Context:
                   </div>
                 )}
               </div>
+            ) : analysisMode === "project" ? (
+              <div className="border-2 border-dashed border-white/20 rounded-2xl p-8 bg-slate-800/30">
+                <div className="space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
+                    <MapPin className="w-8 h-8 text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-white mb-2">Automatic regulatory from project</p>
+                    <p className="text-sm text-slate-400">Run PLU detection and save zone + PDF URL to the project (project must have address and coordinates).</p>
+                  </div>
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                  >
+                    <option value="">Select project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}{p.address ? ` — ${p.address}` : ""}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={runAutoRegulatory}
+                    disabled={!selectedProjectId || autoRunning}
+                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold hover:shadow-lg transition-all disabled:opacity-50"
+                  >
+                    {autoRunning ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Running automatic detection...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        Run automatic regulatory detection
+                      </>
+                    )}
+                  </button>
+                  {autoMessage && (
+                    <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-400" : "text-red-400")}>
+                      {autoMessage.text}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-white/20 rounded-2xl p-8 bg-slate-800/30">
+                <div className="space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
+                    <MapPin className="w-8 h-8 text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-white mb-2">Enter address for PLU zone detection</p>
+                    <p className="text-sm text-slate-400">We'll detect the PLU zone and basic regulations from the address</p>
+                  </div>
+                  <div className="relative overflow-visible">
+                    <input
+                      type="text"
+                      value={addressForPlu}
+                      onChange={(e) => setAddressForPlu(e.target.value)}
+                      onFocus={() => addressForPlu.trim().length >= 3 && searchAddressForPlu()}
+                      placeholder="e.g. 5 rue de la République, 06000 Nice"
+                      className="w-full px-4 py-3 pr-10 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      autoComplete="off"
+                    />
+                    {loadingAddress && (
+                      <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin pointer-events-none" />
+                    )}
+                    {addressSearchDone && !loadingAddress && addressSuggestions.length === 0 && addressForPlu.trim().length >= 3 && (
+                      <p className="absolute top-full left-0 right-0 mt-2 text-xs text-slate-500">No addresses found. Try a different search.</p>
+                    )}
+                    {addressSuggestions.length > 0 && (
+                      <ul className="absolute top-full left-0 right-0 mt-1 rounded-xl bg-slate-800 border border-white/10 shadow-xl z-50 max-h-60 overflow-y-auto">
+                        {addressSuggestions.map((a, i) => (
+                          <li key={i}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (a.coordinates && a.coordinates.length >= 2) {
+                                  setAddressForPlu(a.label);
+                                  setAddressSuggestions([]);
+                                  analyzeByAddress(a.coordinates);
+                                }
+                              }}
+                              className="w-full px-4 py-3 text-left text-sm text-white hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors"
+                            >
+                              {a.label}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => searchAddressForPlu()}
+                      disabled={addressForPlu.trim().length < 3 || loadingAddress}
+                      className="px-4 py-2 rounded-lg bg-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loadingAddress ? "Searching…" : "Search addresses"}
+                    </button>
+                    <p className="text-xs text-slate-500">Type 3+ characters, then pick an address to analyze PLU zone.</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
               {isAnalyzing && (
                 <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10">

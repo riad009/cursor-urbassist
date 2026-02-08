@@ -1,512 +1,460 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import Navigation from "@/components/layout/Navigation";
 import {
+  FolderKanban,
   Plus,
-  Search,
-  Filter,
-  Grid3X3,
-  List,
-  MoreHorizontal,
-  Calendar,
   MapPin,
-  ArrowUpRight,
+  FileText,
+  Loader2,
   Trash2,
-  Edit3,
-  Copy,
-  Star,
-  StarOff,
-  FolderOpen,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Building2,
-  Home,
-  TreePine,
-  Warehouse,
+  ArrowRight,
+  Search,
+  ChevronDown,
+  Shield,
+  AlertTriangle,
 } from "lucide-react";
-import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
-  description: string;
-  status: "draft" | "in-progress" | "review" | "completed";
-  type: "residential" | "commercial" | "extension" | "renovation";
-  location: string;
-  area: string;
-  createdAt: string;
+  description: string | null;
+  address: string | null;
+  status: string;
   updatedAt: string;
-  progress: number;
-  starred: boolean;
-  thumbnail: string;
+  regulatoryAnalysis?: { id: string; zoneType: string | null } | null;
+  _count?: { documents: number };
 }
 
-const projectsData: Project[] = [
-  {
-    id: 1,
-    name: "Villa Méditerranée",
-    description: "Luxury residential villa with pool and garden",
-    status: "in-progress",
-    type: "residential",
-    location: "Nice, France",
-    area: "280 m²",
-    createdAt: "2026-01-15",
-    updatedAt: "2 hours ago",
-    progress: 75,
-    starred: true,
-    thumbnail: "🏠",
-  },
-  {
-    id: 2,
-    name: "Commercial Center Aurora",
-    description: "Modern commercial complex with retail spaces",
-    status: "review",
-    type: "commercial",
-    location: "Lyon, France",
-    area: "1,500 m²",
-    createdAt: "2026-01-10",
-    updatedAt: "Yesterday",
-    progress: 90,
-    starred: true,
-    thumbnail: "🏢",
-  },
-  {
-    id: 3,
-    name: "Garden Extension Project",
-    description: "Backyard extension with landscaping",
-    status: "completed",
-    type: "extension",
-    location: "Paris, France",
-    area: "85 m²",
-    createdAt: "2025-12-20",
-    updatedAt: "3 days ago",
-    progress: 100,
-    starred: false,
-    thumbnail: "🌳",
-  },
-  {
-    id: 4,
-    name: "Warehouse Renovation",
-    description: "Industrial space converted to loft apartments",
-    status: "draft",
-    type: "renovation",
-    location: "Marseille, France",
-    area: "450 m²",
-    createdAt: "2026-02-01",
-    updatedAt: "1 week ago",
-    progress: 10,
-    starred: false,
-    thumbnail: "🏭",
-  },
-  {
-    id: 5,
-    name: "Coastal Residence",
-    description: "Beach house with panoramic sea views",
-    status: "in-progress",
-    type: "residential",
-    location: "Cannes, France",
-    area: "320 m²",
-    createdAt: "2026-01-25",
-    updatedAt: "5 hours ago",
-    progress: 45,
-    starred: true,
-    thumbnail: "🏖️",
-  },
-  {
-    id: 6,
-    name: "Urban Apartment Complex",
-    description: "Multi-family residential building",
-    status: "review",
-    type: "residential",
-    location: "Bordeaux, France",
-    area: "2,100 m²",
-    createdAt: "2026-01-05",
-    updatedAt: "2 days ago",
-    progress: 85,
-    starred: false,
-    thumbnail: "🏘️",
-  },
-];
-
-const statusConfig = {
-  draft: { label: "Draft", color: "bg-slate-500/20 text-slate-400", icon: Edit3 },
-  "in-progress": { label: "In Progress", color: "bg-blue-500/20 text-blue-400", icon: Clock },
-  review: { label: "Review", color: "bg-amber-500/20 text-amber-400", icon: AlertCircle },
-  completed: { label: "Completed", color: "bg-emerald-500/20 text-emerald-400", icon: CheckCircle2 },
-};
-
-const typeConfig = {
-  residential: { label: "Residential", icon: Home, color: "text-blue-400" },
-  commercial: { label: "Commercial", icon: Building2, color: "text-purple-400" },
-  extension: { label: "Extension", icon: TreePine, color: "text-emerald-400" },
-  renovation: { label: "Renovation", icon: Warehouse, color: "text-orange-400" },
-};
-
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>(projectsData);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const { user, loading: authLoading } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newAddress, setNewAddress] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<{ label: string; city: string; postcode: string; coordinates?: number[] }[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<{ label: string; city: string; postcode: string; coordinates: number[] } | null>(null);
+  const [parcels, setParcels] = useState<{ id: string; section: string; number: string; area: number }[]>([]);
+  const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
+  const [pluInfo, setPluInfo] = useState<{ zoneType: string | null; zoneName: string | null } | null>(null);
+  const [protectedAreas, setProtectedAreas] = useState<{ name: string; type: string }[]>([]);
+  const [loadingAddress, setLoadingAddress] = useState(false);
+  const [loadingCadastre, setLoadingCadastre] = useState(false);
+  const [loadingPlu, setLoadingPlu] = useState(false);
+  const [cadastreError, setCadastreError] = useState<string | null>(null);
+  const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
 
-  const filteredProjects = projects.filter((project) => {
-    const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filterStatus === "all" || project.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  useEffect(() => {
+    if (!user) return;
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then((data) => setProjects(data.projects || []))
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false));
+  }, [user]);
 
-  const toggleStar = (id: number) => {
-    setProjects(projects.map(p => 
-      p.id === id ? { ...p, starred: !p.starred } : p
-    ));
+  const searchAddress = useCallback(() => {
+    if (!addressQuery.trim() || addressQuery.length < 4) {
+      setAddressSuggestions([]);
+      return;
+    }
+    setLoadingAddress(true);
+    fetch("/api/address/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: addressQuery }),
+    })
+      .then((r) => r.json())
+      .then((d) => setAddressSuggestions(d.results || []))
+      .catch(() => setAddressSuggestions([]))
+      .finally(() => setLoadingAddress(false));
+  }, [addressQuery]);
+
+  useEffect(() => {
+    const t = setTimeout(searchAddress, 400);
+    return () => clearTimeout(t);
+  }, [addressQuery, searchAddress]);
+
+  const selectAddress = useCallback((addr: { label: string; city: string; postcode: string; coordinates?: number[] }) => {
+    const coords = addr.coordinates;
+    if (!coords || coords.length < 2) return;
+    setSelectedAddress({ ...addr, coordinates: coords });
+    setNewAddress(addr.label);
+    setAddressSuggestions([]);
+    setLoadingCadastre(true);
+    setLoadingPlu(true);
+    setCadastreError(null);
+    setParcels([]);
+    setPluInfo(null);
+    setProtectedAreas([]);
+    fetch("/api/cadastre/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords }),
+    })
+      .then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) {
+          setCadastreError(d.error || "Cadastre lookup failed");
+          setParcels([]);
+          setNorthAngleDegrees(null);
+          return;
+        }
+        setParcels(d.parcels || []);
+        setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null);
+      })
+      .catch(() => {
+        setCadastreError("Cadastre service unavailable. You can still create the project with the address.");
+        setParcels([]);
+      })
+      .finally(() => setLoadingCadastre(false));
+    fetch("/api/plu-detection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.zoneType || d.zoneName) setPluInfo({ zoneType: d.zoneType || null, zoneName: d.zoneName || null });
+      })
+      .finally(() => setLoadingPlu(false));
+    fetch("/api/protected-areas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords }),
+    })
+      .then((r) => r.json())
+      .then((d) => setProtectedAreas(d.areas || []))
+      .catch(() => {});
+  }, []);
+
+  const createProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const parcelIds = selectedParcelIds.length > 0 ? selectedParcelIds : parcels.map((p) => p.id);
+      const parcelArea = selectedParcelIds.length > 0
+        ? parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((sum, p) => sum + p.area, 0)
+        : parcels.reduce((sum, p) => sum + p.area, 0) || parcels[0]?.area;
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName.trim(),
+          address: newAddress.trim() || undefined,
+          municipality: selectedAddress?.city,
+          coordinates: selectedAddress?.coordinates,
+          parcelIds: parcelIds.length ? parcelIds : undefined,
+          parcelArea,
+          northAngle: northAngleDegrees != null ? northAngleDegrees : undefined,
+          zoneType: pluInfo?.zoneType || pluInfo?.zoneName,
+          protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.project) {
+        setProjects((p) => [data.project, ...p]);
+        setShowNewModal(false);
+        setNewName("");
+        setNewAddress("");
+        setSelectedAddress(null);
+        setParcels([]);
+        setSelectedParcelIds([]);
+        setPluInfo(null);
+        setProtectedAreas([]);
+        setNorthAngleDegrees(null);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setCreating(false);
   };
+
+  const deleteProject = async (id: string) => {
+    if (!confirm("Delete this project?")) return;
+    try {
+      await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      setProjects((p) => p.filter((x) => x.id !== id));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-4">
+        <h1 className="text-2xl font-bold text-white">Sign in to view projects</h1>
+        <Link
+          href="/login"
+          className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold"
+        >
+          Sign in
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Projects</h1>
-            <p className="text-slate-400 mt-1">Manage and organize your construction projects</p>
+            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+              <FolderKanban className="w-8 h-8 text-blue-400" />
+              Projects
+            </h1>
+            <p className="text-slate-400 mt-1">
+              Manage your construction projects • {user.credits} credits
+            </p>
           </div>
           <button
             onClick={() => setShowNewModal(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25"
           >
             <Plus className="w-5 h-5" />
             New Project
           </button>
         </div>
 
-        {/* Filters & Search */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search projects..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
-            />
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
           </div>
-
-          {/* Status Filter */}
-          <div className="flex items-center gap-2">
-            <div className="flex bg-slate-800/50 rounded-xl p-1 border border-white/10">
-              <button
-                onClick={() => setFilterStatus("all")}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                  filterStatus === "all" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
-                )}
-              >
-                All
-              </button>
-              {Object.entries(statusConfig).map(([key, config]) => (
-                <button
-                  key={key}
-                  onClick={() => setFilterStatus(key)}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                    filterStatus === key ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
-                  )}
-                >
-                  {config.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* View Toggle */}
-          <div className="flex bg-slate-800/50 rounded-xl p-1 border border-white/10">
-            <button
-              onClick={() => setViewMode("grid")}
-              className={cn(
-                "p-2 rounded-lg transition-colors",
-                viewMode === "grid" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
-              )}
-            >
-              <Grid3X3 className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setViewMode("list")}
-              className={cn(
-                "p-2 rounded-lg transition-colors",
-                viewMode === "list" ? "bg-blue-500 text-white" : "text-slate-400 hover:text-white"
-              )}
-            >
-              <List className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Stats Bar */}
-        <div className="flex gap-4 overflow-x-auto pb-2">
-          {Object.entries(statusConfig).map(([key, config]) => {
-            const count = projects.filter(p => p.status === key).length;
-            return (
-              <div
-                key={key}
-                className="flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-800/30 border border-white/5 min-w-fit"
-              >
-                <config.icon className={cn("w-4 h-4", config.color.split(" ")[1])} />
-                <span className="text-sm text-white font-medium">{config.label}</span>
-                <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", config.color)}>
-                  {count}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Projects Grid/List */}
-        {filteredProjects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <FolderOpen className="w-16 h-16 text-slate-600 mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">No projects found</h3>
-            <p className="text-slate-400 mb-6">Try adjusting your search or filter</p>
+        ) : projects.length === 0 ? (
+          <div className="text-center py-16 rounded-2xl bg-slate-800/30 border border-white/10">
+            <FolderKanban className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2">No projects yet</h2>
+            <p className="text-slate-400 mb-6">Create your first project to get started</p>
             <button
               onClick={() => setShowNewModal(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500 text-white font-semibold hover:bg-blue-600 transition-colors"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold"
             >
               <Plus className="w-5 h-5" />
-              Create New Project
+              Create Project
             </button>
           </div>
-        ) : viewMode === "grid" ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProjects.map((project) => {
-              const status = statusConfig[project.status];
-              const type = typeConfig[project.type];
-              return (
-                <div
-                  key={project.id}
-                  className="group relative bg-slate-800/50 border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-all hover:-translate-y-1"
-                >
-                  {/* Header */}
-                  <div className="relative h-32 bg-gradient-to-br from-slate-700/50 to-slate-800/50 p-4">
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="relative flex items-start justify-between">
-                      <div className="w-14 h-14 rounded-xl bg-slate-700/50 flex items-center justify-center text-3xl">
-                        {project.thumbnail}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => toggleStar(project.id)}
-                          className={cn(
-                            "p-2 rounded-lg transition-colors",
-                            project.starred ? "text-amber-400" : "text-slate-500 hover:text-white"
-                          )}
-                        >
-                          {project.starred ? <Star className="w-5 h-5 fill-current" /> : <StarOff className="w-5 h-5" />}
-                        </button>
-                        <button className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors">
-                          <MoreHorizontal className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="absolute bottom-4 left-4">
-                      <span className={cn("px-2.5 py-1 rounded-full text-xs font-medium", status.color)}>
-                        {status.label}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Content */}
-                  <div className="p-4">
-                    <Link href={`/editor?project=${project.id}`}>
-                      <h3 className="text-lg font-semibold text-white mb-1 group-hover:text-blue-400 transition-colors">
-                        {project.name}
-                      </h3>
-                    </Link>
-                    <p className="text-sm text-slate-400 line-clamp-2 mb-4">{project.description}</p>
-
-                    <div className="flex items-center gap-4 text-xs text-slate-500 mb-4">
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5" />
-                        {project.location}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <type.icon className={cn("w-3.5 h-3.5", type.color)} />
-                        {project.area}
-                      </span>
-                    </div>
-
-                    {/* Progress */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500">Progress</span>
-                        <span className="text-white font-medium">{project.progress}%</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                        <div
-                          className={cn(
-                            "h-full rounded-full transition-all",
-                            project.progress === 100
-                              ? "bg-gradient-to-r from-emerald-500 to-teal-500"
-                              : "bg-gradient-to-r from-blue-500 to-purple-500"
-                          )}
-                          style={{ width: `${project.progress}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
-                      <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        {project.updatedAt}
-                      </span>
-                      <Link
-                        href={`/editor?project=${project.id}`}
-                        className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 font-medium"
-                      >
-                        Open
-                        <ArrowUpRight className="w-4 h-4" />
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         ) : (
-          /* List View */
-          <div className="space-y-3">
-            {filteredProjects.map((project) => {
-              const status = statusConfig[project.status];
-              const type = typeConfig[project.type];
-              return (
-                <div
-                  key={project.id}
-                  className="group flex items-center gap-4 p-4 bg-slate-800/50 border border-white/10 rounded-xl hover:border-white/20 transition-all"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-slate-700/50 flex items-center justify-center text-2xl flex-shrink-0">
-                    {project.thumbnail}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                className="group rounded-xl bg-slate-800/50 border border-white/10 p-5 hover:border-white/20 transition-all"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                    <MapPin className="w-6 h-6 text-blue-400" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1">
-                      <Link href={`/editor?project=${project.id}`}>
-                        <h3 className="font-semibold text-white group-hover:text-blue-400 transition-colors truncate">
-                          {project.name}
-                        </h3>
-                      </Link>
-                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", status.color)}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5" />
-                        {project.location}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <type.icon className={cn("w-3.5 h-3.5", type.color)} />
-                        {type.label}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5" />
-                        {project.area}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-24">
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-slate-500">Progress</span>
-                        <span className="text-white">{project.progress}%</span>
-                      </div>
-                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
-                          style={{ width: `${project.progress}%` }}
-                        />
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => toggleStar(project.id)}
-                      className={cn(
-                        "p-2 rounded-lg transition-colors",
-                        project.starred ? "text-amber-400" : "text-slate-500 hover:text-white"
-                      )}
-                    >
-                      {project.starred ? <Star className="w-5 h-5 fill-current" /> : <StarOff className="w-5 h-5" />}
-                    </button>
-                    <Link
-                      href={`/editor?project=${project.id}`}
-                      className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
-                    >
-                      <ArrowUpRight className="w-5 h-5" />
-                    </Link>
-                  </div>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      project.status === "COMPLETED"
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : "bg-blue-500/20 text-blue-400"
+                    }`}
+                  >
+                    {project.status}
+                  </span>
                 </div>
-              );
-            })}
+                <h3 className="font-semibold text-white mb-1">{project.name}</h3>
+                {project.address && (
+                  <p className="text-sm text-slate-500 mb-3 truncate">{project.address}</p>
+                )}
+                <div className="flex items-center gap-2 text-xs text-slate-400 mb-4">
+                  {project.regulatoryAnalysis && (
+                    <span className="flex items-center gap-1">
+                      <FileText className="w-3 h-3" />
+                      PLU analyzed
+                    </span>
+                  )}
+                  {project._count?.documents ? (
+                    <span>{project._count.documents} documents</span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/editor?project=${project.id}`}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-500/20 text-blue-400 font-medium hover:bg-blue-500/30"
+                  >
+                    Open <ArrowRight className="w-4 h-4" />
+                  </Link>
+                  <button
+                    onClick={() => deleteProject(project.id)}
+                    className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showNewModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg p-6 my-8">
+              <h2 className="text-xl font-bold text-white mb-4">New Project</h2>
+              <form onSubmit={createProject} className="space-y-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Project name</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                    placeholder="e.g. Villa Méditerranée"
+                    required
+                  />
+                </div>
+                <div className="relative">
+                  <label className="block text-sm text-slate-400 mb-2">Search address</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <input
+                      type="text"
+                      value={selectedAddress ? newAddress : addressQuery}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAddressQuery(v);
+                        setNewAddress(v);
+                        if (selectedAddress) setSelectedAddress(null);
+                      }}
+                      onFocus={() => selectedAddress && setSelectedAddress(null)}
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                      placeholder="123 Rue Example, 06000 Nice"
+                    />
+                    {loadingAddress && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
+                    )}
+                  </div>
+                  {addressSuggestions.length > 0 && (
+                    <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl bg-slate-800 border border-white/10 overflow-hidden">
+                      {addressSuggestions.map((a, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => selectAddress({
+                            label: a.label,
+                            city: a.city,
+                            postcode: a.postcode,
+                            coordinates: a.coordinates,
+                          })}
+                          className="w-full px-4 py-2 text-left text-sm text-white hover:bg-slate-700 flex items-center gap-2"
+                        >
+                          <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
+                          <span className="truncate">{a.label}</span>
+                          <span className="text-slate-500 text-xs shrink-0">{a.postcode} {a.city}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500 mt-1">Type to search, or enter address manually</p>
+                </div>
+                {selectedAddress && (
+                  <>
+                    {loadingCadastre || loadingPlu ? (
+                      <div className="flex items-center gap-2 text-slate-400 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading cadastre & PLU...
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {cadastreError && (
+                          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-400">
+                            {cadastreError}
+                          </div>
+                        )}
+                        {pluInfo && (pluInfo.zoneType || pluInfo.zoneName) && (
+                          <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                            <span className="text-xs text-slate-400">PLU Zone</span>
+                            <p className="text-sm font-medium text-blue-400">{pluInfo.zoneType || pluInfo.zoneName}</p>
+                          </div>
+                        )}
+                        {protectedAreas.length > 0 && (
+                          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                            <span className="text-xs text-slate-400 flex items-center gap-1">
+                              <Shield className="w-3 h-3" /> Protected areas
+                            </span>
+                            <p className="text-xs text-amber-400 mt-1">{protectedAreas.map((a) => a.name).join(", ")}</p>
+                          </div>
+                        )}
+                        {parcels.length > 0 && (
+                          <div>
+                            <p className="text-xs text-amber-400/90 mb-2 flex items-center gap-1">
+                              <Shield className="w-3.5 h-3.5" />
+                              You must select all parcels affected by your project. This is a regulatory requirement for permit applications.
+                            </p>
+                            <label className="block text-xs text-slate-400 mb-2">Select parcel(s) — multiple allowed</label>
+                            <div className="flex flex-wrap gap-2">
+                              {parcels.slice(0, 12).map((p) => {
+                                const selected = selectedParcelIds.includes(p.id);
+                                return (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedParcelIds((prev) =>
+                                        prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                                      );
+                                    }}
+                                    className={cn(
+                                      "px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+                                      selected
+                                        ? "bg-blue-500/30 text-blue-400 border border-blue-500/50"
+                                        : "bg-slate-800 text-slate-300 border border-white/10 hover:border-white/20"
+                                    )}
+                                  >
+                                    {p.section}{p.number} ({p.area}m²)
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {selectedParcelIds.length > 0 && (
+                              <p className="text-xs text-slate-500 mt-1">
+                                {selectedParcelIds.length} parcel(s) selected · Total: {parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((s, p) => s + p.area, 0)}m²
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-slate-700 text-white font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50"
+                  >
+                    {creating ? "Creating..." : "Create"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
-
-      {/* New Project Modal */}
-      {showNewModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg p-6 shadow-2xl">
-            <h2 className="text-xl font-bold text-white mb-6">Create New Project</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Project Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Villa Méditerranée"
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Project Type</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {Object.entries(typeConfig).map(([key, config]) => (
-                    <button
-                      key={key}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-slate-800 border border-white/10 hover:border-blue-500/50 transition-colors text-left"
-                    >
-                      <config.icon className={cn("w-5 h-5", config.color)} />
-                      <span className="text-white font-medium">{config.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Location</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Paris, France"
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowNewModal(false)}
-                className="flex-1 px-5 py-2.5 rounded-xl bg-slate-800 text-white font-medium hover:bg-slate-700 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setShowNewModal(false)}
-                className="flex-1 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-medium hover:shadow-lg hover:shadow-purple-500/25 transition-all"
-              >
-                Create Project
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </Navigation>
   );
 }

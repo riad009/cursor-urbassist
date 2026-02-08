@@ -166,7 +166,7 @@ export default function Dashboard() {
               </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold mb-3">
-              Welcome to <span className="gradient-text">ArchStudio</span>
+              Welcome to <span className="gradient-text">UrbAssist</span>
             </h1>
             <p className="text-slate-400 text-lg max-w-xl mb-6">
               Professional construction project design platform. Create, analyze, and export your architectural plans with AI-powered assistance.
@@ -326,7 +326,7 @@ export default function Dashboard() {
         {/* Footer */}
         <footer className="pt-8 border-t border-white/5">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500">
-            <p>© 2026 ArchStudio. Demo project by roms09</p>
+            <p>© 2026 UrbAssist. Construction Project Assistance</p>
             <div className="flex items-center gap-4">
               <a href="#" className="hover:text-white transition-colors">Documentation</a>
               <a href="#" className="hover:text-white transition-colors">Support</a>

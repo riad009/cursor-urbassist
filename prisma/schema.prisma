@@ -1,0 +1,313 @@
+// SaaS Platform for Construction Project Assistance
+// Prisma Schema - Full database model
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Users & Auth
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  name          String?
+  role          UserRole  @default(USER)
+  credits       Int       @default(0)
+  stripeCustomerId String? @map("stripe_customer_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+  projects      Project[]
+  creditTransactions CreditTransaction[]
+  payments      Payment[]
+}
+
+enum UserRole {
+  USER
+  DEVELOPER
+  ADMIN
+}
+
+// Credits & Subscriptions
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  subscriptions   Subscription[]
+  description     String?
+  priceMonthly    Float    @map("price_monthly")
+  creditsPerMonth Int      @map("credits_per_month")
+  features        Json?
+  stripePriceId   String?  @map("stripe_price_id")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+}
+
+model Subscription {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  planId        String    @map("plan_id")
+  plan          SubscriptionPlan @relation(fields: [planId], references: [id])
+  status        SubscriptionStatus @default(ACTIVE)
+  creditsPerMonth Int     @map("credits_per_month")
+  stripeSubId   String?   @map("stripe_sub_id")
+  startedAt     DateTime @default(now()) @map("started_at")
+  expiresAt     DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+model CreditTransaction {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  amount      Int
+  type        CreditType @map("type")
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum CreditType {
+  PURCHASE
+  SUBSCRIPTION
+  PLU_ANALYSIS
+  PLAN_GENERATION
+  VISUAL_GENERATION
+  LANDSCAPE_INTEGRATION
+  DOCUMENT_EXPORT
+  DESCRIPTIVE_STATEMENT
+}
+
+// Payments (Stripe)
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  stripeSessionId String?  @map("stripe_session_id")
+  stripePaymentId String?  @map("stripe_payment_id")
+  amount          Float
+  currency        String   @default("eur")
+  status          String   @default("pending")
+  type            String   // "credits" or "subscription"
+  creditsAmount   Int?     @map("credits_amount")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([stripeSessionId])
+}
+
+// Projects
+model Project {
+  id              String        @id @default(cuid())
+  userId          String        @map("user_id")
+  name            String
+  description     String?
+  address         String?
+  municipality    String?
+  departement     String?
+  citycode        String?
+  coordinates     String?       // JSON: {lat, lng}
+  parcelIds       String        @default("") @map("parcel_ids")
+  parcelArea      Float?        @map("parcel_area")
+  parcelGeometry  String?       @map("parcel_geometry") // GeoJSON
+  northAngle      Float?        @map("north_angle")    // degrees from cadastre
+  status          ProjectStatus @default(DRAFT)
+  projectType     String?       @map("project_type") // construction, extension, renovation
+  scale           String        @default("1:100")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  regulatoryAnalysis RegulatoryAnalysis?
+  sitePlanData      SitePlanData?
+  feasibilityReport FeasibilityReport?
+  documents         Document[]
+  protectedAreas    ProtectedArea[]
+  descriptiveStatement DescriptiveStatement?
+  terrainData       TerrainData?
+  elevationData     ElevationData[]
+  sectionData       SectionData[]
+}
+
+enum ProjectStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+}
+
+// Regulatory Analysis (PLU/PLUi, ABF, etc)
+model RegulatoryAnalysis {
+  id            String   @id @default(cuid())
+  projectId     String   @unique @map("project_id")
+  zoneType      String?  @map("zone_type")
+  pluDocumentId String?  @map("plu_document_id")
+  rawContent    String?  @map("raw_content")
+  aiAnalysis    Json     @map("ai_analysis")
+  constraints   Json?
+  pdfUrl        String?  @map("pdf_url")
+  protectedZones Json?   @map("protected_zones") // ABF, heritage, classified
+  analyzedAt    DateTime @default(now()) @map("analyzed_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Protected Areas (ABF, Heritage, etc)
+model ProtectedArea {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  type        String   // ABF, HERITAGE, CLASSIFIED, NATURA2000, FLOOD_ZONE
+  name        String
+  description String?
+  distance    Float?   // distance from parcel in meters
+  constraints Json?    // specific constraints for this area
+  sourceUrl   String?  @map("source_url")
+  detectedAt  DateTime @default(now()) @map("detected_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// Feasibility (questionnaire-based)
+model FeasibilityReport {
+  id          String   @id @default(cuid())
+  projectId   String   @unique @map("project_id")
+  questionnaireData Json @map("questionnaire_data")
+  isFeasible  Boolean  @map("is_feasible")
+  conditions  Json?
+  adaptations Json?    // suggested adaptations
+  report      String?
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Site Plan / Drawing Editor data
+model SitePlanData {
+  id            String   @id @default(cuid())
+  projectId     String   @unique @map("project_id")
+  canvasData    Json     @map("canvas_data")
+  elements      Json?    // named elements with labels
+  footprintExisting Float? @map("footprint_existing")
+  footprintProjected Float? @map("footprint_projected")
+  footprintMax  Float?   @map("footprint_max")
+  surfaceAreas  Json?    @map("surface_areas") // by type: green, gravel, concrete, asphalt
+  vrdNetworks   Json?    @map("vrd_networks") // utility networks
+  northAngle    Float?   @map("north_angle")
+  terrainData   Json?    @map("terrain_data")
+  complianceResults Json? @map("compliance_results") // real-time compliance
+  building3D      Json?   @map("building_3d") // simplified 3D model: width, depth, wallHeights, roof
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Terrain / Altimetry data
+model TerrainData {
+  id            String   @id @default(cuid())
+  projectId     String   @unique @map("project_id")
+  elevationPoints Json   @map("elevation_points") // [{x, y, z}]
+  sectionLines  Json?    @map("section_lines") // defined section lines
+  terrainModel  Json?    @map("terrain_model") // 3D mesh data
+  profiles      Json?    // generated terrain profiles
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Elevation drawings
+model ElevationData {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  facade        String   // north, south, east, west
+  wallHeights   Json     @map("wall_heights")
+  roofData      Json?    @map("roof_data")
+  openings      Json?    // windows, doors
+  materials     Json?
+  canvasData    Json?    @map("canvas_data")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// Section drawings
+model SectionData {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  name          String
+  sectionLine   Json     @map("section_line") // start and end points
+  groundProfile Json?    @map("ground_profile")
+  buildingCut   Json?    @map("building_cut")
+  canvasData    Json?    @map("canvas_data")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// Descriptive Statement (notice descriptive)
+model DescriptiveStatement {
+  id            String   @id @default(cuid())
+  projectId     String   @unique @map("project_id")
+  answers       Json     // questionnaire answers
+  generatedText String?  @map("generated_text")
+  sections      Json?    // structured sections of the statement
+  status        String   @default("draft") // draft, generated, finalized
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// Generated documents
+model Document {
+  id          String       @id @default(cuid())
+  projectId   String       @map("project_id")
+  type        DocumentType @map("type")
+  name        String
+  fileUrl     String?      @map("file_url")
+  fileData    String?      @map("file_data") // base64 for local storage
+  metadata    Json?
+  creditsUsed Int          @default(0) @map("credits_used")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([type])
+}
+
+enum DocumentType {
+  LOCATION_PLAN
+  SITE_PLAN
+  SECTION
+  ELEVATION
+  LANDSCAPE_INSERTION
+  DESCRIPTIVE_STATEMENT
+  FULL_PACKAGE
+}
