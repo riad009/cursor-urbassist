@@ -9,6 +9,7 @@ export default function DeveloperPage() {
   const { user } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -18,6 +19,7 @@ export default function DeveloperPage() {
     setLoading(true);
     setError("");
     setResult(null);
+    setAnalysis(null);
     try {
       const formData = new FormData();
       formData.append("image", file);
@@ -28,6 +30,7 @@ export default function DeveloperPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       setResult(data.imageUrl);
+      setAnalysis(data.analysis || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
     }
@@ -103,14 +106,24 @@ export default function DeveloperPage() {
             </button>
           </form>
 
-          {result && (
-            <div className="mt-8 p-4 rounded-xl bg-slate-900/50">
-              <p className="text-sm text-slate-400 mb-2">Result</p>
-              <img
-                src={result}
-                alt="Generated visual"
-                className="max-w-full rounded-lg border border-white/10"
-              />
+          {(result || analysis) && (
+            <div className="mt-8 space-y-4">
+              {result && (
+                <div className="p-4 rounded-xl bg-slate-900/50">
+                  <p className="text-sm text-slate-400 mb-2">Result</p>
+                  <img
+                    src={result}
+                    alt="Generated visual"
+                    className="max-w-full rounded-lg border border-white/10"
+                  />
+                </div>
+              )}
+              {analysis && (
+                <div className="p-4 rounded-xl bg-slate-900/50">
+                  <p className="text-sm text-slate-400 mb-2">AI Analysis & Recommendations</p>
+                  <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans">{analysis}</pre>
+                </div>
+              )}
             </div>
           )}
         </div>

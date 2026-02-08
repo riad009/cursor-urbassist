@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, HARDCODED_USER_ID } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateImage, isImageGenerationEnabled } from "@/lib/imageGeneration";
 
@@ -133,9 +133,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Deduct credits
+    // Deduct credits (skip DB for hardcoded demo user)
     const cost = 5;
-    if (user.credits >= cost) {
+    if (user.id !== HARDCODED_USER_ID && user.credits >= cost) {
       await prisma.user.update({
         where: { id: user.id },
         data: { credits: { decrement: cost } },

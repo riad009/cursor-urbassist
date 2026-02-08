@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, HARDCODED_USER_ID } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
@@ -31,12 +31,47 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (STRIPE_SECRET) {
-        // Real Stripe integration
-        const Stripe = (await import("stripe")).default;
-        const stripe = new Stripe(STRIPE_SECRET);
+      if (!STRIPE_SECRET) {
+        // Demo mode: directly add credits when Stripe is not configured
+        if (user.id === HARDCODED_USER_ID) {
+          return NextResponse.json({
+            success: true,
+            credits: user.credits + pkg.credits,
+            message: `${pkg.credits} credits added (demo account - register to persist credits)`,
+          });
+        }
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { credits: { increment: pkg.credits } },
+        });
 
-        const session = await stripe.checkout.sessions.create({
+        await prisma.creditTransaction.create({
+          data: {
+            userId: user.id,
+            amount: pkg.credits,
+            type: "PURCHASE",
+            description: `Purchased ${pkg.credits} credits (demo mode)`,
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          credits: user.credits + pkg.credits,
+          message: `${pkg.credits} credits added (demo mode - set STRIPE_SECRET_KEY to enable real payments)`,
+        });
+      }
+
+      // Real Stripe integration (requires registered user in DB)
+      if (user.id === HARDCODED_USER_ID) {
+        return NextResponse.json(
+          { error: "Checkout requires a registered account. Please register or sign in with a real account." },
+          { status: 400 }
+        );
+      }
+      const Stripe = (await import("stripe")).default;
+      const stripe = new Stripe(STRIPE_SECRET);
+
+      const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           line_items: [
             {
@@ -74,28 +109,6 @@ export async function POST(request: NextRequest) {
         });
 
         return NextResponse.json({ url: session.url });
-      }
-
-      // Demo mode: directly add credits
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { credits: { increment: pkg.credits } },
-      });
-
-      await prisma.creditTransaction.create({
-        data: {
-          userId: user.id,
-          amount: pkg.credits,
-          type: "PURCHASE",
-          description: `Purchased ${pkg.credits} credits (demo mode)`,
-        },
-      });
-
-      return NextResponse.json({
-        success: true,
-        credits: user.credits + pkg.credits,
-        message: `${pkg.credits} credits added (demo mode - no payment required)`,
-      });
     }
 
     if (type === "subscription") {
@@ -111,7 +124,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      if (plan.stripePriceId && !STRIPE_SECRET) {
+        return NextResponse.json(
+          { error: "Stripe is not configured. Set STRIPE_SECRET_KEY to enable subscription payments." },
+          { status: 503 }
+        );
+      }
+
       if (STRIPE_SECRET && plan.stripePriceId) {
+        if (user.id === HARDCODED_USER_ID) {
+          return NextResponse.json(
+            { error: "Checkout requires a registered account. Please register or sign in with a real account." },
+            { status: 400 }
+          );
+        }
         const Stripe = (await import("stripe")).default;
         const stripe = new Stripe(STRIPE_SECRET);
 
@@ -131,7 +157,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ url: session.url });
       }
 
-      // Demo mode: create subscription directly
+      // Demo mode: no Stripe session (missing STRIPE_SECRET_KEY or plan.stripePriceId)
+      const whyNoStripe = !STRIPE_SECRET
+        ? "Set STRIPE_SECRET_KEY in .env and add a Stripe Price ID to this plan in Admin."
+        : "Add a Stripe Price ID to this plan in Admin (Plans → edit plan → Stripe Price ID).";
+      if (user.id === HARDCODED_USER_ID) {
+        return NextResponse.json({
+          success: true,
+          message: `Subscribed to ${plan.name} (demo). To open Stripe checkout: ${whyNoStripe}`,
+          credits: user.credits + plan.creditsPerMonth,
+        });
+      }
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 1);
 
@@ -160,7 +196,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        message: `Subscribed to ${plan.name} (demo mode)`,
+        message: `Subscribed to ${plan.name} (demo mode). To open Stripe checkout: ${whyNoStripe}`,
         credits: user.credits + plan.creditsPerMonth,
       });
     }
@@ -168,7 +204,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid type" }, { status: 400 });
   } catch (error) {
     console.error("Checkout error:", error);
-    return NextResponse.json({ error: "Checkout failed" }, { status: 500 });
+    const message =
+      error && typeof error === "object" && "message" in error
+        ? String((error as { message: unknown }).message)
+        : "Checkout failed";
+    return NextResponse.json(
+      { error: message.startsWith("Checkout") ? message : `Checkout failed: ${message}` },
+      { status: 500 }
+    );
   }
 }
 

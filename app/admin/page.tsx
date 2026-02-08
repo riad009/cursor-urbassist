@@ -65,6 +65,7 @@ export default function AdminPage() {
   const [showAddPlan, setShowAddPlan] = useState(false);
   const [newPlan, setNewPlan] = useState({ name: "", slug: "", description: "", priceMonthly: 9.9, creditsPerMonth: 20, stripePriceId: "" });
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [syncingStripe, setSyncingStripe] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -180,6 +181,27 @@ export default function AdminPage() {
       setPlans((list.plans || []).filter((p: Plan) => p.isActive !== false));
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed" });
+    }
+  };
+
+  const syncPlansToStripe = async () => {
+    setMessage(null);
+    setSyncingStripe(true);
+    try {
+      const res = await fetch("/api/stripe/sync-prices", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error || "Sync failed" });
+        return;
+      }
+      setMessage({ type: "success", text: data.message || "Plans synced to Stripe." });
+      const list = await fetch("/api/plans?all=true").then((r) => r.json());
+      setAdminPlans(list.plans || []);
+      setPlans((list.plans || []).filter((p: Plan) => p.isActive !== false));
+    } catch {
+      setMessage({ type: "error", text: "Sync failed" });
+    } finally {
+      setSyncingStripe(false);
     }
   };
 
@@ -398,15 +420,27 @@ export default function AdminPage() {
                 {user?.role === "ADMIN" && (
                   <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
                     <h3 className="text-lg font-semibold text-white mb-3">Manage subscription plans</h3>
-                    {!showAddPlan ? (
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {!showAddPlan ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowAddPlan(true)}
+                          className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 text-sm font-medium"
+                        >
+                          Add plan
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() => setShowAddPlan(true)}
-                        className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 text-sm font-medium"
+                        onClick={syncPlansToStripe}
+                        disabled={syncingStripe}
+                        className="px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
                       >
-                        Add plan
+                        {syncingStripe ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                        Sync plans to Stripe
                       </button>
-                    ) : (
+                    </div>
+                    {showAddPlan ? (
                       <form onSubmit={createPlan} className="space-y-3 max-w-md">
                         <input
                           placeholder="Name"
@@ -455,7 +489,7 @@ export default function AdminPage() {
                           <button type="button" onClick={() => setShowAddPlan(false)} className="px-4 py-2 rounded-xl bg-slate-700 text-slate-300 text-sm">Cancel</button>
                         </div>
                       </form>
-                    )}
+                    ) : null}
                     <div className="mt-4 space-y-2">
                       {adminPlans.map((plan) => (
                         <div key={plan.id} className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-slate-700/30">
@@ -568,6 +602,11 @@ export default function AdminPage() {
                         </>
                       )}
                     </button>
+                    {plan.priceMonthly > 0 && !plan.stripePriceId && (
+                      <p className="text-xs text-amber-400/90 mt-2 text-center">
+                        Add Stripe Price ID in Admin to open Stripe checkout
+                      </p>
+                    )}
                   </div>
                 ))}
                 </div>
