@@ -991,6 +991,14 @@ export default function EditorPage() {
           <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-xs font-medium">
             Scale {currentScale.label}
           </span>
+          <div className="h-6 w-px bg-white/10" />
+          <Link 
+            href="/facades" 
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors text-sm font-medium"
+          >
+            <Layers className="w-4 h-4" />
+            <span>Facades Editor</span>
+          </Link>
         </div>
 
         <div className="flex items-center gap-2">

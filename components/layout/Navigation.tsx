@@ -26,6 +26,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "from-blue-500 to-cyan-500" },
   { href: "/projects", label: "Projects", icon: FolderKanban, color: "from-violet-500 to-purple-500" },
   { href: "/editor", label: "Design Studio", icon: PenTool, color: "from-pink-500 to-rose-500" },
+  { href: "/facades", label: "Facades", icon: Building2, color: "from-cyan-500 to-blue-500" },
   { href: "/regulations", label: "AI Analysis", icon: FileText, color: "from-amber-500 to-orange-500" },
   { href: "/landscape", label: "Landscape", icon: Image, color: "from-emerald-500 to-teal-500" },
   { href: "/calculations", label: "Calculations", icon: Calculator, color: "from-indigo-500 to-blue-500" },
