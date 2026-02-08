@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, HARDCODED_USER_ID } from "@/lib/auth";
+import { getSession, HARDCODED_USER_ID, isUnrestrictedAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateImage, isImageGenerationEnabled } from "@/lib/imageGeneration";
 
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (user.role !== "DEVELOPER" && user.credits < 5) {
+  if (user.role !== "DEVELOPER" && user.role !== "ADMIN" && user.credits < 5) {
     return NextResponse.json(
       { error: "Insufficient credits. Need 5 credits per visual." },
       { status: 402 }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     if (GEMINI_API_KEY) {
       try {
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -133,9 +133,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Deduct credits (skip DB for hardcoded demo user)
+    // Deduct credits (skip for hardcoded demo user and admin)
     const cost = 5;
-    if (user.id !== HARDCODED_USER_ID && user.credits >= cost) {
+    if (!isUnrestrictedAdmin(user) && user.id !== HARDCODED_USER_ID && user.credits >= cost) {
       await prisma.user.update({
         where: { id: user.id },
         data: { credits: { decrement: cost } },
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
       style: styleDesc,
       purpose: purposeDesc,
       creditsUsed: cost,
-      creditsRemaining: Math.max(0, user.credits - cost),
+      creditsRemaining: isUnrestrictedAdmin(user) ? user.credits : Math.max(0, user.credits - cost),
     });
   } catch (error) {
     console.error("Developer visual:", error);

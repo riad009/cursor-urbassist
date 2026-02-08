@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -92,8 +92,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Deduct credits
-    if (user.credits >= 2) {
+    // Deduct credits (skip for admin)
+    if (!isUnrestrictedAdmin(user) && user.credits >= 2) {
       await prisma.user.update({
         where: { id: user.id },
         data: { credits: { decrement: 2 } },

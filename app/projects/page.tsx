@@ -30,6 +30,8 @@ interface Project {
   _count?: { documents: number };
 }
 
+const DOSSIER_STORAGE_KEY = "urbassist_dossier";
+
 export default function ProjectsPage() {
   const { user, loading: authLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -53,12 +55,41 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (!user) return;
-    fetch("/api/projects")
+    fetch("/api/projects", { credentials: "include" })
       .then((r) => r.json())
       .then((data) => setProjects(data.projects || []))
       .catch(() => setProjects([]))
       .finally(() => setLoading(false));
   }, [user]);
+
+  // Pre-fill from dossier flow (Step 0 → 1 → 2 → projects)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const fromDossier = new URLSearchParams(window.location.search).get("from") === "dossier";
+    if (!fromDossier) return;
+    try {
+      const raw = sessionStorage.getItem(DOSSIER_STORAGE_KEY);
+      if (!raw) return;
+      const dossier = JSON.parse(raw) as { step1?: { description?: string; projectType?: string }; step2?: { address?: string; city?: string; postcode?: string; coordinates?: number[]; parcels?: { id: string; section: string; number: string; area: number }[]; parcelIds?: string[]; pluZone?: string | null; pluName?: string | null } };
+      const step2 = dossier?.step2;
+      if (!step2?.address || !step2?.coordinates) return;
+      setShowNewModal(true);
+      setNewAddress(step2.address);
+      setSelectedAddress({
+        label: step2.address,
+        city: step2.city || "",
+        postcode: step2.postcode || "",
+        coordinates: step2.coordinates,
+      });
+      if (Array.isArray(step2.parcels)) setParcels(step2.parcels);
+      if (Array.isArray(step2.parcelIds)) setSelectedParcelIds(step2.parcelIds);
+      if (step2.pluZone != null || step2.pluName != null) setPluInfo({ zoneType: step2.pluZone ?? null, zoneName: step2.pluName ?? null });
+      const step1 = dossier?.step1;
+      if (step1?.description && typeof step1.description === "string") setNewName(step1.description.slice(0, 80));
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const searchAddress = useCallback(() => {
     if (!addressQuery.trim() || addressQuery.length < 4) {
@@ -285,19 +316,27 @@ export default function ProjectsPage() {
                     <span>{project._count.documents} documents</span>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/projects/${project.id}`}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-500/20 text-blue-400 font-medium hover:bg-blue-500/30"
+                    >
+                      Dashboard <ArrowRight className="w-4 h-4" />
+                    </Link>
+                    <button
+                      onClick={() => deleteProject(project.id)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                   <Link
                     href={`/editor?project=${project.id}`}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-500/20 text-blue-400 font-medium hover:bg-blue-500/30"
+                    className="text-center text-sm text-slate-500 hover:text-slate-300 py-1"
                   >
-                    Open <ArrowRight className="w-4 h-4" />
+                    Open site plan →
                   </Link>
-                  <button
-                    onClick={() => deleteProject(project.id)}
-                    className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
             ))}

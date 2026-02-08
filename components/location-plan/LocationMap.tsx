@@ -11,6 +11,8 @@ interface LocationMapProps {
   baseLayer: "street" | "satellite" | "ign";
   cadastralOverlay: boolean;
   onZoomChange: (zoom: number) => void;
+  selectedParcelIds?: string[];
+  onParcelSelect?: (ids: string[]) => void;
   className?: string;
 }
 

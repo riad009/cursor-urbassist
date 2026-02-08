@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -11,7 +11,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import type { FeatureCollection, Feature } from "geojson";
+import type { FeatureCollection, Feature, GeoJsonObject } from "geojson";
 import "leaflet/dist/leaflet.css";
 
 // Fix Leaflet default icon in Next.js (webpack doesn't resolve default paths)
@@ -52,12 +52,21 @@ function MapController({
   return null;
 }
 
+interface ParcelFeatureProperties {
+  id?: string;
+  section?: string;
+  number?: string;
+  area?: number;
+}
+
 export function LocationMapInner({
   center,
   zoom,
   baseLayer,
   cadastralOverlay,
   onZoomChange,
+  selectedParcelIds = [],
+  onParcelSelect,
   className = "",
 }: {
   center: { lat: number; lng: number } | null;
@@ -65,6 +74,8 @@ export function LocationMapInner({
   baseLayer: "street" | "satellite" | "ign";
   cadastralOverlay: boolean;
   onZoomChange: (zoom: number) => void;
+  selectedParcelIds?: string[];
+  onParcelSelect?: (ids: string[]) => void;
   className?: string;
 }) {
   const [cadastralData, setCadastralData] = useState<FeatureCollection | null>(null);
@@ -84,10 +95,21 @@ export function LocationMapInner({
         const parcels = d.parcels || [];
         const features = parcels
           .filter((p: { geometry?: unknown }) => p.geometry)
-          .map((p: { geometry: Feature["geometry"] }): Feature => ({
+          .map((p: {
+            id?: string;
+            section?: string;
+            number?: string;
+            area?: number;
+            geometry: Feature["geometry"];
+          }): Feature<GeoJsonObject, ParcelFeatureProperties> => ({
             type: "Feature",
             geometry: p.geometry,
-            properties: {},
+            properties: {
+              id: p.id,
+              section: p.section,
+              number: p.number,
+              area: p.area,
+            },
           }));
         if (features.length > 0) {
           setCadastralData({
@@ -100,6 +122,19 @@ export function LocationMapInner({
       })
       .catch(() => setCadastralData(null));
   }, [center, cadastralOverlay]);
+
+  const handleParcelClick = useCallback(
+    (featureId: string | undefined) => {
+      if (!featureId || !onParcelSelect) return;
+      const id = featureId;
+      const isSelected = selectedParcelIds.includes(id);
+      const next = isSelected
+        ? selectedParcelIds.filter((x) => x !== id)
+        : [...selectedParcelIds, id];
+      onParcelSelect(next);
+    },
+    [selectedParcelIds, onParcelSelect]
+  );
 
   const streetUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
   const satelliteUrl =
@@ -135,8 +170,31 @@ export function LocationMapInner({
         {center && <Marker position={[center.lat, center.lng]} />}
         {cadastralData && cadastralOverlay && (
           <GeoJSON
-            data={cadastralData}
-            style={{ color: "#3b82f6", weight: 2, fillOpacity: 0.15 }}
+            data={cadastralData as GeoJsonObject}
+            style={(feature) => {
+              const id = feature?.properties?.id;
+              const selected = id && selectedParcelIds.includes(id);
+              return {
+                color: selected ? "#1d4ed8" : "#3b82f6",
+                weight: selected ? 3 : 2,
+                fillColor: selected ? "#2563eb" : "#93c5fd",
+                fillOpacity: selected ? 0.35 : 0.15,
+              };
+            }}
+            onEachFeature={(feature, layer) => {
+              const id = feature?.properties?.id;
+              layer.on({
+                click: () => handleParcelClick(id),
+                mouseover: function (this: L.GeoJSON) {
+                  const path = (this as unknown as { _path?: HTMLElement })._path;
+                  if (path) path.style.cursor = "pointer";
+                },
+                mouseout: function (this: L.GeoJSON) {
+                  const path = (this as unknown as { _path?: HTMLElement })._path;
+                  if (path) path.style.cursor = "";
+                },
+              });
+            }}
           />
         )}
         <MapController center={center} zoom={zoom} onZoomChange={onZoomChange} />

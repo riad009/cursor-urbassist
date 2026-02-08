@@ -1,38 +1,50 @@
-# Vercel deployment
+# Vercel + Neon deployment
 
-**Sign-in works on localhost but not on Vercel?** The app needs a PostgreSQL database and env vars on Vercel. Until `DATABASE_URL` (and optionally `JWT_SECRET`) are set in the project’s Environment Variables, login and registration will fail on the live site.
+This app uses **PostgreSQL on Neon** and is deployed on **Vercel**. No extra Neon features (e.g. Neon Auth) are required.
 
-## Required environment variables
+## 1. Create a Neon project and get connection strings
 
-Set these in **Vercel → Your Project → Settings → Environment Variables**:
+1. Go to [console.neon.tech](https://console.neon.tech) and sign in.
+2. Create a new project (or use an existing one).
+3. Open the project → **Connection details** (or **Dashboard** → connection info).
+4. You need **two** connection strings:
+   - **Pooled connection** — host usually contains `-pooler` (e.g. `ep-xxx-pooler.region.aws.neon.tech`). Use this for **`DATABASE_URL`** (runtime/app).
+   - **Direct connection** — same URL but **without** `-pooler` in the host. Use this for **`DIRECT_URL`** (Prisma migrations only).
 
-| Variable        | Description |
-|----------------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string (e.g. Neon, Vercel Postgres, Supabase). **Required** for login/register and all app features. |
-| `JWT_SECRET`   | Secret for auth tokens. Use a long random string in production (e.g. `openssl rand -base64 32`). |
+Copy both; you’ll set them in Vercel and in your local `.env` / `.env.local`.
 
-## Neon + Vercel checklist
+## 2. Environment variables on Vercel
 
-1. **Get the Neon connection string**
-   - In [Neon](https://console.neon.tech): open your project → Dashboard.
-   - Under “Get connected to your new database”, copy the **connection string** (starts with `postgresql://...`).
-   - Prefer the **pooled** connection string if shown (e.g. `-pooler` in the host); it works better with serverless.
+In **Vercel → Your Project → Settings → Environment Variables**, set:
 
-2. **Add env vars in Vercel**
-   - Vercel → your project → **Settings** → **Environment Variables**.
-   - Add `DATABASE_URL` = your Neon connection string (Production, Preview, Development as needed).
-   - Add `JWT_SECRET` = a long random string (recommended for production).
+| Variable           | Description |
+|--------------------|-------------|
+| `DATABASE_URL`     | Neon **pooled** connection string (host with `-pooler`). |
+| `DIRECT_URL`       | Neon **direct** connection string (no `-pooler`), for migrations. |
+| `NEXTAUTH_SECRET`  | Long random string (e.g. `openssl rand -base64 32`). |
+| `AUTH_SECRET`      | Same or another long random string. |
+| `NEXTAUTH_URL`     | Your app’s **production** URL (e.g. `https://your-app.vercel.app`). |
+| `AUTH_URL`         | Same as `NEXTAUTH_URL` for production. |
 
-3. **Create tables in Neon (one-time)**
-   - From your project folder, run (replace with your real Neon URL):
+For production, **`NEXTAUTH_URL` and `AUTH_URL` must use your real Vercel domain**, not `localhost`.
+
+Add any optional vars you use: `GEMINI_API_KEY`, Stripe keys, `NEXT_PUBLIC_*`, etc.
+
+## 3. One-time local setup (before first deploy)
+
+1. Copy `.env.example` to `.env` and `.env.local`.
+2. Fill in your **real** Neon URLs and secrets in both:
+   - `DATABASE_URL` = Neon pooled connection string
+   - `DIRECT_URL` = Neon direct connection string
+   - `NEXTAUTH_SECRET`, `AUTH_SECRET`, and optionally `NEXTAUTH_URL` / `AUTH_URL` for local (e.g. `http://localhost:3000`)
+3. Apply the schema and seed the database once:
    ```bash
-   set DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
    npx prisma db push
+   npm run db:seed
    ```
-   - Or in PowerShell: `$env:DATABASE_URL="postgresql://..."; npx prisma db push`
-   - This creates the `User` table and the rest of the schema in Neon.
 
-4. **Redeploy**
-   - Vercel → **Deployments** → … on latest → **Redeploy**, or push a new commit so a new build uses the new env vars.
+Do **not** commit `.env` or `.env.local`; only the example file is committed.
 
-After this, login and registration on the Vercel URL should work. You do **not** need to enable “Neon Auth” in the Neon dashboard; this app uses its own auth with your Neon database.
+## 4. Deploy on Vercel
+
+After setting the env vars in Vercel (step 2), deploy (or redeploy). The build will use `DATABASE_URL` at runtime. Run `npx prisma db push` and `npm run db:seed` from your machine (with `DATABASE_URL` and `DIRECT_URL` in `.env`) once so your Neon database has the schema and seed data; no extra Neon features are required.

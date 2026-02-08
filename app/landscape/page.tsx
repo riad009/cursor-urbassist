@@ -31,6 +31,103 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** Simple Markdown-style renderer for the integration report (## ### ** --- - list) */
+function ReportContent({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/);
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      out.push(
+        <h2 key={i} className="text-lg font-bold text-white mt-6 mb-2 first:mt-0">
+          {trimmed.slice(3)}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      out.push(
+        <h3 key={i} className="text-base font-semibold text-violet-200 mt-4 mb-1.5">
+          {trimmed.slice(4)}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("---")) {
+      out.push(<hr key={i} className="border-slate-500/50 my-4" />);
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      const bullets: string[] = [];
+      while (i < lines.length && (lines[i].trim().startsWith("- ") || lines[i].trim().startsWith("* "))) {
+        bullets.push(lines[i].trim().slice(2));
+        i++;
+      }
+      out.push(
+        <ul key={i} className="list-disc list-inside space-y-1 my-2 text-slate-300 text-sm">
+          {bullets.map((b, j) => (
+            <li key={j}>{renderInline(b)}</li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+    const numMatch = trimmed.match(/^\d+\.\s+(.*)/);
+    if (numMatch) {
+      const numbered: string[] = [];
+      while (i < lines.length && lines[i].trim().match(/^\d+\.\s+/)) {
+        const m = lines[i].trim().match(/^\d+\.\s+(.*)/);
+        if (m) numbered.push(m[1]);
+        i++;
+      }
+      out.push(
+        <ol key={i} className="list-decimal list-inside space-y-1 my-2 text-slate-300 text-sm">
+          {numbered.map((n, j) => (
+            <li key={j}>{renderInline(n)}</li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+    out.push(
+      <p key={i} className="text-slate-300 text-sm leading-relaxed my-2">
+        {renderInline(trimmed)}
+      </p>
+    );
+    i++;
+  }
+  return <div className="space-y-0">{out}</div>;
+}
+
+function renderInline(str: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let remaining = str;
+  let key = 0;
+  while (remaining.length > 0) {
+    const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+    if (boldMatch && boldMatch.index !== undefined) {
+      if (boldMatch.index > 0) {
+        parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>);
+      }
+      parts.push(<strong key={key++} className="text-white font-semibold">{boldMatch[1]}</strong>);
+      remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
+    } else {
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+  }
+  return <>{parts}</>;
+}
+
 interface Layer {
   id: string;
   name: string;
@@ -72,6 +169,9 @@ export default function LandscapePage() {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [reportUnauthorized, setReportUnauthorized] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [geminiUsed, setGeminiUsed] = useState<boolean | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
 
   // Layers
   const [layers, setLayers] = useState<Layer[]>([
@@ -100,8 +200,11 @@ export default function LandscapePage() {
     };
     reader.readAsDataURL(file);
 
-    // Analyze photo with AI
+    // Analyze photo with AI (Gemini when GEMINI_API_KEY is set)
     setIsAnalyzing(true);
+    setAnalysisError(null);
+    setGeminiUsed(null);
+    setGeminiError(null);
     try {
       const formData = new FormData();
       formData.append("photo", file);
@@ -116,9 +219,23 @@ export default function LandscapePage() {
       const data = await res.json();
       if (data.success && data.photo?.analysis) {
         setAnalysisResult(data.photo.analysis);
+        setAnalysisError(null);
+        setGeminiUsed(data.geminiUsed === true);
+        setGeminiError(data.geminiError ? String(data.geminiError) : null);
+      } else if (res.status === 401) {
+        setAnalysisError("Sign in to use AI analysis and reports.");
+        setGeminiUsed(null);
+        setGeminiError(null);
+      } else {
+        setAnalysisError(data.error || "Analysis request failed.");
+        setGeminiUsed(null);
+        setGeminiError(null);
       }
     } catch (error) {
       console.error("Analysis error:", error);
+      setAnalysisError("Request failed. Check your connection and try again.");
+      setGeminiUsed(null);
+      setGeminiError(null);
     }
     setIsAnalyzing(false);
   }, []);
@@ -349,7 +466,10 @@ export default function LandscapePage() {
                     Drop your photo here, click to browse, or use camera
                   </p>
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mt-3">
+                  The construction must be visible or integrable in the photo. Prefer a shot from public space, or from sufficient distance.
+                </p>
+                <p className="text-xs text-slate-500 mt-2">
                   Supports JPG, PNG, WebP up to 25MB
                 </p>
               </div>
@@ -388,7 +508,10 @@ export default function LandscapePage() {
                 </ul>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <p className="text-xs text-slate-500 mt-2">
+                Required: <strong className="text-slate-400">Near environment</strong> and <strong className="text-slate-400">Distant environment</strong> photos improve the integration report.
+              </p>
+              <div className="grid grid-cols-2 gap-4 mt-3">
                 <label className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center cursor-pointer hover:bg-slate-700/30 transition-colors">
                   <input
                     type="file"
@@ -401,6 +524,7 @@ export default function LandscapePage() {
                   <p className="text-sm text-slate-300 font-medium">
                     Use Camera
                   </p>
+                  <p className="text-xs text-slate-500 mt-1">Near or distant</p>
                 </label>
                 <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center">
                   <Grid3X3 className="w-8 h-8 text-slate-500 mx-auto mb-2" />
@@ -521,12 +645,38 @@ export default function LandscapePage() {
                 )}
 
                 {analysisResult && !isAnalyzing && (
-                  <div className="absolute top-4 left-4 px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-lg border border-emerald-500/30 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs text-emerald-400 font-medium">
-                      {analysisResult.ambiance || "Analyzed"} |
-                      Scale: {analysisResult.suggestedScale?.toFixed(1) || "1.0"}x
-                    </span>
+                  <div className="absolute top-4 left-4 flex flex-col gap-2">
+                    <div className="px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-lg border border-emerald-500/30 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs text-emerald-400 font-medium">
+                        {analysisResult.ambiance || "Analyzed"} |
+                        Scale: {analysisResult.suggestedScale?.toFixed(1) || "1.0"}x
+                      </span>
+                    </div>
+                    {geminiUsed === true && (
+                      <div className="px-3 py-1.5 rounded-full bg-blue-500/20 backdrop-blur-lg border border-blue-500/30 text-xs text-blue-300 font-medium">
+                        Gemini AI analysis applied
+                      </div>
+                    )}
+                    {geminiUsed === false && (
+                      <div className="px-3 py-1.5 rounded-lg bg-amber-500/20 backdrop-blur-lg border border-amber-500/30 text-xs text-amber-200 max-w-xs">
+                        {geminiError || "Set GEMINI_API_KEY in .env and restart the server for AI-powered analysis."}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {analysisError && !isAnalyzing && (
+                  <div className="absolute top-4 left-4 right-4 px-3 py-2 rounded-xl bg-amber-500/20 backdrop-blur-lg border border-amber-500/30 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs text-amber-200 font-medium">{analysisError}</span>
+                    {analysisError.includes("Sign in") && (
+                      <Link
+                        href="/login"
+                        className="text-xs font-semibold text-amber-300 hover:text-amber-200 underline"
+                      >
+                        Sign in
+                      </Link>
+                    )}
                   </div>
                 )}
 
@@ -575,19 +725,32 @@ export default function LandscapePage() {
               {/* Integration Report */}
               {integrationReport && (
                 <div className={cn(
-                  "p-5 rounded-2xl border",
+                  "rounded-2xl border overflow-hidden",
                   reportUnauthorized
                     ? "bg-amber-500/10 border-amber-500/20"
-                    : "bg-gradient-to-br from-violet-500/10 to-purple-500/10 border-violet-500/20"
+                    : "bg-slate-900/80 border-white/10 shadow-lg"
                 )}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <FileText className={cn("w-5 h-5", reportUnauthorized ? "text-amber-400" : "text-violet-400")} />
-                    <h3 className="text-sm font-semibold text-white">
-                      AI Landscape Integration Report
-                    </h3>
+                  <div className={cn(
+                    "flex items-center gap-3 px-5 py-4 border-b",
+                    reportUnauthorized ? "border-amber-500/20 bg-amber-500/5" : "border-white/10 bg-violet-500/10"
+                  )}>
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center",
+                      reportUnauthorized ? "bg-amber-500/20" : "bg-violet-500/20"
+                    )}>
+                      <FileText className={cn("w-5 h-5", reportUnauthorized ? "text-amber-400" : "text-violet-400")} />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white">
+                        AI Landscape Integration Report
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Analysis and recommendations for your site
+                      </p>
+                    </div>
                   </div>
                   {reportUnauthorized ? (
-                    <div className="text-sm text-slate-300 space-y-3">
+                    <div className="p-5 text-sm text-slate-300 space-y-3">
                       <p>{integrationReport}</p>
                       <Link
                         href="/login"
@@ -597,8 +760,8 @@ export default function LandscapePage() {
                       </Link>
                     </div>
                   ) : (
-                    <div className="text-sm text-slate-300 whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
-                      {integrationReport}
+                    <div className="p-5 max-h-[420px] overflow-y-auto">
+                      <ReportContent text={integrationReport} />
                     </div>
                   )}
                 </div>
@@ -701,6 +864,17 @@ export default function LandscapePage() {
               {imageError && (
                 <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
                   <p className="text-xs text-amber-400">{imageError}</p>
+                </div>
+              )}
+
+              {analysisError && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-xs text-amber-400 mb-2">{analysisError}</p>
+                  {analysisError.includes("Sign in") && (
+                    <Link href="/login" className="text-xs font-medium text-amber-300 hover:text-amber-200 underline">
+                      Sign in to enable AI
+                    </Link>
+                  )}
                 </div>
               )}
 

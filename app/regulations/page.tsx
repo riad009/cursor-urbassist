@@ -26,6 +26,10 @@ import {
   MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  buildReportFromAnalysis,
+  saveReportToSession,
+} from "@/lib/regulatory-report";
 
 interface AnalysisResult {
   category: string;
@@ -34,6 +38,20 @@ interface AnalysisResult {
   value: string;
   requirement: string;
   recommendation?: string;
+  /** Where this rule comes from (e.g. PLU document, article reference) */
+  regulationSource?: string;
+  /** Zone label with full name (e.g. "UB - Zone Urbaine Mixte") */
+  zoneLabel?: string;
+  /** Full regulatory text or longer description */
+  fullRequirementText?: string;
+  /** How this applies to the project in plain language */
+  context?: string;
+  /** Legal/article reference if known */
+  articleReference?: string;
+  /** Numeric min/max for display (e.g. "5m", "12m") */
+  minValue?: string;
+  maxValue?: string;
+  unit?: string;
 }
 
 const mockAnalysis: AnalysisResult[] = [
@@ -42,48 +60,77 @@ const mockAnalysis: AnalysisResult[] = [
     title: "Maximum Building Height",
     status: "compliant",
     value: "8.5m",
-    requirement: "Max 10m allowed in zone UA",
-    recommendation: "Your project is within the allowed height limit.",
+    requirement: "Max 12m allowed in zone UB - Zone Urbaine Mixte",
+    recommendation: "Your project is within the allowed height limit. Height is measured from natural ground to the highest point of the roof (ridge or flat roof).",
+    regulationSource: "PLU – Règlement graphique et écrit, article hauteur",
+    zoneLabel: "UB - Zone Urbaine Mixte",
+    fullRequirementText: "La hauteur maximale des constructions est fixée à 12 mètres en zone UB. La hauteur est mesurée à partir du terrain naturel jusqu’au point le plus haut du bâtiment (faîte ou toit-terrasse). Les superstructures (cheminées, gaines) peuvent dépasser sous conditions.",
+    context: "Your building height (8.5 m) is below the 12 m limit for this zone. This leaves room for a two-storey building with a pitched roof.",
+    minValue: "0m",
+    maxValue: "12m",
+    unit: "m",
   },
   {
     category: "Setback",
     title: "Front Setback",
     status: "compliant",
     value: "5m",
-    requirement: "Min 4m required from road",
-    recommendation: "Compliant with local regulations.",
+    requirement: "Min 5m required from road",
+    recommendation: "Compliant with local regulations. The front setback is measured from the road boundary to the façade or to the projection of the roof overhang if it is included in the footprint.",
+    regulationSource: "PLU – Règlement des zones, alignement et recul",
+    zoneLabel: "UB - Zone Urbaine Mixte",
+    fullRequirementText: "Un recul minimal de 5 mètres par rapport à la limite séparative avec la voie publique est exigé en front de rue. Ce recul s’applique aux constructions et, selon le PLU, peut inclure les débords de toiture.",
+    context: "Your 5 m front setback meets the minimum. This distance applies from the road (voie) to the main façade or to the regulatory building line.",
+    minValue: "5m",
+    unit: "m",
   },
   {
     category: "Coverage",
     title: "Plot Coverage Ratio",
-    status: "warning",
-    value: "48%",
-    requirement: "Max 50% recommended",
-    recommendation: "Consider reducing coverage to leave margin for modifications.",
+    status: "compliant",
+    value: "40%",
+    requirement: "Max 40% allowed",
+    recommendation: "Within the allowed coverage. The ratio is the footprint (emprise au sol) divided by the parcel area.",
+    regulationSource: "PLU – Coefficient d’emprise au sol (CES)",
+    zoneLabel: "UB - Zone Urbaine Mixte",
+    fullRequirementText: "Le coefficient d’emprise au sol (CES) est fixé à 40 % maximum. L’emprise au sol comprend les constructions couvertes ou découvertes, sous le débord des toitures si le PLU le prévoit.",
+    context: "Your current footprint uses 40% of the parcel, which is at the maximum allowed. Any extension will require reducing another built surface or staying under the total limit.",
+    maxValue: "40%",
+    unit: "%",
   },
   {
     category: "Parking",
     title: "Parking Spaces",
-    status: "compliant",
-    value: "3 spaces",
-    requirement: "Min 2 spaces required for this area",
-    recommendation: "Exceeds minimum requirement.",
+    status: "info",
+    value: "1 place per 60m² of floor area",
+    requirement: "1 place per 60m² of floor area",
+    recommendation: "Verify that the number of spaces matches the total floor area of your project. Each space must be at least 2.50 m × 5.00 m.",
+    regulationSource: "PLU – Règlement stationnement",
+    fullRequirementText: "Une place de stationnement est exigée par tranche de 60 m² de surface de plancher créée ou réhabilitée. Les places doivent être sur la parcelle ou à proximité selon les dispositions du PLU.",
+    context: "For a 120 m² floor area you need at least 2 spaces. The plan de masse must show the parking layout with the required dimensions.",
   },
   {
     category: "Green Space",
     title: "Vegetated Area",
-    status: "violation",
-    value: "15%",
-    requirement: "Min 20% required",
-    recommendation: "Add more landscaping or reduce built area.",
+    status: "info",
+    value: "Minimum 20% of parcel area must be landscaped",
+    requirement: "Minimum 20% of parcel area must be landscaped",
+    recommendation: "Plan landscaping accordingly. Semi-permeable and vegetated surfaces count toward this minimum; impermeable surfaces do not.",
+    regulationSource: "PLU – Espaces verts et perméabilité",
+    zoneLabel: "UB - Zone Urbaine Mixte",
+    fullRequirementText: "Au moins 20 % de la surface de la parcelle doit être en espaces verts ou végétalisés. Les revêtements semi-perméables (graviers, dalles gazon) peuvent être comptabilisés selon le PLU.",
+    context: "Your site plan should show the vegetated and semi-permeable areas and confirm that they represent at least 20% of the parcel.",
   },
   {
     category: "Distance",
-    title: "Distance to Boundary",
-    status: "compliant",
-    value: "3.5m",
-    requirement: "Min 3m from property line",
-    recommendation: "Compliant with boundary requirements.",
+    title: "Architectural Requirements",
+    status: "info",
+    value: "4 constraints",
+    requirement: "Roof pitch between 30-45 degrees, Natural materials for facades (stone, wood, render), Maximum 2 colors for exterior walls, Traditional window proportions required",
+    recommendation: "Review all architectural constraints before finalising façades and roof design.",
+    regulationSource: "PLU – Règles de composition et d’aspect",
+    fullRequirementText: "Pente de toiture entre 30 et 45° ; matériaux naturels pour les façades (pierre, bois, enduit) ; maximum 2 couleurs pour les murs extérieurs ; proportions des ouvertures conformes au caractère local.",
+    context: "These rules apply to the visible appearance of the building. The insertion paysagère and elevations will be checked against these requirements.",
   },
 ];
 
@@ -101,6 +148,7 @@ const categoryIcons: Record<string, React.ElementType> = {
   Parking: Car,
   "Green Space": Trees,
   Distance: Ruler,
+  Zone: MapPin,
 };
 
 export default function RegulationsPage() {
@@ -211,31 +259,42 @@ export default function RegulationsPage() {
       const data = await response.json();
       
       if (data.success && data.analysis) {
-        // Transform API response to display format
+        const zoneLabel = data.analysis.zoneClassification || undefined;
+        const regulationSource = "Extracted from uploaded PLU document";
         const transformedResults: AnalysisResult[] = [];
-        
+
         if (data.analysis.maxHeight) {
+          const m = data.analysis.maxHeight;
           transformedResults.push({
             category: "Height",
             title: "Maximum Building Height",
             status: "compliant",
-            value: `${data.analysis.maxHeight}m`,
-            requirement: `Max ${data.analysis.maxHeight}m allowed in zone ${data.analysis.zoneClassification || 'N/A'}`,
-            recommendation: "Within the allowed height limit.",
+            value: `${m}m`,
+            requirement: `Max ${m}m allowed in zone ${zoneLabel || "N/A"}`,
+            recommendation: "Within the allowed height limit. Height is measured from natural ground to the highest point of the roof.",
+            regulationSource,
+            zoneLabel,
+            maxValue: `${m}m`,
+            unit: "m",
           });
         }
-        
+
         if (data.analysis.setbacks) {
+          const front = data.analysis.setbacks.front;
           transformedResults.push({
             category: "Setback",
             title: "Front Setback",
             status: "compliant",
-            value: `${data.analysis.setbacks.front}m`,
-            requirement: `Min ${data.analysis.setbacks.front}m required from road`,
-            recommendation: "Compliant with local regulations.",
+            value: `${front}m`,
+            requirement: `Min ${front}m required from road`,
+            recommendation: "Compliant with local regulations. The front setback is measured from the road boundary to the façade.",
+            regulationSource,
+            zoneLabel,
+            minValue: `${front}m`,
+            unit: "m",
           });
         }
-        
+
         if (data.analysis.maxCoverageRatio) {
           const ratio = data.analysis.maxCoverageRatio * 100;
           transformedResults.push({
@@ -244,10 +303,14 @@ export default function RegulationsPage() {
             status: ratio > 45 ? "warning" : "compliant",
             value: `${ratio}%`,
             requirement: `Max ${ratio}% allowed`,
-            recommendation: data.analysis.recommendations?.[0] || "Check coverage requirements.",
+            recommendation: data.analysis.recommendations?.[0] || "The ratio is footprint (emprise au sol) divided by parcel area.",
+            regulationSource,
+            zoneLabel,
+            maxValue: `${ratio}%`,
+            unit: "%",
           });
         }
-        
+
         if (data.analysis.parkingRequirements) {
           transformedResults.push({
             category: "Parking",
@@ -255,10 +318,12 @@ export default function RegulationsPage() {
             status: "info",
             value: data.analysis.parkingRequirements,
             requirement: data.analysis.parkingRequirements,
-            recommendation: "Verify parking allocation.",
+            recommendation: "Verify that the number of spaces matches your floor area. Each space at least 2.50 m × 5.00 m.",
+            regulationSource,
+            zoneLabel,
           });
         }
-        
+
         if (data.analysis.greenSpaceRequirements) {
           transformedResults.push({
             category: "Green Space",
@@ -266,10 +331,12 @@ export default function RegulationsPage() {
             status: "info",
             value: data.analysis.greenSpaceRequirements,
             requirement: data.analysis.greenSpaceRequirements,
-            recommendation: "Plan landscaping accordingly.",
+            recommendation: "Plan landscaping accordingly. Semi-permeable and vegetated surfaces count toward the minimum.",
+            regulationSource,
+            zoneLabel,
           });
         }
-        
+
         if (data.analysis.architecturalConstraints?.length > 0) {
           transformedResults.push({
             category: "Distance",
@@ -277,10 +344,12 @@ export default function RegulationsPage() {
             status: "info",
             value: `${data.analysis.architecturalConstraints.length} constraints`,
             requirement: data.analysis.architecturalConstraints.join(", "),
-            recommendation: "Review all architectural constraints.",
+            recommendation: "Review all architectural constraints before finalising façades and roof design.",
+            regulationSource,
+            zoneLabel,
           });
         }
-        
+
         setResults(transformedResults.length > 0 ? transformedResults : mockAnalysis);
       } else {
         // Fallback to mock data if API fails
@@ -356,6 +425,8 @@ export default function RegulationsPage() {
       const pluResData = await pluRes.json();
       const pluData = pluResData.plu || pluResData;
       const regs = pluData.regulations as Record<string, unknown> | undefined;
+      const zoneLabel = [pluData.zoneType, pluData.zoneName].filter(Boolean).join(" – ") || undefined;
+      const regulationSource = "Detected from address (PLU/cadastre data)";
       const transformedResults: AnalysisResult[] = [];
       if (pluData.zoneType || pluData.zoneName) {
         transformedResults.push({
@@ -364,17 +435,24 @@ export default function RegulationsPage() {
           status: "info",
           value: pluData.zoneType || pluData.zoneName || "N/A",
           requirement: `Detected zone for this address`,
-          recommendation: "Verify with local urban planning office.",
+          recommendation: "Verify with local urban planning office or upload the full PLU document for detailed rules.",
+          regulationSource,
+          zoneLabel,
         });
       }
       if (regs?.maxHeight) {
+        const m = regs.maxHeight as number;
         transformedResults.push({
           category: "Height",
           title: "Maximum Building Height",
           status: "info",
-          value: `${regs.maxHeight}m`,
-          requirement: `Max height in zone`,
-          recommendation: "Check full PLU for exact rules.",
+          value: `${m}m`,
+          requirement: `Max ${m}m in zone`,
+          recommendation: "Check full PLU for exact rules and measurement method.",
+          regulationSource,
+          zoneLabel,
+          maxValue: `${m}m`,
+          unit: "m",
         });
       }
       if (regs?.setbacks && typeof regs.setbacks === "object") {
@@ -384,18 +462,25 @@ export default function RegulationsPage() {
           title: "Setbacks",
           status: "info",
           value: `F:${s.front || 0}m S:${s.side || 0}m R:${s.rear || 0}m`,
-          requirement: "Front, side, rear setbacks",
-          recommendation: "Verify with PLU document.",
+          requirement: "Front, side, rear setbacks (verify with PLU).",
+          recommendation: "Verify with PLU document. Front = from road, side/rear = from boundaries.",
+          regulationSource,
+          zoneLabel,
         });
       }
       if (regs?.maxCoverageRatio) {
+        const ratio = Number(regs.maxCoverageRatio) * 100;
         transformedResults.push({
           category: "Coverage",
           title: "Coverage Ratio",
           status: "info",
-          value: `${Number(regs.maxCoverageRatio) * 100}%`,
-          requirement: "Maximum plot coverage",
-          recommendation: "Check PLU for exact limits.",
+          value: `${ratio}%`,
+          requirement: "Maximum plot coverage (emprise au sol).",
+          recommendation: "Check PLU for exact limits and how overhangs are counted.",
+          regulationSource,
+          zoneLabel,
+          maxValue: `${ratio}%`,
+          unit: "%",
         });
       }
       setResults(transformedResults.length > 0 ? transformedResults : mockAnalysis);
@@ -841,7 +926,7 @@ Context:
                               {status.label}
                             </span>
                           </div>
-                          <p className="text-sm text-slate-400 truncate">{result.requirement}</p>
+                          <p className="text-sm text-slate-400 line-clamp-2">{result.requirement}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-lg font-bold text-white">{result.value}</p>
@@ -871,18 +956,59 @@ Context:
                         <p className="text-sm text-slate-400">{selectedResult.category}</p>
                       </div>
                     </div>
+
+                    {(selectedResult.regulationSource || selectedResult.zoneLabel) && (
+                      <div className="space-y-2 pt-2 border-t border-white/10">
+                        {selectedResult.regulationSource && (
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Regulation source</p>
+                            <p className="text-sm text-slate-300">{selectedResult.regulationSource}</p>
+                          </div>
+                        )}
+                        {selectedResult.zoneLabel && (
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Zone</p>
+                            <p className="text-sm text-slate-300">{selectedResult.zoneLabel}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                       <div>
-                        <p className="text-xs text-slate-500 mb-1">Current Value</p>
+                        <p className="text-xs text-slate-500 mb-1">Current value</p>
                         <p className="text-xl font-bold text-white">{selectedResult.value}</p>
+                        {(selectedResult.minValue != null || selectedResult.maxValue != null) && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            Allowed range: {[selectedResult.minValue, selectedResult.maxValue].filter(Boolean).join(" – ")}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 mb-1">Requirement</p>
                         <p className="text-sm text-slate-300">{selectedResult.requirement}</p>
                       </div>
+                      {selectedResult.fullRequirementText && (
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">Full regulatory text</p>
+                          <p className="text-sm text-slate-300 leading-relaxed">{selectedResult.fullRequirementText}</p>
+                        </div>
+                      )}
+                      {selectedResult.context && (
+                        <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                          <p className="text-xs text-blue-400/90 mb-1">How this applies to your project</p>
+                          <p className="text-sm text-slate-300">{selectedResult.context}</p>
+                        </div>
+                      )}
+                      {selectedResult.articleReference && (
+                        <div>
+                          <p className="text-xs text-slate-500 mb-1">Article / reference</p>
+                          <p className="text-sm text-slate-300">{selectedResult.articleReference}</p>
+                        </div>
+                      )}
                       {selectedResult.recommendation && (
                         <div className="p-3 rounded-xl bg-slate-700/50">
-                          <p className="text-xs text-slate-500 mb-1">AI Recommendation</p>
+                          <p className="text-xs text-slate-500 mb-1">AI recommendation</p>
                           <p className="text-sm text-slate-300">{selectedResult.recommendation}</p>
                         </div>
                       )}
@@ -955,7 +1081,39 @@ Context:
                   </div>
                 )}
 
-                <button className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const address =
+                      (selectedProjectId
+                        ? projects.find((p) => p.id === selectedProjectId)?.address
+                        : null) ?? addressForPlu ?? "";
+                    const zoneFromResult = results.find((r) => r.zoneLabel)?.zoneLabel ?? "";
+                    let determination: { type: "DP" | "PC" | "ARCHITECT_REQUIRED"; justification?: string } | undefined;
+                    try {
+                      const raw = typeof window !== "undefined" ? sessionStorage.getItem("urbassist_dossier") : null;
+                      const dossier = raw ? JSON.parse(raw) : {};
+                      const step4 = dossier?.step4 as { determination?: string; detail?: string } | undefined;
+                      if (step4?.determination) {
+                        determination = {
+                          type: step4.determination as "DP" | "PC" | "ARCHITECT_REQUIRED",
+                          justification: step4.detail,
+                        };
+                      }
+                    } catch {
+                      // ignore
+                    }
+                    const report = buildReportFromAnalysis({
+                      results,
+                      address: address || undefined,
+                      zoneName: zoneFromResult,
+                      determination,
+                    });
+                    saveReportToSession(report);
+                    window.location.href = "/regulations/report";
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+                >
                   <Download className="w-5 h-5" />
                   Export Report
                 </button>

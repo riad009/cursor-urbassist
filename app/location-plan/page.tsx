@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
   MapPin,
@@ -10,12 +12,16 @@ import {
   Satellite,
   Layers,
   Download,
+  ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { LocationMap } from "@/components/location-plan/LocationMap";
+import { getNextStep } from "@/lib/step-flow";
+import { NextStepButton } from "@/components/NextStepButton";
 
 export default function LocationPlanPage() {
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [projects, setProjects] = useState<
     { id: string; name: string; address?: string | null; coordinates?: string | null }[]
@@ -33,6 +39,9 @@ export default function LocationPlanPage() {
   const [cadastralOverlay, setCadastralOverlay] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(6);
   const [loadingAddress, setLoadingAddress] = useState(false);
+  const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
+
+  const projectIdFromUrl = searchParams.get("project");
 
   useEffect(() => {
     if (!user) return;
@@ -41,6 +50,12 @@ export default function LocationPlanPage() {
       .then((d) => setProjects(d.projects || []))
       .catch(() => setProjects([]));
   }, [user]);
+
+  useEffect(() => {
+    if (projectIdFromUrl && projects.some((p) => p.id === projectIdFromUrl)) {
+      setSelectedProjectId(projectIdFromUrl);
+    }
+  }, [projectIdFromUrl, projects]);
 
   useEffect(() => {
     if (!selectedProjectId) return;
@@ -89,6 +104,7 @@ export default function LocationPlanPage() {
     if (coords.length >= 2) {
       setSelectedCoords({ lng: coords[0], lat: coords[1] });
       setAddressSuggestions([]);
+      setSelectedParcelIds([]);
     }
   };
 
@@ -162,6 +178,16 @@ export default function LocationPlanPage() {
                     </option>
                   ))}
                 </select>
+                {selectedProjectId && (
+                  <div className="mt-3 space-y-2">
+                    <NextStepButton
+                      canProceed={!!selectedCoords}
+                      nextHref={`/editor?project=${selectedProjectId}`}
+                      nextLabel={getNextStep("/location-plan", selectedProjectId)?.label ?? "Next: Site Plan"}
+                      disabledMessage="Select a location (address or map) to continue"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -235,7 +261,39 @@ export default function LocationPlanPage() {
                   />
                 </button>
               </div>
+              {cadastralOverlay && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Click parcels on the map to select or deselect.
+                </p>
+              )}
             </div>
+
+            {/* Selected parcels */}
+            {cadastralOverlay && selectedParcelIds.length > 0 && (
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                <h3 className="text-sm font-semibold text-white mb-2">Selected parcels</h3>
+                <p className="text-xs text-slate-400 mb-2">
+                  {selectedParcelIds.length} parcel{selectedParcelIds.length !== 1 ? "s" : ""} selected. Click on the map to add or remove.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedParcelIds.map((id) => (
+                    <span
+                      key={id}
+                      className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-700/80 text-slate-200 text-xs font-mono"
+                    >
+                      {id}
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedParcelIds([])}
+                  className="text-xs font-medium text-blue-400 hover:text-blue-300"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
 
             {/* Map Info */}
             <div>
@@ -266,6 +324,8 @@ export default function LocationPlanPage() {
                 baseLayer={baseLayer}
                 cadastralOverlay={cadastralOverlay}
                 onZoomChange={setZoomLevel}
+                selectedParcelIds={selectedParcelIds}
+                onParcelSelect={setSelectedParcelIds}
                 className="absolute inset-0 w-full h-full"
               />
               {!selectedCoords && (

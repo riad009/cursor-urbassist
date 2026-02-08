@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
+import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -33,7 +33,7 @@ Extract and return this JSON structure:
 Include minGreenPct as a number (e.g. 20 for 20% minimum green space).`;
 
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -72,20 +72,22 @@ Include minGreenPct as a number (e.g. 20 for 20% minimum green space).`;
       },
     });
 
-    // Deduct credit
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { credits: { decrement: 1 } },
-    });
-    await prisma.creditTransaction.create({
-      data: {
-        userId: user.id,
-        amount: -1,
-        type: "PLU_ANALYSIS",
-        description: "PLU regulatory analysis",
-        metadata: { projectId: id },
-      },
-    });
+    // Deduct credit (skip for admin)
+    if (!isUnrestrictedAdmin(user)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { credits: { decrement: 1 } },
+      });
+      await prisma.creditTransaction.create({
+        data: {
+          userId: user.id,
+          amount: -1,
+          type: "PLU_ANALYSIS",
+          description: "PLU regulatory analysis",
+          metadata: { projectId: id },
+        },
+      });
+    }
 
     return NextResponse.json({ analysis: regulatory.aiAnalysis, regulatory });
   } catch (error) {

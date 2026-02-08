@@ -1,9 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Automatic PLU/PLUi Zone Detection from address
-// Uses GPU (Géoportail de l'Urbanisme) API and fallback methods
+// PLU zone: official GPU API at https://www.geoportail-urbanisme.gouv.fr/api
+//   - Tries GET /api/gpu/zone-urba?lon=&lat= then GET /feature-info/du?lon=&lat=&typeName=zone_urba.
+// Documents: API Carto (https://apicarto.ign.fr/api/doc/gpu) for /api/gpu/document.
+// Zone responses are GeoJSON FeatureCollection; properties follow CNIG (libelle, typezone, libelong).
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+/** Broad category codes only (CNIG typezone). More specific codes (libelle) like AUD, UA, UB take precedence. */
+const BROAD_ZONE_CODES = new Set(["U", "AU", "A", "N"]);
+
+/**
+ * When the API returns multiple zone features at a point, prefer the one with a specific zone code (libelle)
+ * e.g. "AUD" over the broad category "U" or "AU", so the displayed zone matches official PLU data.
+ */
+function pickBestZoneFeature(
+  features: Array<{ properties?: Record<string, unknown> }>
+): { properties?: Record<string, unknown> } | null {
+  if (!features.length) return null;
+  const withLibelle = features.filter(
+    (f) => f.properties?.libelle && typeof f.properties.libelle === "string"
+  );
+  if (withLibelle.length === 0) return features[0];
+  const specific = withLibelle.find(
+    (f) => !BROAD_ZONE_CODES.has(String(f.properties?.libelle).trim().toUpperCase())
+  );
+  return specific ?? withLibelle[0] ?? features[0];
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,28 +80,41 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 2: Try GPU (Géoportail de l'Urbanisme) for PLU zones
-    try {
-      const gpuRes = await fetch(
-        `https://apicarto.ign.fr/api/gpu/zone-urba?lon=${lng}&lat=${lat}`,
-        { signal: AbortSignal.timeout(10000) }
-      );
-
-      if (gpuRes.ok) {
-        const gpuData = await gpuRes.json();
-        if (gpuData.features && gpuData.features.length > 0) {
-          const zone = gpuData.features[0].properties;
-          pluInfo.zoneType = zone.typezone || zone.libelle || null;
-          pluInfo.zoneName = zone.libelong || zone.libelle || null;
-          pluInfo.pluType = zone.idurba
-            ? zone.idurba.includes("PLUi")
-              ? "PLUi"
-              : "PLU"
-            : null;
+    // Step 2: PLU zone from Géoportail de l'Urbanisme (https://www.geoportail-urbanisme.gouv.fr/api)
+    // Try GET /api/gpu/zone-urba then GET /feature-info/du?typeName=zone_urba; fallback API Carto.
+    // Per CNIG/GPU: libelle = exact zone code; typezone = broad category (U, AU, A, N).
+    const GPU_BASE = "https://www.geoportail-urbanisme.gouv.fr/api";
+    let zoneFeatures: unknown[] = [];
+    const zoneUrls: string[] = [
+      `${GPU_BASE}/gpu/zone-urba?lon=${lng}&lat=${lat}`,
+      `${GPU_BASE}/feature-info/du?lon=${lng}&lat=${lat}&typeName=zone_urba`,
+      `https://apicarto.ign.fr/api/gpu/zone-urba?lon=${lng}&lat=${lat}`,
+    ];
+    for (const url of zoneUrls) {
+      try {
+        const gpuRes = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (gpuRes.ok) {
+          const gpuData = await gpuRes.json();
+          if (gpuData.features && gpuData.features.length > 0) {
+            zoneFeatures = gpuData.features;
+            const features = gpuData.features as Array<{ properties?: Record<string, unknown> }>;
+            const zone = pickBestZoneFeature(features)?.properties ?? features[0].properties;
+            if (zone) {
+              pluInfo.zoneType = (zone.libelle as string) || (zone.typezone as string) || null;
+              pluInfo.zoneName = (zone.libelong as string) || (zone.libelle as string) || (zone.typezone as string) || null;
+              const idurba = zone.idurba as string | undefined;
+              pluInfo.pluType = idurba
+                ? idurba.includes("PLUi")
+                  ? "PLUi"
+                  : "PLU"
+                : null;
+            }
+          }
+          break;
         }
+      } catch (e) {
+        continue;
       }
-    } catch (e) {
-      console.log("GPU API unavailable:", e);
     }
 
     // Step 3: Try to get PLU document info and PDF URL
@@ -169,7 +206,7 @@ export async function POST(request: NextRequest) {
 Only return the JSON, no other text.`;
 
         const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -202,6 +239,7 @@ Only return the JSON, no other text.`;
     return NextResponse.json({
       success: true,
       plu: pluInfo,
+      zoneFeatures, // GeoJSON features with geometry for zone map
       source: pluInfo.pluStatus ? "gpu" : "estimated",
     });
   } catch (error) {
@@ -270,6 +308,19 @@ function getDefaultRegulations(zoneType: string): Record<string, unknown> {
         "Infrastructure must be completed first",
       ],
     },
+    AUD: {
+      zoneClassification: "AUD - Zone à urbaniser d'habitat diffus",
+      maxHeight: 10,
+      setbacks: { front: 5, side: 4, rear: 4 },
+      maxCoverageRatio: 0.35,
+      maxFloorAreaRatio: 1.0,
+      parkingRequirements: "2 places per dwelling",
+      greenSpaceRequirements: "Minimum 25% of parcel area",
+      architecturalConstraints: [
+        "Subject to development plan approval",
+        "Diffuse habitat zone – verify with PLU for specific rules",
+      ],
+    },
     "A/N": {
       zoneClassification: "A/N - Zone Agricole ou Naturelle",
       maxHeight: 7,
@@ -286,5 +337,9 @@ function getDefaultRegulations(zoneType: string): Record<string, unknown> {
     },
   };
 
-  return defaults[zoneType] || defaults["UB"];
+  const exact = defaults[zoneType];
+  if (exact) return exact;
+  // Map sub-types to family (e.g. AUD → AU, UH/UD → UB)
+  const family = zoneType.startsWith("AU") ? "AU" : zoneType.startsWith("U") ? "UB" : null;
+  return family ? defaults[family] ?? defaults["UB"] : defaults["UB"];
 }

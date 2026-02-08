@@ -10,6 +10,10 @@ export const HARDCODED_USER_ID = "hardcoded-user-no-db";
 export const HARDCODED_EMAIL = "example@gmail.com";
 export const HARDCODED_PASSWORD = "123456";
 
+/** Admin account: full access, no credit restrictions. Login creates/finds user in DB. */
+export const ADMIN_EMAIL = "admin@gmail.com";
+export const ADMIN_PASSWORD = "123456";
+
 export function getHardcodedUser(): AuthUser {
   return {
     id: HARDCODED_USER_ID,
@@ -18,6 +22,11 @@ export function getHardcodedUser(): AuthUser {
     role: "USER",
     credits: 10,
   };
+}
+
+/** True if user is admin and should have unrestricted access (no credit checks/deductions). */
+export function isUnrestrictedAdmin(user: AuthUser): boolean {
+  return user.role === "ADMIN";
 }
 
 export interface AuthUser {
@@ -44,11 +53,22 @@ export async function createToken(user: AuthUser): Promise<string> {
   );
 }
 
+const HARDCODED_ADMIN_ID = "hardcoded-admin-no-db";
+
 export async function verifyToken(token: string): Promise<AuthUser | null> {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { id: string };
     if (payload.id === HARDCODED_USER_ID) {
       return getHardcodedUser();
+    }
+    if (payload.id === HARDCODED_ADMIN_ID) {
+      return {
+        id: HARDCODED_ADMIN_ID,
+        email: ADMIN_EMAIL,
+        name: "Admin",
+        role: "ADMIN",
+        credits: 999999,
+      };
     }
     const user = await prisma.user.findUnique({
       where: { id: payload.id },

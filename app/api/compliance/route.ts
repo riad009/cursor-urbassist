@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
       string,
       unknown
     >) || {};
+    const zoneLabel = (project.regulatoryAnalysis?.zoneType as string) || "PLU";
     const parcelArea = project.parcelArea || 500;
     const maxCoverageRatio = (rules.maxCoverageRatio as number) ?? 0.5;
     const maxCoverage = maxCoverageRatio * 100;
@@ -175,12 +176,13 @@ export async function POST(request: NextRequest) {
             : null;
 
         if (distFront !== null && distFront < (setbacks.front ?? 5)) {
+          const required = setbacks.front ?? 5;
           checks.push({
             rule: "Front Setback",
             status: "violation",
-            message: `Front setback ${distFront.toFixed(1)}m is less than required ${setbacks.front}m`,
-            details: `"${b.name || "Building"}" is ${distFront.toFixed(1)}m from front boundary`,
-            suggestion: `Move building ${((setbacks.front ?? 5) - distFront).toFixed(1)}m back from front boundary`,
+            message: `Current distance: ${distFront.toFixed(1)} m. Minimum required (${zoneLabel}): ${required} m`,
+            details: `"${b.name || "Building"}" is ${distFront.toFixed(1)} m from front boundary. Minimum: ${required} m (zone ${zoneLabel})`,
+            suggestion: `Move building ${(required - distFront).toFixed(1)} m back from front boundary`,
           });
         }
 
@@ -188,9 +190,9 @@ export async function POST(request: NextRequest) {
           checks.push({
             rule: "Side Setback (Left)",
             status: "violation",
-            message: `Side setback ${distLeft.toFixed(1)}m is less than required ${requiredSide.toFixed(1)}m${buildingHeightM > 0 ? ` (max of ${setbacks.side}m and H/2=${(buildingHeightM / 2).toFixed(1)}m)` : ""}`,
-            details: `"${b.name || "Building"}" is ${distLeft.toFixed(1)}m from left boundary`,
-            suggestion: `Move building ${(requiredSide - distLeft).toFixed(1)}m from left boundary`,
+            message: `Current distance: ${distLeft.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredSide.toFixed(1)} m`,
+            details: `"${b.name || "Building"}" is ${distLeft.toFixed(1)} m from left boundary. Minimum: ${requiredSide.toFixed(1)} m (zone ${zoneLabel})`,
+            suggestion: `Move building ${(requiredSide - distLeft).toFixed(1)} m from left boundary`,
           });
         }
 
@@ -198,9 +200,9 @@ export async function POST(request: NextRequest) {
           checks.push({
             rule: "Side Setback (Right)",
             status: "violation",
-            message: `Side setback ${distRight.toFixed(1)}m is less than required ${requiredSide.toFixed(1)}m`,
-            details: `"${b.name || "Building"}" is ${distRight.toFixed(1)}m from right boundary`,
-            suggestion: `Move building ${(requiredSide - distRight).toFixed(1)}m from right boundary`,
+            message: `Current distance: ${distRight.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredSide.toFixed(1)} m`,
+            details: `"${b.name || "Building"}" is ${distRight.toFixed(1)} m from right boundary. Minimum: ${requiredSide.toFixed(1)} m (zone ${zoneLabel})`,
+            suggestion: `Move building ${(requiredSide - distRight).toFixed(1)} m from right boundary`,
           });
         }
 
@@ -208,9 +210,9 @@ export async function POST(request: NextRequest) {
           checks.push({
             rule: "Rear Setback",
             status: "violation",
-            message: `Rear setback ${distRear.toFixed(1)}m is less than required ${requiredRear.toFixed(1)}m`,
-            details: `"${b.name || "Building"}" is ${distRear.toFixed(1)}m from rear boundary`,
-            suggestion: `Move building ${(requiredRear - distRear).toFixed(1)}m from rear boundary`,
+            message: `Current distance: ${distRear.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredRear.toFixed(1)} m`,
+            details: `"${b.name || "Building"}" is ${distRear.toFixed(1)} m from rear boundary. Minimum: ${requiredRear.toFixed(1)} m (zone ${zoneLabel})`,
+            suggestion: `Move building ${(requiredRear - distRear).toFixed(1)} m from rear boundary`,
           });
         }
       }

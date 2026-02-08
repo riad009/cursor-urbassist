@@ -429,6 +429,9 @@ trailer << /Size 5 /Root 1 0 R >>
         {user && projects.length > 0 && (
           <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
             <h2 className="text-lg font-semibold text-white">Export Project Documents (Credit-based)</h2>
+            <p className="text-slate-400 text-sm">
+              All documents will be generated automatically from your project. Choose the type and format then export.
+            </p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Project</label>

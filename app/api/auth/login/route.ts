@@ -4,12 +4,15 @@ import {
   verifyPassword,
   createToken,
   getHardcodedUser,
+  hashPassword,
   HARDCODED_EMAIL,
   HARDCODED_PASSWORD,
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
 } from "@/lib/auth";
 
 const DATABASE_ERROR_MESSAGE =
-  "Sign-in is not configured on this server. The database (DATABASE_URL) must be set in Vercel → Project → Settings → Environment Variables.";
+  "Sign-in is not configured on this server. Set DATABASE_URL and DIRECT_URL (Neon) in Vercel → Project → Settings → Environment Variables. See docs/VERCEL.md.";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +22,70 @@ export async function POST(request: NextRequest) {
         { error: "Email and password required" },
         { status: 400 }
       );
+    }
+
+    // Admin: hardcoded credentials, find-or-create in DB for project ownership
+    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      if (process.env.DATABASE_URL) {
+        let adminUser = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
+        if (!adminUser) {
+          adminUser = await prisma.user.create({
+            data: {
+              email: ADMIN_EMAIL,
+              passwordHash: await hashPassword(ADMIN_PASSWORD),
+              name: "Admin",
+              role: "ADMIN",
+              credits: 999999,
+            },
+          });
+        } else {
+          // Ensure existing admin user always has ADMIN role and full credits
+          adminUser = await prisma.user.update({
+            where: { email: ADMIN_EMAIL },
+            data: { role: "ADMIN", credits: 999999 },
+          });
+        }
+        const token = await createToken({
+          id: adminUser.id,
+          email: adminUser.email,
+          name: adminUser.name,
+          role: adminUser.role,
+          credits: adminUser.credits,
+        });
+        const response = NextResponse.json({
+          user: { id: adminUser.id, email: adminUser.email, name: adminUser.name, role: adminUser.role, credits: adminUser.credits },
+          token,
+        });
+        response.cookies.set("auth-token", token, {
+          httpOnly: true,
+          path: "/",
+          maxAge: 60 * 60 * 24 * 7,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+        });
+        return response;
+      }
+      // No DB: return admin as in-memory user (project create will fail; use DB for full flow)
+      const adminUser = {
+        id: "hardcoded-admin-no-db",
+        email: ADMIN_EMAIL,
+        name: "Admin",
+        role: "ADMIN" as const,
+        credits: 999999,
+      };
+      const token = await createToken(adminUser);
+      const response = NextResponse.json({
+        user: { id: adminUser.id, email: adminUser.email, name: adminUser.name, role: adminUser.role, credits: adminUser.credits },
+        token,
+      });
+      response.cookies.set("auth-token", token, {
+        httpOnly: true,
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
+      return response;
     }
 
     if (email === HARDCODED_EMAIL && password === HARDCODED_PASSWORD) {

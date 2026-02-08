@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -26,26 +26,46 @@ import {
   LogOut,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute } from "@/lib/step-flow";
+
+const stepIcons = [
+  LayoutDashboard,
+  MapPin,
+  PenTool,
+  Building2,
+  Box,
+  Image,
+  Calculator,
+  Download,
+] as const;
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "from-blue-500 to-cyan-500" },
   { href: "/projects", label: "Projects", icon: FolderKanban, color: "from-violet-500 to-purple-500" },
-  { href: "/editor", label: "Design Studio", icon: PenTool, color: "from-pink-500 to-rose-500" },
   { href: "/regulations", label: "AI Analysis", icon: FileText, color: "from-amber-500 to-orange-500" },
   { href: "/feasibility", label: "Feasibility", icon: FileCheck, color: "from-emerald-500 to-teal-500" },
-  { href: "/terrain", label: "Terrain", icon: Building2, color: "from-orange-500 to-amber-500" },
-  { href: "/building-3d", label: "Building 3D", icon: Box, color: "from-amber-500 to-yellow-500" },
-  { href: "/location-plan", label: "Location Plan", icon: MapPin, color: "from-sky-500 to-blue-500" },
-  { href: "/landscape", label: "Landscape", icon: Image, color: "from-emerald-500 to-teal-500" },
-  { href: "/statement", label: "Statement", icon: Calculator, color: "from-indigo-500 to-blue-500" },
-  { href: "/export", label: "Export", icon: Download, color: "from-slate-500 to-gray-500" },
   { href: "/developer", label: "Developer", icon: Sparkles, color: "from-purple-500 to-pink-500" },
 ];
 
 export function Navigation({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
+  const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
+  const currentStepIndex = projectId ? getStepIndex(pathname) : -1;
+  const [projectName, setProjectName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectName(null);
+      return;
+    }
+    fetch(`/api/projects/${projectId}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setProjectName(d.project?.name ?? null))
+      .catch(() => setProjectName(null));
+  }, [projectId]);
 
   return (
     <div className="min-h-screen">
@@ -152,6 +172,53 @@ export function Navigation({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
+        {/* Planning application steps bar - shown when in a project context */}
+        {projectId && (
+          <div className="border-t border-white/10 bg-slate-900/90 px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href={`/projects/${projectId}`}
+                className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white shrink-0"
+              >
+                <FolderKanban className="w-4 h-4 text-sky-400" />
+                <span className="hidden sm:inline">{projectName || "Project"}</span>
+                <span className="text-slate-500 text-xs font-normal">(steps)</span>
+              </Link>
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
+                {PLANNING_STEPS.map((step, idx) => {
+                  const isActive = idx === currentStepIndex;
+                  const isPast = idx < currentStepIndex;
+                  const href = step.href(projectId);
+                  const Icon = stepIcons[idx] ?? LayoutDashboard;
+                  return (
+                    <Link
+                      key={step.step}
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all",
+                        isActive && "bg-sky-500 text-white shadow-md shadow-sky-500/25",
+                        isPast && !isActive && "text-slate-400 hover:text-slate-200 hover:bg-white/5",
+                        !isActive && !isPast && "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
+                          isActive ? "bg-sky-400/90 text-white" : "bg-slate-700 text-slate-400"
+                        )}
+                      >
+                        {step.step}
+                      </span>
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span className="hidden md:inline">{step.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Mobile Navigation */}
         {isMobileMenuOpen && (
           <nav className="lg:hidden border-t border-white/10 bg-slate-900/95 backdrop-blur-xl">
@@ -182,7 +249,7 @@ export function Navigation({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main Content */}
-      <main className="pt-16 min-h-screen">
+      <main className={cn("min-h-screen", projectId ? "pt-32" : "pt-16")}>
         {children}
       </main>
     </div>

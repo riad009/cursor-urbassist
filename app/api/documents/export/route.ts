@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSession } from "@/lib/auth";
+import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
+import {
+  generateStyledPDF,
+  type PDFProjectInfo,
+  type PDFExportOptions,
+} from "@/lib/pdf-generator";
 
 const CREDIT_COSTS: Record<string, number> = {
   LOCATION_PLAN: 2,
@@ -28,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     const cost = CREDIT_COSTS[documentType] ?? 2;
-    if (user.credits < cost) {
+    if (!isUnrestrictedAdmin(user) && user.credits < cost) {
       return NextResponse.json(
         {
           error: `Insufficient credits. Need ${cost}, have ${user.credits}`,
@@ -85,25 +90,27 @@ export async function POST(request: NextRequest) {
       });
       if (existingLandscape?.fileData) {
         const cost = CREDIT_COSTS.LANDSCAPE_INSERTION ?? 5;
-        if (user.credits < cost) {
+        if (!isUnrestrictedAdmin(user) && user.credits < cost) {
           return NextResponse.json(
             { error: `Insufficient credits. Need ${cost}, have ${user.credits}` },
             { status: 402 }
           );
         }
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { credits: { decrement: cost } },
-        });
-        await prisma.creditTransaction.create({
-          data: {
-            userId: user.id,
-            amount: -cost,
-            type: "DOCUMENT_EXPORT",
-            description: `Export ${documentType}`,
-            metadata: { projectId, documentId: existingLandscape.id, documentType: "LANDSCAPE_INSERTION" },
-          },
-        });
+        if (!isUnrestrictedAdmin(user)) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { credits: { decrement: cost } },
+          });
+          await prisma.creditTransaction.create({
+            data: {
+              userId: user.id,
+              amount: -cost,
+              type: "DOCUMENT_EXPORT",
+              description: `Export ${documentType}`,
+              metadata: { projectId, documentId: existingLandscape.id, documentType: "LANDSCAPE_INSERTION" },
+            },
+          });
+        }
         return NextResponse.json({
           success: true,
           document: {
@@ -115,7 +122,7 @@ export async function POST(request: NextRequest) {
             isImage: true,
             creditsUsed: cost,
           },
-          creditsRemaining: user.credits - cost,
+          creditsRemaining: isUnrestrictedAdmin(user) ? user.credits : user.credits - cost,
         });
       }
     }
@@ -132,7 +139,6 @@ export async function POST(request: NextRequest) {
             address: project.address,
             parcelIds: project.parcelIds,
             views: ["aerial", "ign", "cadastral"],
-            mapUrls: generateMapUrls(project),
           },
         };
         break;
@@ -210,8 +216,70 @@ export async function POST(request: NextRequest) {
         };
     }
 
-    // Generate a basic PDF representation (base64 encoded)
-    const pdfBase64 = generatePDFContent(documentContent);
+    // Build PDF project info
+    const pdfProject: PDFProjectInfo = {
+      projectName: documentContent.project.name,
+      address: documentContent.project.address,
+      municipality: documentContent.project.municipality,
+      date: documentContent.project.date,
+      parcelRef: project.parcelIds || undefined,
+      totalSurface: project.parcelArea ? `${project.parcelArea} m²` : undefined,
+    };
+
+    // Try to get main image (landscape insertion or site plan canvas)
+    let mainImage: string | undefined;
+    const landscapeDoc = await prisma.document.findFirst({
+      where: { projectId, type: "LANDSCAPE_INSERTION", fileData: { not: null } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (landscapeDoc?.fileData) {
+      const raw = landscapeDoc.fileData as string;
+      mainImage = raw.startsWith("data:") ? raw : `data:image/png;base64,${raw}`;
+    }
+    const contentObj = documentContent.content as Record<string, unknown>;
+    const sitePlanCanvas = contentObj?.canvasData ?? project.sitePlanData?.canvasData;
+    if (!mainImage && typeof sitePlanCanvas === "string" && sitePlanCanvas.startsWith("data:image")) {
+      mainImage = sitePlanCanvas;
+    }
+
+    // Extract surface data from site plan
+    const surfaceAreasRaw = project.sitePlanData?.surfaceAreas;
+    let surfaceData: Array<{ description: string; surface: string }> | undefined;
+    if (Array.isArray(surfaceAreasRaw)) {
+      surfaceData = surfaceAreasRaw.map((r) =>
+        typeof r === "object" && r && "description" in r && "surface" in r
+          ? { description: String(r.description), surface: String(r.surface) }
+          : { description: "", surface: "" }
+      ).filter((r) => r.description);
+    } else if (surfaceAreasRaw && typeof surfaceAreasRaw === "object" && !Array.isArray(surfaceAreasRaw)) {
+      surfaceData = Object.entries(surfaceAreasRaw as Record<string, number>).map(([desc, val]) => ({
+        description: desc,
+        surface: typeof val === "number" ? `${val.toFixed(2)} m²` : String(val),
+      }));
+    }
+
+    const pdfOptions: PDFExportOptions = {
+      paperSize: (documentContent.paperSize as "A3" | "A4" | "A2") || "A3",
+      scale: documentContent.scale,
+      documentType,
+    };
+
+    const statementText =
+      (contentObj?.text as string) ||
+      (contentObj?.sections && typeof contentObj.sections === "object"
+        ? Object.values(contentObj.sections as Record<string, string>).join("\n\n")
+        : project.descriptiveStatement?.generatedText || "");
+
+    const pdfContent = {
+      type: documentType,
+      text: statementText,
+      surfaceData,
+      mainImage,
+      mapImage: undefined as string | undefined,
+    };
+
+    const pdfBuffer = await generateStyledPDF(pdfProject, pdfOptions, pdfContent);
+    const pdfBase64 = pdfBuffer.toString("base64");
 
     // Save document to database
     const doc = await prisma.document.create({
@@ -229,20 +297,22 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Deduct credits
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { credits: { decrement: cost } },
-    });
-    await prisma.creditTransaction.create({
-      data: {
-        userId: user.id,
-        amount: -cost,
-        type: "DOCUMENT_EXPORT",
-        description: `Export ${documentType}`,
-        metadata: { projectId, documentId: doc.id, documentType },
-      },
-    });
+    // Deduct credits (skip for admin)
+    if (!isUnrestrictedAdmin(user)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { credits: { decrement: cost } },
+      });
+      await prisma.creditTransaction.create({
+        data: {
+          userId: user.id,
+          amount: -cost,
+          type: "DOCUMENT_EXPORT",
+          description: `Export ${documentType}`,
+          metadata: { projectId, documentId: doc.id, documentType },
+        },
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -253,7 +323,7 @@ export async function POST(request: NextRequest) {
         fileData: pdfBase64,
         creditsUsed: cost,
       },
-      creditsRemaining: user.credits - cost,
+      creditsRemaining: isUnrestrictedAdmin(user) ? user.credits : user.credits - cost,
     });
   } catch (error) {
     console.error("Export:", error);
@@ -283,176 +353,4 @@ export async function GET(request: NextRequest) {
   });
 
   return NextResponse.json({ documents });
-}
-
-function generateMapUrls(project: {
-  coordinates?: string | null;
-  address?: string | null;
-}): Record<string, string> {
-  let lat = 43.7;
-  let lng = 7.26;
-
-  if (project.coordinates) {
-    try {
-      const coords = JSON.parse(project.coordinates);
-      lat = coords.lat || coords[1] || 43.7;
-      lng = coords.lng || coords[0] || 7.26;
-    } catch {
-      // use defaults
-    }
-  }
-
-  return {
-    aerial: `https://wxs.ign.fr/decouverte/geoportail/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&TILEMATRIXSET=PM&TILEMATRIX=16&TILECOL=${Math.floor(((lng + 180) / 360) * Math.pow(2, 16))}&TILEROW=${Math.floor((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2 * Math.pow(2, 16))}&FORMAT=image/jpeg`,
-    cadastral: `https://cadastre.data.gouv.fr/map?lat=${lat}&lng=${lng}&zoom=18`,
-    ign: `https://www.geoportail.gouv.fr/carte?c=${lng},${lat}&z=18`,
-    openstreetmap: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}`,
-  };
-}
-
-function generatePDFContent(documentContent: {
-  title: string;
-  project: { name: string; address: string; municipality: string; date: string };
-  paperSize: string;
-  scale: string;
-  type: string;
-  content: unknown;
-}): string {
-  // Generate a proper PDF structure
-  const { title, project, paperSize, scale, type } = documentContent;
-
-  // Paper sizes in points (1 point = 1/72 inch)
-  const sizes: Record<string, { w: number; h: number }> = {
-    A4: { w: 595, h: 842 },
-    A3: { w: 842, h: 1190 },
-    A2: { w: 1190, h: 1684 },
-    A1: { w: 1684, h: 2384 },
-    A0: { w: 2384, h: 3370 },
-  };
-
-  const size = sizes[paperSize] || sizes.A3;
-
-  // Build PDF content
-  const pdfObjects: string[] = [];
-  let objCount = 0;
-
-  const addObj = (content: string) => {
-    objCount++;
-    pdfObjects.push(`${objCount} 0 obj\n${content}\nendobj`);
-    return objCount;
-  };
-
-  // Catalog
-  addObj("<< /Type /Catalog /Pages 2 0 R >>");
-
-  // Pages
-  addObj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-
-  // Font
-  const fontId = addObj(
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
-  );
-
-  // Build content stream
-  const lines: string[] = [];
-  lines.push("BT");
-  lines.push(`/F1 20 Tf`);
-  lines.push(`50 ${size.h - 60} Td`);
-  lines.push(`(${escPdf(title)}) Tj`);
-  lines.push(`/F1 12 Tf`);
-  lines.push(`0 -30 Td`);
-  lines.push(`(Project: ${escPdf(project.name)}) Tj`);
-  lines.push(`0 -20 Td`);
-  lines.push(`(Address: ${escPdf(project.address)}) Tj`);
-  lines.push(`0 -20 Td`);
-  lines.push(`(Municipality: ${escPdf(project.municipality)}) Tj`);
-  lines.push(`0 -20 Td`);
-  lines.push(`(Scale: ${escPdf(scale)} | Paper: ${escPdf(paperSize)}) Tj`);
-  lines.push(`0 -20 Td`);
-  lines.push(`(Date: ${escPdf(project.date)}) Tj`);
-  lines.push(`0 -20 Td`);
-  lines.push(`(Document Type: ${escPdf(type)}) Tj`);
-
-  // Add content-specific text
-  lines.push(`0 -40 Td`);
-  lines.push(`/F1 14 Tf`);
-  lines.push(`(Document Content) Tj`);
-  lines.push(`/F1 10 Tf`);
-  lines.push(`0 -25 Td`);
-
-  const contentObj = documentContent.content as Record<string, unknown>;
-  if (contentObj && typeof contentObj === "object") {
-    if (contentObj.text && typeof contentObj.text === "string") {
-      // Descriptive statement
-      const textLines = (contentObj.text as string).split("\n").slice(0, 30);
-      for (const line of textLines) {
-        if (line.trim()) {
-          lines.push(`(${escPdf(line.substring(0, 80))}) Tj`);
-          lines.push(`0 -15 Td`);
-        }
-      }
-    } else {
-      lines.push(
-        `(This document contains ${type.toLowerCase().replace("_", " ")} data.) Tj`
-      );
-      lines.push(`0 -15 Td`);
-      lines.push(
-        `(Generated by UrbAssist - ${new Date().toISOString()}) Tj`
-      );
-    }
-  }
-
-  lines.push("ET");
-
-  // Draw border
-  lines.push("2 w");
-  lines.push(
-    `20 20 ${size.w - 40} ${size.h - 40} re S`
-  );
-
-  // Draw title block
-  const tbW = size.w / 2;
-  const tbH = 60;
-  lines.push(
-    `${size.w - tbW - 20} 20 ${tbW} ${tbH} re S`
-  );
-
-  // North arrow (simple triangle)
-  const nx = size.w - 50;
-  const ny = size.h - 50;
-  lines.push(`${nx} ${ny + 20} m ${nx - 8} ${ny} l ${nx + 8} ${ny} l f`);
-
-  const contentStream = lines.join("\n");
-
-  // Content stream
-  const streamId = addObj(
-    `<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream`
-  );
-
-  // Page (insert at position 3, after pages)
-  // We need to insert the page object at index 2 (which is object 3)
-  pdfObjects.splice(
-    2,
-    0,
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${size.w} ${size.h}] /Contents ${streamId} 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> >>\nendobj`
-  );
-
-  // Rebuild with correct numbering
-  const pdf = [
-    "%PDF-1.4",
-    ...pdfObjects,
-    `xref\n0 ${objCount + 1}`,
-    `trailer << /Size ${objCount + 1} /Root 1 0 R >>`,
-    "%%EOF",
-  ].join("\n");
-
-  return Buffer.from(pdf).toString("base64");
-}
-
-function escPdf(str: string): string {
-  return str
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)")
-    .replace(/[^\x20-\x7E]/g, "?");
 }

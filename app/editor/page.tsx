@@ -37,8 +37,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
+  Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getNextStep } from "@/lib/step-flow";
+import { NextStepButton } from "@/components/NextStepButton";
 
 type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd";
 
@@ -94,12 +97,13 @@ const SURFACE_TYPES = [
 ];
 
 const VRD_TYPES = [
-  { id: "electricity", label: "Électricité", color: "#fbbf24" },
-  { id: "water", label: "Eau potable", color: "#38bdf8" },
-  { id: "wastewater", label: "Assainissement", color: "#78716c" },
-  { id: "stormwater", label: "Eaux pluviales", color: "#0ea5e9" },
-  { id: "telecom", label: "Télécom", color: "#a78bfa" },
-  { id: "gas", label: "Gaz", color: "#f97316" },
+  { id: "electricity", label: "Electricity", color: "#fbbf24" },
+  { id: "water", label: "Water", color: "#38bdf8" },
+  { id: "wastewater", label: "Wastewater", color: "#78716c" },
+  { id: "stormwater", label: "Stormwater", color: "#0ea5e9" },
+  { id: "telecom", label: "Telecom", color: "#a78bfa" },
+  { id: "gas", label: "Gas", color: "#f97316" },
+  { id: "not_applicable", label: "Not applicable", color: "#6b7280" },
 ];
 
 const colors = [
@@ -1358,6 +1362,24 @@ function EditorPageContent() {
   const requiredGreenPct = projectForEditor?.minGreenPct ?? 20;
   const greenPct = parcelAreaForGreen > 0 ? ((surfaceAreasByType.green ?? 0) / parcelAreaForGreen) * 100 : 0;
 
+  const hasUnnamedElements = (() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return true;
+    const drawable = canvas.getObjects().filter(
+      (o) => !(o as any).isGrid && !(o as any).isMeasurement && !(o as any).isPolygonPreview
+    );
+    return drawable.some((o) => {
+      const name = String((o as any).elementName ?? (o as any).name ?? "").trim();
+      return !name || name === "Unnamed";
+    });
+  })();
+  const hasContent = footprintSummary.projected > 0 || surfaceAreasByType.total > 0;
+  const editorCanProceed =
+    !!currentProjectId &&
+    !hasUnnamedElements &&
+    greenPct >= requiredGreenPct &&
+    hasContent;
+
   return (
     <div className="h-screen bg-slate-950 flex flex-col overflow-hidden">
       {/* Top Bar */}
@@ -1394,14 +1416,22 @@ function EditorPageContent() {
                 ))}
               </select>
               {currentProjectId && (
-                <button
-                  onClick={saveSitePlan}
-                  disabled={saving}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Save
-                </button>
+                <>
+                  <button
+                    onClick={saveSitePlan}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save
+                  </button>
+                  <NextStepButton
+                    canProceed={editorCanProceed}
+                    nextHref={getNextStep("/editor", currentProjectId)?.href ?? `/terrain?project=${currentProjectId}`}
+                    nextLabel={getNextStep("/editor", currentProjectId)?.label ?? "Next: Terrain"}
+                    disabledMessage="Name all elements, meet green % requirement, and add at least one footprint to continue"
+                  />
+                </>
               )}
             </div>
           )}
@@ -1543,6 +1573,17 @@ function EditorPageContent() {
             <Compass className="w-5 h-5" />
           </button>
 
+          {/* View in 3D */}
+          {currentProjectId && (
+            <Link
+              href={`/building-3d?project=${currentProjectId}`}
+              className="w-12 h-12 rounded-xl flex items-center justify-center text-violet-400 hover:bg-violet-500/20 transition-all"
+              title="View in 3D"
+            >
+              <Box className="w-5 h-5" />
+            </Link>
+          )}
+
           {/* Sample Parcel Button */}
           <button
             onClick={createSampleParcel}
@@ -1631,6 +1672,11 @@ function EditorPageContent() {
                     </div>
                   ))}
                 </div>
+              )}
+              {showCompliance && currentProjectId && (
+                <p className="p-3 pt-0 text-xs text-slate-500 border-t border-white/5 mt-1">
+                  If your PLU counts roof overhang in footprint, set overhang in Building 3D (View in 3D).
+                </p>
               )}
             </div>
           )}

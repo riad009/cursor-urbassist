@@ -169,23 +169,26 @@ export default function Dashboard() {
               Welcome to <span className="gradient-text">UrbAssist</span>
             </h1>
             <p className="text-slate-400 text-lg max-w-xl mb-6">
-              Professional construction project design platform. Create, analyze, and export your architectural plans with AI-powered assistance.
+              Platform for your planning applications. Building permit or prior declaration — free simulation before payment.
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/editor"
+                href="/dossier/qualification"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all group"
               >
                 <Play className="w-4 h-4" />
-                Start Designing
+                Start my urban planning application
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
+              <p className="w-full text-xs text-slate-500 mt-1">
+                Building permit or prior declaration · Free simulation before payment
+              </p>
               <Link
                 href="/projects"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-white font-semibold hover:bg-white/10 transition-all"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-medium hover:bg-white/10 transition-all"
               >
                 <FolderKanban className="w-4 h-4" />
-                View Projects
+                View my projects
               </Link>
             </div>
           </div>

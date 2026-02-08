@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword, createToken } from "@/lib/auth";
 
 const DATABASE_ERROR_MESSAGE =
-  "Registration is not configured on this server. The database (DATABASE_URL) must be set in Vercel → Project → Settings → Environment Variables.";
+  "Registration is not configured on this server. Set DATABASE_URL and DIRECT_URL (Neon) in Vercel → Project → Settings → Environment Variables. See docs/VERCEL.md.";
 
 export async function POST(request: NextRequest) {
   try {
