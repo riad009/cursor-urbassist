@@ -22,10 +22,13 @@ export interface ZoneMapProps {
   center: { lat: number; lng: number } | null;
   parcels?: ParcelWithGeometry[];
   selectedParcelIds?: string[];
+  onParcelSelect?: (ids: string[]) => void;
   zoneFeatures?: unknown[];
   pluZone: string | null;
   pluName: string | null;
   pluType?: string | null;
+  /** When false, only the map is shown (no regulation sidebar), so the map uses full width. */
+  showRegulationSidebar?: boolean;
   className?: string;
 }
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { Building3D } from "../route";
+import type { Building3D } from "@/lib/building3d";
 
 /**
  * Returns building data derived from the 3D model for use in section drawings.

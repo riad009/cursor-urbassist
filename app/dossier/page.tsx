@@ -4,9 +4,10 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Redirect to Projects — address and parcels are entered in the New Project flow.
+ * Dossier flow removed — redirect to Projects.
+ * Address and parcels are entered in the New Project modal.
  */
-export default function DossierQualificationPage() {
+export default function DossierPage() {
   const router = useRouter();
   useEffect(() => {
     router.replace("/projects");

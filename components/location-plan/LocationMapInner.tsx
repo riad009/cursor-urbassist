@@ -11,7 +11,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import type { FeatureCollection, Feature, GeoJsonObject } from "geojson";
+import type { FeatureCollection, Feature, Geometry, GeoJsonObject } from "geojson";
 import "leaflet/dist/leaflet.css";
 
 // Fix Leaflet default icon in Next.js (webpack doesn't resolve default paths)
@@ -44,6 +44,14 @@ function MapController({
       map.setView(FRANCE_CENTER, 6);
     }
   }, [center, map]);
+
+  useEffect(() => {
+    const scale = L.control.scale({ imperial: false });
+    scale.addTo(map);
+    return () => {
+      scale.remove();
+    };
+  }, [map]);
 
   useMapEvents({
     zoomend: () => onZoomChange(map.getZoom()),
@@ -101,7 +109,7 @@ export function LocationMapInner({
             number?: string;
             area?: number;
             geometry: Feature["geometry"];
-          }): Feature<GeoJsonObject, ParcelFeatureProperties> => ({
+          }): Feature<Geometry, ParcelFeatureProperties> => ({
             type: "Feature",
             geometry: p.geometry,
             properties: {

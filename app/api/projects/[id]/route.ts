@@ -32,19 +32,23 @@ export async function PUT(
   const project = await prisma.project.findFirst({ where: { id, userId: user.id } });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = await request.json();
+  const data: Record<string, unknown> = {
+    name: body.name,
+    description: body.description,
+    address: body.address,
+    municipality: body.municipality,
+    parcelIds: Array.isArray(body.parcelIds) ? body.parcelIds.join(",") : body.parcelIds,
+    parcelArea: body.parcelArea,
+    northAngle: body.northAngle != null ? Number(body.northAngle) : undefined,
+    status: body.status,
+    scale: body.scale,
+  };
+  if (body.parcelGeometry !== undefined) {
+    data.parcelGeometry = typeof body.parcelGeometry === "string" ? body.parcelGeometry : (body.parcelGeometry != null ? JSON.stringify(body.parcelGeometry) : null);
+  }
   const updated = await prisma.project.update({
     where: { id },
-    data: {
-      name: body.name,
-      description: body.description,
-      address: body.address,
-      municipality: body.municipality,
-      parcelIds: Array.isArray(body.parcelIds) ? body.parcelIds.join(",") : body.parcelIds,
-      parcelArea: body.parcelArea,
-      northAngle: body.northAngle != null ? Number(body.northAngle) : undefined,
-      status: body.status,
-      scale: body.scale,
-    },
+    data,
   });
   // Auto location plan: ensure LOCATION_PLAN document when address + parcels
   const hasAddress = !!updated.address?.trim();

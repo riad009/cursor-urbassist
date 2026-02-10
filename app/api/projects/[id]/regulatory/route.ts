@@ -4,6 +4,39 @@ import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+/** PATCH: update only footprint preference (includeOverhangInFootprint) in aiAnalysis */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const user = await getSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const project = await prisma.project.findFirst({ where: { id, userId: user.id } });
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const body = await request.json().catch(() => ({}));
+    const includeOverhangInFootprint = body.includeOverhangInFootprint === true;
+    const existing = await prisma.regulatoryAnalysis.findUnique({
+      where: { projectId: id },
+    });
+    const currentAi = (existing?.aiAnalysis as Record<string, unknown>) || {};
+    const updatedAi = { ...currentAi, includeOverhangInFootprint };
+    await prisma.regulatoryAnalysis.upsert({
+      where: { projectId: id },
+      create: {
+        projectId: id,
+        aiAnalysis: updatedAi as object,
+      },
+      update: { aiAnalysis: updatedAi as object },
+    });
+    return NextResponse.json({ success: true, includeOverhangInFootprint });
+  } catch (e) {
+    console.error("Regulatory PATCH:", e);
+    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

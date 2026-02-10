@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
@@ -13,6 +13,8 @@ import {
   Layers,
   Download,
   ArrowRight,
+  FileDown,
+  Ruler,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
@@ -20,7 +22,7 @@ import { LocationMap } from "@/components/location-plan/LocationMap";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 
-export default function LocationPlanPage() {
+function LocationPlanPageContent() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const [projects, setProjects] = useState<
@@ -40,6 +42,8 @@ export default function LocationPlanPage() {
   const [zoomLevel, setZoomLevel] = useState(6);
   const [loadingAddress, setLoadingAddress] = useState(false);
   const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
+  const [paperFormat, setPaperFormat] = useState<"A4" | "A3">("A3");
+  const [projectDetails, setProjectDetails] = useState<{ address?: string | null; parcelIds?: string[]; zoneType?: string | null } | null>(null);
 
   const projectIdFromUrl = searchParams.get("project");
 
@@ -58,7 +62,10 @@ export default function LocationPlanPage() {
   }, [projectIdFromUrl, projects]);
 
   useEffect(() => {
-    if (!selectedProjectId) return;
+    if (!selectedProjectId) {
+      setProjectDetails(null);
+      return;
+    }
     const project = projects.find((p) => p.id === selectedProjectId) as { id: string; coordinates?: string | null; address?: string | null; parcelIds?: string } | undefined;
     if (!project?.coordinates) return;
     try {
@@ -69,10 +76,26 @@ export default function LocationPlanPage() {
     } catch {
       setSelectedCoords(null);
     }
-    // Auto location plan: ensure document exists when address + parcels are set
     if (project?.address && (project?.parcelIds || project?.coordinates)) {
       fetch(`/api/projects/${selectedProjectId}/location-plan/ensure`, { method: "POST" }).catch(() => {});
     }
+    fetch(`/api/projects/${selectedProjectId}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => {
+        const p = d.project;
+        if (p) {
+          const parcelIds = typeof p.parcelIds === "string" ? (p.parcelIds ? p.parcelIds.split(",").filter(Boolean) : []) : (p.parcelIds || []);
+          const zoneType = p.regulatoryAnalysis?.zoneType ?? p.zoneType ?? null;
+          setProjectDetails({
+            address: p.address,
+            parcelIds: Array.isArray(parcelIds) ? parcelIds : [],
+            zoneType,
+          });
+        } else {
+          setProjectDetails(null);
+        }
+      })
+      .catch(() => setProjectDetails(null));
   }, [selectedProjectId, projects]);
 
   const searchAddress = useCallback(async () => {
@@ -124,11 +147,41 @@ export default function LocationPlanPage() {
             <div>
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <MapPin className="w-5 h-5 text-blue-400" />
-                Location Plan
+                Location Plan (Plan de situation)
               </h1>
               <p className="text-slate-400 text-sm mt-1">
-                Interactive map with cadastral overlay and aerial view.
+                Reposition aerial, IGN, or cadastral views. Each view includes a graphical scale. Select format and export to PDF.
               </p>
+            </div>
+
+            {/* Format A4 / A3 */}
+            <div>
+              <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+                <Ruler className="w-4 h-4 text-blue-400" />
+                Format
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("A4")}
+                  className={cn(
+                    "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    paperFormat === "A4" ? "bg-blue-500/30 text-blue-300 border border-blue-500/50" : "bg-slate-800/50 text-slate-400 border border-white/10 hover:border-white/20"
+                  )}
+                >
+                  A4
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("A3")}
+                  className={cn(
+                    "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    paperFormat === "A3" ? "bg-blue-500/30 text-blue-300 border border-blue-500/50" : "bg-slate-800/50 text-slate-400 border border-white/10 hover:border-white/20"
+                  )}
+                >
+                  A3
+                </button>
+              </div>
             </div>
 
             {/* Search Address */}
@@ -295,25 +348,53 @@ export default function LocationPlanPage() {
               </div>
             )}
 
+            {/* Project info (all previously requested information) */}
+            {selectedProjectId && projectDetails && (
+              <div className="p-3 rounded-xl bg-slate-800/80 border border-white/10">
+                <h3 className="text-sm font-semibold text-white mb-2">Project information</h3>
+                <ul className="text-xs text-slate-300 space-y-1">
+                  {projectDetails.address && (
+                    <li><span className="text-slate-500">Address:</span> {projectDetails.address}</li>
+                  )}
+                  {projectDetails.parcelIds && projectDetails.parcelIds.length > 0 && (
+                    <li><span className="text-slate-500">Parcels:</span> {projectDetails.parcelIds.join(", ")}</li>
+                  )}
+                  {projectDetails.zoneType && (
+                    <li><span className="text-slate-500">PLU zone:</span> {projectDetails.zoneType}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
             {/* Map Info */}
             <div>
               <h3 className="text-sm font-semibold text-white mb-2">Map Info</h3>
               <div className="text-sm text-slate-400">
                 Zoom Level: <span className="text-white font-medium">{zoomLevel}</span>
               </div>
+              <p className="text-xs text-slate-500 mt-1">Graphical scale is shown on the map (bottom-left).</p>
             </div>
           </div>
 
           {/* Main map area */}
           <div className="flex-1 flex flex-col min-w-0 relative">
-            <div className="absolute top-4 right-4 z-[1000]">
+            <div className="absolute top-4 right-4 z-[1000] flex flex-wrap gap-2">
+              {selectedProjectId && (
+                <Link
+                  href={`/export?project=${selectedProjectId}&doc=LOCATION_PLAN&paper=${paperFormat.toLowerCase()}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium shadow-lg"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Export PDF ({paperFormat})
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={exportMap}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium shadow-lg"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium"
               >
                 <Download className="w-4 h-4" />
-                Export Map
+                Open in OSM
               </button>
             </div>
 
@@ -341,5 +422,19 @@ export default function LocationPlanPage() {
         </div>
       </div>
     </Navigation>
+  );
+}
+
+export default function LocationPlanPage() {
+  return (
+    <Suspense fallback={
+      <Navigation>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+        </div>
+      </Navigation>
+    }>
+      <LocationPlanPageContent />
+    </Suspense>
   );
 }

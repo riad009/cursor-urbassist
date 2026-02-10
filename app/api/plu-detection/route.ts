@@ -1,19 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Automatic PLU/PLUi Zone Detection from address
-// PLU zone: official GPU API at https://www.geoportail-urbanisme.gouv.fr/api
-//   - Tries GET /api/gpu/zone-urba?lon=&lat= then GET /feature-info/du?lon=&lat=&typeName=zone_urba.
-// Documents: API Carto (https://apicarto.ign.fr/api/doc/gpu) for /api/gpu/document.
-// Zone responses are GeoJSON FeatureCollection; properties follow CNIG (libelle, typezone, libelong).
+// Uses all GPU endpoints (Documents d'urbanisme: PLU, POS, CC, PSMV):
+//   - zone-urba: official GPU then API Carto. Secteur-cc for CC when no PLU zone.
+//   - document, secteur-cc, prescription-surf/lin/pct, info-surf/lin/pct via API Carto (lon/lat).
+// https://www.geoportail-urbanisme.gouv.fr/api and https://apicarto.ign.fr/api/doc/gpu
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-/** Broad category codes only (CNIG typezone). More specific codes (libelle) like AUD, UA, UB take precedence. */
+const GPU_BASE = "https://www.geoportail-urbanisme.gouv.fr/api";
+const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
+
+/** GPU layer paths (lon/lat query). */
+const GPU_LAYERS = [
+  "document",
+  "zone-urba",
+  "secteur-cc",
+  "prescription-surf",
+  "prescription-lin",
+  "prescription-pct",
+  "info-surf",
+  "info-lin",
+  "info-pct",
+] as const;
+
+async function fetchGpuLayer(
+  baseUrl: string,
+  path: string,
+  lng: number,
+  lat: number
+): Promise<unknown[]> {
+  try {
+    const res = await fetch(`${baseUrl}/${path}?lon=${lng}&lat=${lat}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data?.features ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Broad category codes only (CNIG typezone). */
 const BROAD_ZONE_CODES = new Set(["U", "AU", "A", "N"]);
 
 /**
- * When the API returns multiple zone features at a point, prefer the one with a specific zone code (libelle)
- * e.g. "AUD" over the broad category "U" or "AU", so the displayed zone matches official PLU data.
+ * Priority order for zone libelle when multiple specific zones overlap (e.g. AUD vs Uj).
+ * Lower index = higher priority. AUD (zone à urbaniser diffuse) preferred over Uj (urbaine loisirs).
+ */
+const ZONE_LIBELLE_PRIORITY: string[] = [
+  "AUD", // Zone à urbaniser d'habitat diffus — often the actual applicable zone when overlapping U
+  "AU", "AUS", "AUL", "AUH", "AUM", "AUN", // other AU
+  "UA", "UB", "UC", "UD", "UE", "UF", "UG", "UH", "UI", "UJ", "UK", "UL", "UM", "UN", "UP", "UQ", "UR", "US", "UT", "UU", "UV", "UW", "UX", "UY", "UZ", // U sub-types
+];
+
+function libellePriority(libelle: string): number {
+  const upper = libelle.trim().toUpperCase();
+  const i = ZONE_LIBELLE_PRIORITY.indexOf(upper);
+  return i === -1 ? ZONE_LIBELLE_PRIORITY.length : i;
+}
+
+/**
+ * When the API returns multiple zone features at a point, pick the best applicable zone:
+ * - Exclude broad codes (U, AU, A, N) when a more specific code exists.
+ * - Prefer AUD over Uj (and AU-type over U-type) when both are present.
  */
 function pickBestZoneFeature(
   features: Array<{ properties?: Record<string, unknown> }>
@@ -23,10 +74,17 @@ function pickBestZoneFeature(
     (f) => f.properties?.libelle && typeof f.properties.libelle === "string"
   );
   if (withLibelle.length === 0) return features[0];
-  const specific = withLibelle.find(
+  const specific = withLibelle.filter(
     (f) => !BROAD_ZONE_CODES.has(String(f.properties?.libelle).trim().toUpperCase())
   );
-  return specific ?? withLibelle[0] ?? features[0];
+  if (specific.length === 0) return withLibelle[0] ?? features[0];
+  // Prefer by priority (AUD before Uj, etc.)
+  const best = specific.sort(
+    (a, b) =>
+      libellePriority(String(a.properties?.libelle ?? "")) -
+      libellePriority(String(b.properties?.libelle ?? ""))
+  )[0];
+  return best ?? specific[0] ?? features[0];
 }
 
 export async function POST(request: NextRequest) {
@@ -80,15 +138,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 2: PLU zone from Géoportail de l'Urbanisme (https://www.geoportail-urbanisme.gouv.fr/api)
-    // Try GET /api/gpu/zone-urba then GET /feature-info/du?typeName=zone_urba; fallback API Carto.
-    // Per CNIG/GPU: libelle = exact zone code; typezone = broad category (U, AU, A, N).
-    const GPU_BASE = "https://www.geoportail-urbanisme.gouv.fr/api";
+    // Step 2: Zone from GPU — try official GPU then API Carto (GET /api/gpu/zone-urba)
     let zoneFeatures: unknown[] = [];
     const zoneUrls: string[] = [
       `${GPU_BASE}/gpu/zone-urba?lon=${lng}&lat=${lat}`,
       `${GPU_BASE}/feature-info/du?lon=${lng}&lat=${lat}&typeName=zone_urba`,
-      `https://apicarto.ign.fr/api/gpu/zone-urba?lon=${lng}&lat=${lat}`,
+      `${APICARTO_GPU}/zone-urba?lon=${lng}&lat=${lat}`,
     ];
     for (const url of zoneUrls) {
       try {
@@ -112,44 +167,61 @@ export async function POST(request: NextRequest) {
           }
           break;
         }
-      } catch (e) {
+      } catch {
         continue;
       }
     }
 
-    // Step 3: Try to get PLU document info and PDF URL
-    try {
-      const docRes = await fetch(
-        `https://apicarto.ign.fr/api/gpu/document?lon=${lng}&lat=${lat}`,
-        { signal: AbortSignal.timeout(10000) }
-      );
+    // Step 2b: Fetch all other GPU layers (document, secteur-cc, prescriptions, info) from API Carto
+    const [
+      documentFeatures,
+      secteurCcFeatures,
+      prescriptionSurfFeatures,
+      prescriptionLinFeatures,
+      prescriptionPctFeatures,
+      infoSurfFeatures,
+      infoLinFeatures,
+      infoPctFeatures,
+    ] = await Promise.all([
+      fetchGpuLayer(APICARTO_GPU, "document", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "secteur-cc", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "prescription-surf", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "prescription-lin", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "prescription-pct", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "info-surf", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "info-lin", lng, lat),
+      fetchGpuLayer(APICARTO_GPU, "info-pct", lng, lat),
+    ]);
 
-      if (docRes.ok) {
-        const docData = await docRes.json();
-        if (docData.features && docData.features.length > 0) {
-          const doc = docData.features[0].properties as Record<string, unknown>;
-          pluInfo.pluStatus = (doc.etat as string) || null;
-          pluInfo.pluType = pluInfo.pluType || (doc.typedoc as string) || null;
-          // Store PDF/document URL if API provides it (lien, url, document_url, etc.)
-          const docUrl =
-            (doc.lien as string) ||
-            (doc.url as string) ||
-            (doc.document_url as string) ||
-            (doc.pdf_url as string);
-          if (docUrl && typeof docUrl === "string") {
-            pluInfo.pdfUrl = docUrl;
-          }
-        }
+    // Document layer: fill pluStatus, pluType, pdfUrl (PLU/POS/CC/PSMV)
+    if (documentFeatures.length > 0) {
+      const doc = (documentFeatures[0] as { properties?: Record<string, unknown> }).properties;
+      if (doc) {
+        pluInfo.pluStatus = pluInfo.pluStatus ?? (doc.etat as string) ?? null;
+        pluInfo.pluType = pluInfo.pluType ?? (doc.typedoc as string) ?? null;
+        const docUrl =
+          (doc.lien as string) ??
+          (doc.url as string) ??
+          (doc.document_url as string) ??
+          (doc.pdf_url as string);
+        if (docUrl && typeof docUrl === "string") pluInfo.pdfUrl = docUrl;
       }
-      // Fallback: link to Géoportail document portal for the commune (user can find official PLU PDF there)
-      if (!pluInfo.pdfUrl && communeCode) {
-        pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/document/commune/${communeCode}`;
-      }
-    } catch (e) {
-      console.log("GPU document API unavailable:", e);
+    }
+    if (!pluInfo.pdfUrl && communeCode) {
+      pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/document/commune/${communeCode}`;
     }
 
-    // Step 4: If no zone detected via API, provide estimated zone
+    // CC without PLU zone: use secteur-cc as sector (Carte Communale)
+    if (!pluInfo.zoneType && secteurCcFeatures.length > 0) {
+      const first = (secteurCcFeatures[0] as { properties?: Record<string, unknown> }).properties;
+      if (first) {
+        pluInfo.zoneType = (first.libelle as string) || "CC";
+        pluInfo.zoneName = (first.libelong as string) || (first.libelle as string) || "Secteur Carte Communale";
+        pluInfo.pluType = pluInfo.pluType || "CC";
+      }
+    }
+
+    // Step 3: If still no zone, provide estimated zone
     if (!pluInfo.zoneType) {
       // Estimate zone based on commune population and location
       try {
@@ -239,8 +311,19 @@ Only return the JSON, no other text.`;
     return NextResponse.json({
       success: true,
       plu: pluInfo,
-      zoneFeatures, // GeoJSON features with geometry for zone map
+      zoneFeatures,
       source: pluInfo.pluStatus ? "gpu" : "estimated",
+      gpu: {
+        document: documentFeatures,
+        zone: zoneFeatures,
+        secteurCc: secteurCcFeatures,
+        prescriptionSurf: prescriptionSurfFeatures,
+        prescriptionLin: prescriptionLinFeatures,
+        prescriptionPct: prescriptionPctFeatures,
+        infoSurf: infoSurfFeatures,
+        infoLin: infoLinFeatures,
+        infoPct: infoPctFeatures,
+      },
     });
   } catch (error) {
     console.error("PLU detection error:", error);

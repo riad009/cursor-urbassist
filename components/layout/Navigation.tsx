@@ -1,15 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
+  FileCheck,
   FolderKanban,
   PenTool,
-  FileText,
-  FileCheck,
   Image,
   Calculator,
   Download,
@@ -30,6 +29,7 @@ import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute } from "@/lib/step-
 
 const stepIcons = [
   LayoutDashboard,
+  FileCheck,
   MapPin,
   PenTool,
   Building2,
@@ -39,15 +39,13 @@ const stepIcons = [
   Download,
 ] as const;
 
+// Top menu: only Dashboard and Project. Other features (AI Analysis, Feasibility, Developer) are reached via the dashboard.
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, color: "from-blue-500 to-cyan-500" },
-  { href: "/projects", label: "Projects", icon: FolderKanban, color: "from-violet-500 to-purple-500" },
-  { href: "/regulations", label: "AI Analysis", icon: FileText, color: "from-amber-500 to-orange-500" },
-  { href: "/feasibility", label: "Feasibility", icon: FileCheck, color: "from-emerald-500 to-teal-500" },
-  { href: "/developer", label: "Developer", icon: Sparkles, color: "from-purple-500 to-pink-500" },
+  { href: "/projects", label: "Project", icon: FolderKanban, color: "from-violet-500 to-purple-500" },
 ];
 
-export function Navigation({ children }: { children: React.ReactNode }) {
+function NavigationInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -84,7 +82,12 @@ export function Navigation({ children }: { children: React.ReactNode }) {
               <h1 className="text-lg font-bold tracking-tight">
                 <span className="gradient-text">UrbAssist</span>
               </h1>
-              <p className="text-[10px] text-slate-400 -mt-1">UrbAssist</p>
+              <p className="text-[10px] text-slate-400 -mt-1 flex items-center gap-1.5">
+                UrbAssist
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-700/80 text-slate-300 border border-white/10">
+                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "3"}
+                </span>
+              </p>
             </div>
           </Link>
 
@@ -253,6 +256,34 @@ export function Navigation({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+  );
+}
+
+function NavigationFallback({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen">
+      <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/10">
+        <div className="flex items-center justify-between px-4 h-16">
+          <Link href="/" className="flex items-center gap-3 group">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/25" />
+            </div>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-bold tracking-tight"><span className="gradient-text">UrbAssist</span></h1>
+            </div>
+          </Link>
+        </div>
+      </header>
+      <main className="min-h-screen pt-16">{children}</main>
+    </div>
+  );
+}
+
+export function Navigation({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<NavigationFallback>{children}</NavigationFallback>}>
+      <NavigationInner>{children}</NavigationInner>
+    </Suspense>
   );
 }
 

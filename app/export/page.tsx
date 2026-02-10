@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -168,15 +169,16 @@ const DOCUMENT_TYPES = [
   { id: "FULL_PACKAGE", name: "Full Package", credits: 10, description: "All documents" },
 ];
 
-export default function ExportPage() {
+function ExportPageContent() {
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const [projects, setProjects] = useState<{ id: string; name: string; address?: string | null }[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [selectedDocumentType, setSelectedDocumentType] = useState("LOCATION_PLAN");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(searchParams.get("project") || "");
+  const [selectedDocumentType, setSelectedDocumentType] = useState(searchParams.get("doc") || "LOCATION_PLAN");
   const [apiExporting, setApiExporting] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("plans");
-  const [selectedPaper, setSelectedPaper] = useState("a3");
+  const [selectedPaper, setSelectedPaper] = useState(searchParams.get("paper") === "a4" ? "a4" : "a3");
   const [selectedScale, setSelectedScale] = useState("1:100");
   const [isExporting, setIsExporting] = useState(false);
   const [exportComplete, setExportComplete] = useState(false);
@@ -353,39 +355,16 @@ export default function ExportPage() {
         link.href = dataUrl;
         link.click();
       } else if (outputFormat === 'PDF') {
-        // For PDF, we'll create a simple text-based PDF
-        const pdfContent = `%PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${size.w} ${size.h}] /Contents 4 0 R >> endobj
-4 0 obj << /Length 200 >> stream
-BT
-/F1 24 Tf
-50 ${size.h - 50} Td
-(${projectInfo.projectName}) Tj
-0 -30 Td
-/F1 14 Tf
-(Client: ${projectInfo.clientName}) Tj
-0 -20 Td
-(Location: ${projectInfo.location}) Tj
-0 -20 Td
-(Scale: ${selectedScale}) Tj
-0 -20 Td
-(Date: ${projectInfo.date}) Tj
-ET
-endstream endobj
-xref
-0 5
-trailer << /Size 5 /Root 1 0 R >>
-%%EOF`;
-        
-        const blob = new Blob([pdfContent], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.download = `${projectInfo.projectName.replace(/\\s+/g, '_')}_${selectedPaper.toUpperCase()}.pdf`;
-        link.href = url;
-        link.click();
-        URL.revokeObjectURL(url);
+        // Use jsPDF so the file is a valid PDF (fixes "damaged" Acrobat error from hand-crafted PDF)
+        const { jsPDF } = await import('jspdf');
+        const dataUrl = canvas.toDataURL('image/png', 0.95);
+        const doc = new jsPDF({
+          orientation: size.w > size.h ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [size.w, size.h],
+        });
+        doc.addImage(dataUrl, 'PNG', 0, 0, size.w, size.h);
+        doc.save(`${projectInfo.projectName.replace(/\s+/g, '_')}_${selectedPaper.toUpperCase()}.pdf`);
       } else {
         // For other formats, export as PNG
         const dataUrl = canvas.toDataURL('image/png');
@@ -816,5 +795,19 @@ trailer << /Size 5 /Root 1 0 R >>
         </div>
       </div>
     </Navigation>
+  );
+}
+
+export default function ExportPage() {
+  return (
+    <Suspense fallback={
+      <Navigation>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+        </div>
+      </Navigation>
+    }>
+      <ExportPageContent />
+    </Suspense>
   );
 }

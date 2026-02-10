@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateElevation } from "@/lib/elevationGenerator";
-import type { Building3D } from "../building-3d/route";
+import type { Building3D } from "@/lib/building3d";
 
 const FACADES = [
   { name: "north" as const, buildingWidthKey: "width" as const },

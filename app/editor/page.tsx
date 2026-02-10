@@ -42,6 +42,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
+import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
 
 type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd";
 
@@ -145,7 +146,14 @@ function EditorPageContent() {
   const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(projectIdFromUrl);
-  const [projectForEditor, setProjectForEditor] = useState<{ parcelArea: number; northAngle: number; minGreenPct: number } | null>(null);
+  const [projectForEditor, setProjectForEditor] = useState<{
+    parcelArea: number;
+    northAngle: number;
+    minGreenPct: number;
+    parcelGeometry?: string | null;
+  } | null>(null);
+  const projectDataRef = useRef<{ parcelGeometry?: string | null } | null>(null);
+  const parcelsDrawnFromGeometryRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [unnamedElementsWarning, setUnnamedElementsWarning] = useState<{ index: number; type: string }[] | null>(null);
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -201,45 +209,161 @@ function EditorPageContent() {
           const m = ai.greenSpaceRequirements.match(/(\d+)\s*%/);
           if (m) minGreenPct = parseInt(m[1], 10);
         }
+        const parcelGeometry = project.parcelGeometry ?? null;
         setProjectForEditor({
           parcelArea: Number(project.parcelArea) || 500,
           northAngle: Number(project.northAngle) ?? Number(project.sitePlanData?.northAngle) ?? 0,
           minGreenPct,
+          parcelGeometry,
         });
       })
       .catch(() => setProjectForEditor(null));
   }, [currentProjectId]);
 
-  // Load site plan when project selected
-  const loadSitePlan = useCallback((projectId: string) => {
-    fetch(`/api/projects/${projectId}/site-plan`)
-      .then((r) => r.json())
-      .then((data) => {
-        const canvas = fabricRef.current;
-        if (!canvas || !data.sitePlan?.canvasData) return;
-        try {
-          const json = typeof data.sitePlan.canvasData === "string"
-            ? JSON.parse(data.sitePlan.canvasData)
-            : data.sitePlan.canvasData;
-          canvas.loadFromJSON(json, () => {
-            const savedElements = Array.isArray(data.sitePlan?.elements) ? data.sitePlan.elements : [];
-            const objects = canvas.getObjects().filter(
-              (o) => !(o as any).isGrid && !(o as any).isMeasurement && !(o as any).isPolygonPreview
-            );
-            savedElements.forEach((el: { name?: string }, i: number) => {
-              if (objects[i] && el?.name) (objects[i] as any).elementName = el.name;
-            });
-            canvas.renderAll();
-            updateLayers(canvas);
-          });
-        } catch (_) {}
-      })
-      .catch(() => {});
-  }, [updateLayers]);
+  useEffect(() => {
+    projectDataRef.current = projectForEditor ? { parcelGeometry: projectForEditor.parcelGeometry } : null;
+  }, [projectForEditor]);
+
+  const addPolygonMeasurements = useCallback(
+    (polygon: fabric.Polygon, id: string) => {
+      const points = polygon.points;
+      if (!points || points.length < 2) return;
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const createDimensionLine = (x1: number, y1: number, x2: number, y2: number, _id: string, offset: number, color: string) => {
+        const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        const ppm = currentScale.pixelsPerMeter;
+        const m = dist / ppm;
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        const line = new fabric.Line([x1, y1, x2, y2], {
+          stroke: color,
+          strokeWidth: 1,
+          strokeDashArray: [5, 3],
+          selectable: false,
+          evented: false,
+        }) as fabric.Line & { isMeasurement?: boolean; parentId?: string };
+        (line as any).isMeasurement = true;
+        (line as any).parentId = id;
+        const text = new fabric.Text(`${m.toFixed(2)} m`, {
+          left: midX,
+          top: midY - offset,
+          fontSize: 12,
+          fontFamily: "monospace",
+          fill: "#0f172a",
+          backgroundColor: color,
+          padding: 3,
+          originX: "center",
+          selectable: false,
+          evented: false,
+        }) as fabric.Text & { isMeasurement?: boolean; parentId?: string };
+        (text as any).isMeasurement = true;
+        (text as any).parentId = id;
+        return [line, text];
+      };
+      const measurements: fabric.FabricObject[] = [];
+      const matrix = polygon.calcTransformMatrix();
+      for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const t1 = fabric.util.transformPoint(new fabric.Point(p1.x, p1.y), matrix);
+        const t2 = fabric.util.transformPoint(new fabric.Point(p2.x, p2.y), matrix);
+        measurements.push(
+          ...createDimensionLine(t1.x, t1.y, t2.x, t2.y, id, 25, "#22c55e")
+        );
+      }
+      measurementLabelsRef.current.set(id, measurements);
+      measurements.forEach((el) => canvas.add(el));
+    },
+    [currentScale.pixelsPerMeter]
+  );
+
+  const drawParcelsFromProjectData = useCallback(() => {
+    const canvas = fabricRef.current;
+    const data = projectDataRef.current;
+    if (!canvas || !data?.parcelGeometry) return;
+    const raw = typeof data.parcelGeometry === "string" ? data.parcelGeometry : JSON.stringify(data.parcelGeometry);
+    if (parcelsDrawnFromGeometryRef.current === raw) return;
+    const hasParcel = canvas.getObjects().some((o: fabric.FabricObject) => (o as any).isParcel && !(o as any).isGrid && !(o as any).isMeasurement);
+    if (hasParcel) return;
+    const shapes = parcelGeometryToShapes(data.parcelGeometry, {
+      canvasWidth: canvasSize.width,
+      canvasHeight: canvasSize.height,
+      pixelsPerMeter: currentScale.pixelsPerMeter,
+    });
+    if (shapes.length === 0) return;
+    shapes.forEach((shape, i) => {
+      const polygon = new fabric.Polygon(shape.points, {
+        left: shape.left,
+        top: shape.top,
+        originX: "center",
+        originY: "center",
+        fill: "rgba(34, 197, 94, 0.1)",
+        stroke: "#22c55e",
+        strokeWidth: 3,
+      });
+      const shapeId = `parcel-geo-${currentProjectId}-${i}-${Date.now()}`;
+      (polygon as any).id = shapeId;
+      (polygon as any).isParcel = true;
+      (polygon as any).elementName = "Land Parcel";
+      canvas.add(polygon);
+      addPolygonMeasurements(polygon, shapeId);
+    });
+    parcelsDrawnFromGeometryRef.current = raw;
+    canvas.renderAll();
+    updateLayers(canvas);
+  }, [currentProjectId, canvasSize, currentScale.pixelsPerMeter, addPolygonMeasurements, updateLayers]);
+
+  // Load site plan when project selected; after load, draw parcel outlines from project data if needed
+  const loadSitePlan = useCallback(
+    (projectId: string, onLoaded?: () => void) => {
+      parcelsDrawnFromGeometryRef.current = null;
+      fetch(`/api/projects/${projectId}/site-plan`)
+        .then((r) => r.json())
+        .then((data) => {
+          const canvas = fabricRef.current;
+          if (!canvas) return;
+          if (data.sitePlan?.canvasData) {
+            try {
+              const json =
+                typeof data.sitePlan.canvasData === "string"
+                  ? JSON.parse(data.sitePlan.canvasData)
+                  : data.sitePlan.canvasData;
+              canvas.loadFromJSON(json, () => {
+                const savedElements = Array.isArray(data.sitePlan?.elements) ? data.sitePlan.elements : [];
+                const objects = canvas.getObjects().filter(
+                  (o) => !(o as any).isGrid && !(o as any).isMeasurement && !(o as any).isPolygonPreview
+                );
+                savedElements.forEach((el: { name?: string }, i: number) => {
+                  if (objects[i] && el?.name) (objects[i] as any).elementName = el.name;
+                });
+                canvas.renderAll();
+                updateLayers(canvas);
+                onLoaded?.();
+              });
+            } catch (_) {
+              onLoaded?.();
+            }
+          } else {
+            onLoaded?.();
+          }
+        })
+        .catch(() => {
+          onLoaded?.();
+        });
+    },
+    [updateLayers]
+  );
 
   useEffect(() => {
-    if (currentProjectId && canvasReady) loadSitePlan(currentProjectId);
-  }, [currentProjectId, canvasReady, loadSitePlan]);
+    if (currentProjectId && canvasReady) loadSitePlan(currentProjectId, drawParcelsFromProjectData);
+  }, [currentProjectId, canvasReady, loadSitePlan, drawParcelsFromProjectData]);
+
+  // When project data (with parcelGeometry) arrives after canvas is ready, draw parcels if not yet drawn
+  useEffect(() => {
+    if (!currentProjectId || !canvasReady || !projectForEditor?.parcelGeometry) return;
+    drawParcelsFromProjectData();
+  }, [currentProjectId, canvasReady, projectForEditor?.parcelGeometry, drawParcelsFromProjectData]);
 
   const saveSitePlan = useCallback(async () => {
     if (!currentProjectId) return;
@@ -522,40 +646,6 @@ function EditorPageContent() {
     
     // Right measurement (height)
     measurements.push(...createDimensionLine(left + width, top, left + width, top + height, id, 25, "#fbbf24"));
-
-    measurementLabelsRef.current.set(id, measurements);
-  }, [createDimensionLine]);
-
-  // Add measurements to a polygon/parcel
-  const addPolygonMeasurements = useCallback((polygon: fabric.Polygon, id: string) => {
-    const points = polygon.points;
-    if (!points || points.length < 2) return;
-
-    const measurements: fabric.FabricObject[] = [];
-
-    // Get the polygon's transformation matrix
-    const matrix = polygon.calcTransformMatrix();
-    
-    for (let i = 0; i < points.length; i++) {
-      const p1 = points[i];
-      const p2 = points[(i + 1) % points.length];
-      
-      // Transform points to canvas coordinates
-      const transformed1 = fabric.util.transformPoint(
-        new fabric.Point(p1.x, p1.y),
-        matrix
-      );
-      const transformed2 = fabric.util.transformPoint(
-        new fabric.Point(p2.x, p2.y),
-        matrix
-      );
-
-      measurements.push(...createDimensionLine(
-        transformed1.x, transformed1.y,
-        transformed2.x, transformed2.y,
-        id, 25, "#22c55e"
-      ));
-    }
 
     measurementLabelsRef.current.set(id, measurements);
   }, [createDimensionLine]);
@@ -1391,6 +1481,13 @@ function EditorPageContent() {
           </Link>
           <div className="h-6 w-px bg-white/10" />
           <h1 className="text-lg font-semibold text-white">Technical Drawing Editor</h1>
+          <Link
+            href={currentProjectId ? `/site-plan?project=${currentProjectId}` : "/site-plan"}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors text-sm font-medium"
+          >
+            <Layers className="w-4 h-4" />
+            <span>Site Plan</span>
+          </Link>
           <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-xs font-medium">
             Scale {currentScale.label}
           </span>

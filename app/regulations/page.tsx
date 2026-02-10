@@ -149,6 +149,7 @@ const categoryIcons: Record<string, React.ElementType> = {
   "Green Space": Trees,
   Distance: Ruler,
   Zone: MapPin,
+  Conclusion: FileText,
 };
 
 export default function RegulationsPage() {
@@ -179,27 +180,325 @@ export default function RegulationsPage() {
       .catch(() => setProjects([]));
   }, []);
 
-  const runAutoRegulatory = async () => {
+  const [showUploadFallback, setShowUploadFallback] = useState(false);
+  const [fallbackFile, setFallbackFile] = useState<File | null>(null);
+  const [uploadingFallback, setUploadingFallback] = useState(false);
+
+  const runAutoRegulatory = async (uploadedContent?: string) => {
     if (!selectedProjectId) return;
     setAutoRunning(true);
     setAutoMessage(null);
+    setShowUploadFallback(false);
     try {
+      const bodyPayload: Record<string, unknown> = {};
+      if (uploadedContent) bodyPayload.documentContent = uploadedContent;
+
       const res = await fetch(`/api/projects/${selectedProjectId}/regulatory/auto`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(bodyPayload),
       });
       const data = await res.json();
-      if (res.ok) {
-        setAutoMessage({ type: "success", text: "Automatic regulatory detection completed. Zone and PDF URL saved to project. Use Editor or Feasibility to see rules." });
+      if (res.ok && data.success) {
+        const creditsUsed = data.creditsUsed ?? 3;
+        const hasStructuredAnalysis =
+          data.analysis &&
+          (data.analysis.usageDesSols ||
+            data.analysis.conclusion ||
+            data.analysis.article1_occupations_interdites ||
+            data.analysis.summary);
+        if (hasStructuredAnalysis) {
+          const deepResults = transformDeepAnalysis(data.analysis, data.zoneType);
+          setResults(deepResults);
+          setAnalysisComplete(true);
+        }
+        setAutoMessage({ type: "success", text: `Deep PLU analysis completed (${creditsUsed} credits used). Zone: ${data.zoneType || "detected"}.` });
+      } else if (res.status === 402) {
+        setAutoMessage({ type: "error", text: data.error || "Insufficient credits for PLU analysis." });
       } else {
-        setAutoMessage({ type: "error", text: data.error || "Automatic detection failed." });
+        const errText = data.error || "Automatic detection failed.";
+        const showUpload =
+          res.status === 400 ||
+          res.status === 502 ||
+          data.code === "ZONE_OR_DOC_NOT_FOUND" ||
+          errText.includes("no coordinates") ||
+          errText.includes("PLU detection failed") ||
+          errText.includes("upload your PLU") ||
+          errText.includes("could not be retrieved");
+        if (showUpload) {
+          setShowUploadFallback(true);
+          setAutoMessage({
+            type: "error",
+            text: errText.includes("no address") || errText.includes("no coordinates")
+              ? "Project has no address or zone could not be detected. You can upload your PLU document below for analysis (3 credits)."
+              : "Zone or PLU document could not be retrieved automatically. Upload your PLU regulation (PDF) below for analysis (3 credits).",
+          });
+        } else {
+          setAutoMessage({ type: "error", text: errText });
+        }
       }
     } catch {
       setAutoMessage({ type: "error", text: "Request failed." });
     }
     setAutoRunning(false);
   };
+
+  const handleFallbackUpload = async () => {
+    if (!fallbackFile || !selectedProjectId) return;
+    setUploadingFallback(true);
+    try {
+      // Parse file content
+      let documentContent = "";
+      if (fallbackFile.type === "application/pdf" || fallbackFile.type.includes("word")) {
+        const formData = new FormData();
+        formData.append("file", fallbackFile);
+        const uploadRes = await fetch("/api/upload-document", { method: "POST", body: formData });
+        const uploadData = await uploadRes.json();
+        documentContent = uploadData.content || "";
+      } else {
+        documentContent = await fallbackFile.text();
+      }
+      if (!documentContent || documentContent.trim().length < 50) {
+        setAutoMessage({ type: "error", text: "Could not extract text from the document. Try a text-based PDF." });
+        setUploadingFallback(false);
+        return;
+      }
+      // Run analysis with uploaded content
+      await runAutoRegulatory(documentContent);
+    } catch {
+      setAutoMessage({ type: "error", text: "Upload failed." });
+    }
+    setUploadingFallback(false);
+  };
+
+  /** Map conformité from in-depth analysis to status */
+  function conformiteToStatus(conformite: string): AnalysisResult["status"] {
+    const c = String(conformite).toUpperCase();
+    if (c === "OUI") return "compliant";
+    if (c === "NON") return "violation";
+    if (c === "A VERIFIER") return "warning";
+    return "info"; // "Non concerné" or other
+  }
+
+  /** Transform the deep analysis (sections + items or legacy articles) into AnalysisResult[] */
+  function transformDeepAnalysis(analysis: Record<string, unknown>, zoneType?: string | null): AnalysisResult[] {
+    const results: AnalysisResult[] = [];
+    const zone = (analysis.zoneClassification as string) || zoneType || "";
+
+    // New in-depth format: sections with items (reglementation, conformite)
+    const sectionKeys = [
+      "usageDesSols",
+      "conditionsOccupation",
+      "implantationVolumetrie",
+      "aspectExterieur",
+      "stationnement",
+      "espacesLibres",
+      "reseauxVrd",
+      "autresReglementations",
+    ] as const;
+    const hasNewFormat =
+      sectionKeys.some((k) => analysis[k] && Array.isArray((analysis[k] as { items?: unknown[] })?.items)) ||
+      (analysis.conclusion && typeof (analysis.conclusion as { resume?: string })?.resume === "string");
+
+    if (hasNewFormat) {
+      if (zone) {
+        results.push({
+          category: "Zone",
+          title: "Zone PLU",
+          status: "info",
+          value: zone,
+          requirement: (analysis.zoneDescription as string) || zone,
+          regulationSource: "PLU",
+          zoneLabel: zone,
+        });
+      }
+      const situation = analysis.situationProjet as { lotissement?: boolean; abf?: boolean; ppr?: boolean; details?: string } | undefined;
+      if (situation && (situation.lotissement || situation.abf || situation.ppr || situation.details)) {
+        const parts = [
+          situation.lotissement && "Lotissement",
+          situation.abf && "Zone ABF",
+          situation.ppr && "PPR",
+        ].filter(Boolean);
+        results.push({
+          category: "Zone",
+          title: "Situation du projet",
+          status: situation.abf || situation.ppr ? "warning" : "info",
+          value: parts.length ? parts.join(", ") : (situation.details || "–"),
+          requirement: situation.details || "Contexte réglementaire du projet.",
+          regulationSource: "PLU",
+        });
+      }
+      for (const key of sectionKeys) {
+        const section = analysis[key] as { sectionTitle?: string; items?: { item: string; reglementation: string; conformite: string }[] } | undefined;
+        if (!section?.items?.length) continue;
+        const category = section.sectionTitle || key;
+        for (const row of section.items) {
+          results.push({
+            category,
+            title: row.item,
+            status: conformiteToStatus(row.conformite),
+            value: row.conformite,
+            requirement: row.reglementation,
+            fullRequirementText: row.reglementation,
+            regulationSource: "PLU – " + (section.sectionTitle || key),
+            zoneLabel: zone || undefined,
+          });
+        }
+      }
+      const conclusion = analysis.conclusion as { resume?: string; typeDossier?: string } | undefined;
+      if (conclusion?.resume || conclusion?.typeDossier) {
+        results.push({
+          category: "Conclusion",
+          title: "Résumé et type de dossier",
+          status: "info",
+          value: conclusion.typeDossier || "–",
+          requirement: conclusion.resume || "",
+          recommendation: conclusion.typeDossier ? `Type de dossier suggéré : ${conclusion.typeDossier}` : undefined,
+          regulationSource: "Analyse PLU",
+          zoneLabel: zone || undefined,
+        });
+      }
+      if (results.length > 0) return results;
+    }
+
+    // Legacy format: article-based (articles 1–16)
+    const summary = (analysis.summary || {}) as Record<string, unknown>;
+
+    if (zone) {
+      results.push({
+        category: "Zone", title: "Zone classification", status: "info",
+        value: zone,
+        requirement: (analysis.zoneDescription as string) || zone,
+        recommendation: (analysis.documentReference as string) || "",
+        regulationSource: (analysis.documentReference as string) || "PLU",
+        zoneLabel: zone,
+      });
+    }
+
+    // Height (Article 10)
+    const a10 = (analysis.article10_hauteur || {}) as Record<string, unknown>;
+    const maxH = a10.hauteurMax ?? a10.hauteurFaitage ?? (summary.maxHeight as number | null);
+    if (maxH != null) {
+      results.push({
+        category: "Height", title: "Maximum Building Height",
+        status: "compliant", value: `${maxH}m`,
+        requirement: `Max ${maxH}m — ${(a10.modeCalcul as string) || "hauteur au faîtage"}`,
+        recommendation: (a10.details as string) || "",
+        regulationSource: (a10.title as string) || "Article 10",
+        zoneLabel: zone, maxValue: `${maxH}m`, unit: "m",
+        fullRequirementText: (a10.content as string) || "",
+      });
+    }
+
+    // Setbacks (Articles 6, 7)
+    const a6 = (analysis.article6_implantation_voies || {}) as Record<string, unknown>;
+    const a7 = (analysis.article7_implantation_limites || {}) as Record<string, unknown>;
+    const setbacks = (summary.setbacks || {}) as Record<string, unknown>;
+    if (a6.recul != null || setbacks.front != null) {
+      const val = a6.recul ?? setbacks.front;
+      results.push({
+        category: "Setback", title: "Front Setback (voies)",
+        status: "compliant", value: `${val}m`,
+        requirement: `Min ${val}m — ${(a6.alignement as string) || "recul par rapport aux voies"}`,
+        regulationSource: (a6.title as string) || "Article 6",
+        zoneLabel: zone, minValue: `${val}m`, unit: "m",
+        fullRequirementText: (a6.content as string) || "",
+      });
+    }
+    if (a7.retrait != null || setbacks.side != null) {
+      const val = a7.retrait ?? setbacks.side;
+      results.push({
+        category: "Setback", title: "Side Setback (limites séparatives)",
+        status: "compliant", value: `${val}m`,
+        requirement: `${a7.enLimite ? "En limite autorisé" : `Min ${val}m`} — ${(a7.formuleH as string) || ""}`,
+        regulationSource: (a7.title as string) || "Article 7",
+        zoneLabel: zone, minValue: `${val}m`, unit: "m",
+        fullRequirementText: (a7.content as string) || "",
+      });
+    }
+
+    // Coverage (Article 9)
+    const a9 = (analysis.article9_emprise_sol || {}) as Record<string, unknown>;
+    const ces = a9.ces ?? summary.maxCoverageRatio;
+    if (ces != null) {
+      const pct = typeof ces === "number" && ces <= 1 ? `${Math.round((ces as number) * 100)}%` : `${ces}`;
+      results.push({
+        category: "Coverage", title: "Plot Coverage Ratio (CES)",
+        status: "compliant", value: pct,
+        requirement: `Max ${pct}`,
+        regulationSource: (a9.title as string) || "Article 9",
+        zoneLabel: zone, maxValue: pct, unit: "%",
+        fullRequirementText: (a9.content as string) || "",
+      });
+    }
+
+    // Parking (Article 12)
+    const a12 = (analysis.article12_stationnement || {}) as Record<string, unknown>;
+    if (a12.content || summary.parkingRequirements) {
+      results.push({
+        category: "Parking", title: "Parking Requirements",
+        status: "info", value: (a12.habitat as string) || (summary.parkingRequirements as string) || "",
+        requirement: (a12.content as string) || (summary.parkingRequirements as string) || "",
+        regulationSource: (a12.title as string) || "Article 12",
+        zoneLabel: zone,
+        fullRequirementText: `Habitat: ${a12.habitat || "–"} | Commerce: ${a12.commerce || "–"} | Vélos: ${a12.velo || "–"}`,
+      });
+    }
+
+    // Green space (Article 13)
+    const a13 = (analysis.article13_espaces_verts || {}) as Record<string, unknown>;
+    if (a13.content || summary.greenSpaceRequirements) {
+      results.push({
+        category: "Green Space", title: "Espaces verts & plantations",
+        status: "info",
+        value: a13.pourcentageMin != null ? `${a13.pourcentageMin}%` : (summary.greenSpaceRequirements as string) || "",
+        requirement: (a13.content as string) || (summary.greenSpaceRequirements as string) || "",
+        regulationSource: (a13.title as string) || "Article 13",
+        zoneLabel: zone,
+        fullRequirementText: (a13.content as string) || "",
+      });
+    }
+
+    // Architecture (Article 11)
+    const a11 = (analysis.article11_aspect_exterieur || {}) as Record<string, unknown>;
+    if (a11.content) {
+      results.push({
+        category: "Distance", title: "Aspect extérieur & architecture",
+        status: "info", value: "See details",
+        requirement: (a11.content as string) || "",
+        regulationSource: (a11.title as string) || "Article 11",
+        zoneLabel: zone,
+        fullRequirementText: (a11.content as string) || "",
+        context: JSON.stringify({ toiture: a11.toiture, facades: a11.facades, clotures: a11.clotures }),
+      });
+    }
+
+    // Risks
+    const risques = (analysis.risques_naturels || {}) as Record<string, unknown>;
+    if (risques.pprn || risques.inondation || risques.sismique) {
+      results.push({
+        category: "Zone", title: "Risques naturels",
+        status: risques.pprn ? "warning" : "info",
+        value: [risques.pprn && "PPRN", risques.inondation && "Inondation", risques.sismique].filter(Boolean).join(", ") || "Aucun",
+        requirement: (risques.details as string) || "",
+        regulationSource: "Risques naturels",
+      });
+    }
+
+    // Servitudes
+    const servitudes = (analysis.servitudes || {}) as Record<string, unknown>;
+    if (servitudes.abf || servitudes.monument_historique || servitudes.site_classe) {
+      results.push({
+        category: "Zone", title: "Servitudes",
+        status: "warning",
+        value: [servitudes.abf && "ABF", servitudes.monument_historique && "Monument historique", servitudes.site_classe && "Site classé"].filter(Boolean).join(", ") || "Aucune",
+        requirement: (servitudes.details as string) || "",
+        regulationSource: "Servitudes d'utilité publique",
+      });
+    }
+
+    return results;
+  }
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -695,26 +994,55 @@ Context:
                     ))}
                   </select>
                   <button
-                    onClick={runAutoRegulatory}
+                    onClick={() => runAutoRegulatory()}
                     disabled={!selectedProjectId || autoRunning}
                     className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold hover:shadow-lg transition-all disabled:opacity-50"
                   >
                     {autoRunning ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        Running automatic detection...
+                        Running deep PLU analysis…
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-5 h-5" />
-                        Run automatic regulatory detection
+                        Run deep PLU analysis (3 credits)
                       </>
                     )}
                   </button>
+                  <p className="text-xs text-slate-500">The analysis covers articles 1–16 (CNIG standard): occupations, setbacks, height, coverage, parking, green space, architecture, risks, etc.</p>
                   {autoMessage && (
                     <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-400" : "text-red-400")}>
                       {autoMessage.text}
                     </p>
+                  )}
+                  {/* Fallback: upload your own PLU if zone not detected */}
+                  {showUploadFallback && (
+                    <div className="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3">
+                      <p className="text-sm font-medium text-amber-200">
+                        Zone not detected automatically. Upload your PLU document for analysis.
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        If the address is in an area without digitized PLU, or if the detected zone is uncertain, you can upload the PLU regulation PDF yourself.
+                      </p>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt"
+                        onChange={(e) => setFallbackFile(e.target.files?.[0] || null)}
+                        className="block text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+                      />
+                      {fallbackFile && (
+                        <button
+                          type="button"
+                          onClick={handleFallbackUpload}
+                          disabled={uploadingFallback || autoRunning}
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/30 text-amber-200 text-sm font-medium hover:bg-amber-500/50 disabled:opacity-50"
+                        >
+                          {uploadingFallback ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                          Analyze uploaded PLU (3 credits)
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1093,11 +1421,11 @@ Context:
                     try {
                       const raw = typeof window !== "undefined" ? sessionStorage.getItem("urbassist_dossier") : null;
                       const dossier = raw ? JSON.parse(raw) : {};
-                      const step4 = dossier?.step4 as { determination?: string; detail?: string } | undefined;
-                      if (step4?.determination) {
+                      const stepPermit = (dossier?.step5 ?? dossier?.step4) as { determination?: string; detail?: string; explanation?: string } | undefined;
+                      if (stepPermit?.determination) {
                         determination = {
-                          type: step4.determination as "DP" | "PC" | "ARCHITECT_REQUIRED",
-                          justification: step4.detail,
+                          type: stepPermit.determination as "DP" | "PC" | "ARCHITECT_REQUIRED",
+                          justification: stepPermit.explanation ?? stepPermit.detail,
                         };
                       }
                     } catch {

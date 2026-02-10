@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Real French Cadastre API integration
-// Uses Etalab/cadastre.data.gouv.fr APIs + geo.api.gouv.fr
-// IGN apicarto may be slow/unavailable; we always return fallback parcels when possible.
+// Uses IGN Apicarto (cadastre/parcelle) with bounding box to fetch multiple parcels.
+// Smart selection: point-in-polygon for parcel containing the address, else closest centroid.
+// Geocoding is done by the caller (api-adresse.data.gouv.fr).
+
+const BBOX_DELTA = 0.0008; // ~±90 m at mid-latitudes; small search square around address
 
 /** Normalize coordinates to [lng, lat] from various request shapes. */
 function normalizeCoordinates(
@@ -12,7 +15,6 @@ function normalizeCoordinates(
     const a = Number(coordinates[0]);
     const b = Number(coordinates[1]);
     if (Number.isFinite(a) && Number.isFinite(b)) {
-      // GeoJSON and Adresse API use [lng, lat]; some APIs use [lat, lng]
       if (a >= -180 && a <= 180 && b >= -90 && b <= 90) return [a, b]; // [lng, lat]
       if (b >= -180 && b <= 180 && a >= -90 && a <= 90) return [b, a]; // [lat, lng]
       return [a, b];
@@ -25,6 +27,88 @@ function normalizeCoordinates(
     if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
   }
   return null;
+}
+
+/** GeoJSON Polygon coordinates (exterior ring, closed). [lng, lat] per point. */
+function bboxPolygon(lng: number, lat: number): number[][][] {
+  const d = BBOX_DELTA;
+  return [[
+    [lng - d, lat - d],
+    [lng + d, lat - d],
+    [lng + d, lat + d],
+    [lng - d, lat + d],
+    [lng - d, lat - d],
+  ]];
+}
+
+/** Point-in-polygon (ray-casting). Ring is array of [lng, lat]. */
+function pointInRing(lng: number, lat: number, ring: Array<[number, number]>): boolean {
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Get first ring (exterior) from GeoJSON Polygon or MultiPolygon. */
+function getExteriorRing(geometry: { type?: string; coordinates?: unknown }): Array<[number, number]> | null {
+  if (!geometry || !geometry.coordinates) return null;
+  const c = geometry.coordinates;
+  if (geometry.type === "Polygon" && Array.isArray(c) && c.length > 0) {
+    const ring = c[0];
+    return Array.isArray(ring) ? (ring as Array<[number, number]>) : null;
+  }
+  if (geometry.type === "MultiPolygon" && Array.isArray(c) && c.length > 0) {
+    const firstPoly = c[0];
+    const ring = Array.isArray(firstPoly) ? firstPoly[0] : null;
+    return Array.isArray(ring) ? (ring as Array<[number, number]>) : null;
+  }
+  return null;
+}
+
+/** Point inside polygon (any ring that contains the point). */
+function pointInPolygon(lng: number, lat: number, geometry: unknown): boolean {
+  const ring = getExteriorRing(geometry as { type?: string; coordinates?: unknown });
+  return ring ? pointInRing(lng, lat, ring) : false;
+}
+
+/** Centroid of exterior ring [lng, lat]. */
+function polygonCentroid(geometry: unknown): [number, number] | null {
+  const ring = getExteriorRing(geometry as { type?: string; coordinates?: unknown });
+  if (!ring || ring.length === 0) return null;
+  let sumLng = 0, sumLat = 0;
+  for (const p of ring) {
+    sumLng += p[0];
+    sumLat += p[1];
+  }
+  return [sumLng / ring.length, sumLat / ring.length];
+}
+
+/** Squared distance (avoid sqrt). */
+function distSq(lng1: number, lat1: number, lng2: number, lat2: number): number {
+  const dLng = lng2 - lng1, dLat = lat2 - lat1;
+  return dLng * dLng + dLat * dLat;
+}
+
+/** Ensure every parcel has a unique id (API can return empty or duplicate ids). */
+function ensureUniqueParcelIds<T extends { id: string; section: string; number: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.map((p, i) => {
+    let id = (p.id || "").trim();
+    const base = `${p.section}-${p.number}`;
+    if (!id || seen.has(id)) {
+      id = `${base}-${i}`;
+    }
+    let j = 0;
+    while (seen.has(id)) {
+      id = `${base}-${i}-${++j}`;
+    }
+    seen.add(id);
+    return { ...p, id };
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -68,53 +152,113 @@ export async function POST(request: NextRequest) {
         console.warn("Cadastre: commune lookup failed", e);
       }
 
-      let parcels: Array<{
+      type ParcelItem = {
         id: string;
         section: string;
         number: string;
         area: number;
         geometry?: unknown;
         coordinates: number[];
-      }> = [];
+      };
 
-      // Step 2: Try IGN apicarto (often slow or unavailable) with geometry
+      let parcels: ParcelItem[] = [];
+      let bestMatchId: string | null = null;
+
+      // Step 2: Fetch all parcels in a small bounding box (IGN Apicarto)
       try {
-        const geom = JSON.stringify({
-          type: "Point",
-          coordinates: [lng, lat],
+        const bboxGeom = JSON.stringify({
+          type: "Polygon",
+          coordinates: bboxPolygon(lng, lat),
         });
         const parcelRes = await fetch(
-          `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}`,
-          { signal: AbortSignal.timeout(6000) }
+          `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(bboxGeom)}`,
+          { signal: AbortSignal.timeout(10000) }
         );
         if (parcelRes.ok) {
           const parcelData = await parcelRes.json();
           if (parcelData.features && parcelData.features.length > 0) {
-            parcels = parcelData.features.map(
+            let raw = parcelData.features.map(
               (f: {
-                properties: {
-                  id?: string;
-                  section?: string;
-                  numero?: string;
-                  contenance?: number;
-                };
+                properties: { id?: string; section?: string; numero?: string; contenance?: number };
                 geometry: unknown;
               }) => ({
-                id: f.properties?.id ?? "",
+                id: String(f.properties?.id ?? ""),
                 section: String(f.properties?.section ?? ""),
                 number: String(f.properties?.numero ?? ""),
                 area: Number(f.properties?.contenance ?? 0),
                 geometry: f.geometry,
-                coordinates: [lng, lat],
+                coordinates: [lng, lat] as number[],
               })
-            );
+            ) as ParcelItem[];
+            raw = ensureUniqueParcelIds(raw) as ParcelItem[];
+
+            // Smart selection: parcel containing the point, else closest centroid
+            let containing: ParcelItem | null = null;
+            for (const p of raw) {
+              if (p.geometry && pointInPolygon(lng, lat, p.geometry)) {
+                containing = p;
+                break;
+              }
+            }
+            if (containing) {
+              bestMatchId = containing.id;
+            } else {
+              let minDist = Infinity;
+              for (const p of raw) {
+                const cen = polygonCentroid(p.geometry);
+                if (cen) {
+                  const d = distSq(lng, lat, cen[0], cen[1]);
+                  if (d < minDist) {
+                    minDist = d;
+                    bestMatchId = p.id;
+                  }
+                }
+              }
+            }
+
+            // Sort so best match is first (principal parcel)
+            if (bestMatchId && raw.length > 1) {
+              const idx = raw.findIndex((p) => p.id === bestMatchId);
+              if (idx > 0) {
+                const [best] = raw.splice(idx, 1);
+                raw.unshift(best);
+              }
+            }
+            parcels = raw;
           }
         }
       } catch (apiError) {
         console.warn("Cadastre: IGN API error, using fallback", apiError);
       }
 
-      // Fallback: try legacy lon/lat/buffer in case geometry param not supported
+      // Fallback: point query then buffer query
+      if (parcels.length === 0) {
+        try {
+          const pointGeom = JSON.stringify({ type: "Point", coordinates: [lng, lat] });
+          const parcelRes = await fetch(
+            `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(pointGeom)}`,
+            { signal: AbortSignal.timeout(6000) }
+          );
+          if (parcelRes.ok) {
+            const parcelData = await parcelRes.json();
+            if (parcelData.features?.length > 0) {
+              parcels = ensureUniqueParcelIds(parcelData.features.map(
+                (f: { properties: { id?: string; section?: string; numero?: string; contenance?: number }; geometry: unknown }) => ({
+                  id: String(f.properties?.id ?? ""),
+                  section: String(f.properties?.section ?? ""),
+                  number: String(f.properties?.numero ?? ""),
+                  area: Number(f.properties?.contenance ?? 0),
+                  geometry: f.geometry,
+                  coordinates: [lng, lat],
+                })
+              ) as ParcelItem[]) as ParcelItem[];
+              bestMatchId = parcels[0]?.id ?? null;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
       if (parcels.length === 0) {
         try {
           const parcelRes = await fetch(
@@ -123,25 +267,18 @@ export async function POST(request: NextRequest) {
           );
           if (parcelRes.ok) {
             const parcelData = await parcelRes.json();
-            if (parcelData.features && parcelData.features.length > 0) {
-              parcels = parcelData.features.map(
-                (f: {
-                  properties: {
-                    id?: string;
-                    section?: string;
-                    numero?: string;
-                    contenance?: number;
-                  };
-                  geometry: unknown;
-                }) => ({
-                  id: f.properties?.id ?? "",
+            if (parcelData.features?.length > 0) {
+              parcels = ensureUniqueParcelIds(parcelData.features.map(
+                (f: { properties: { id?: string; section?: string; numero?: string; contenance?: number }; geometry: unknown }) => ({
+                  id: String(f.properties?.id ?? ""),
                   section: String(f.properties?.section ?? ""),
                   number: String(f.properties?.numero ?? ""),
                   area: Number(f.properties?.contenance ?? 0),
                   geometry: f.geometry,
                   coordinates: [lng, lat],
                 })
-              );
+              ) as ParcelItem[]) as ParcelItem[];
+              bestMatchId = parcels[0]?.id ?? null;
             }
           }
         } catch {
@@ -149,23 +286,24 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Always return parcels: use estimated ones when external API fails
       if (parcels.length === 0) {
         const communeCode = commune?.code ?? citycode ?? "06088";
         parcels = generateRealisticParcels(communeCode, [lng, lat]);
+        bestMatchId = parcels[0]?.id ?? null;
       }
 
       const northAngleDegrees = computeNorthAngleFromGeometry(parcels[0]?.geometry);
 
       return NextResponse.json({
         parcels,
+        bestMatchId,
         municipality: commune?.nom ?? "Unknown",
         departement: commune?.departement?.nom ?? "Unknown",
         citycode: commune?.code ?? citycode,
         northAngleDegrees,
         source: parcels[0]?.geometry ? "api" : "estimated",
         message:
-          "Select all parcels affected by your project. According to regulations, you must include every parcel that is part of the construction site.",
+          "Select one or more parcels. You can own several parcels. The parcel under your address is pre-selected.",
       });
     }
 

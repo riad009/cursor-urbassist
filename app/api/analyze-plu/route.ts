@@ -1,12 +1,50 @@
 import { NextRequest, NextResponse } from "next/server"
 
-// Gemini API integration for PLU document analysis
+// Deep PLU analysis using Gemini — structured compliance analysis per project
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
 interface AnalysisRequest {
   documentContent: string
   parcelAddress?: string
   zoneType?: string
+  description?: string
+}
+
+/** Expected item in each section */
+export interface AnalysisItem {
+  item: string
+  reglementation: string
+  conformite: "OUI" | "NON" | "A VERIFIER" | "Non concerné"
+}
+
+/** Section with items */
+export interface AnalysisSection {
+  sectionTitle: string
+  items: AnalysisItem[]
+}
+
+/** In-depth analysis output (user-provided schema) */
+export interface DeepPluAnalysis {
+  situationProjet?: {
+    lotissement?: boolean
+    abf?: boolean
+    ppr?: boolean
+    details?: string
+  }
+  usageDesSols?: AnalysisSection
+  conditionsOccupation?: AnalysisSection
+  implantationVolumetrie?: AnalysisSection
+  aspectExterieur?: AnalysisSection
+  stationnement?: AnalysisSection
+  espacesLibres?: AnalysisSection
+  reseauxVrd?: AnalysisSection
+  autresReglementations?: AnalysisSection
+  conclusion?: { resume: string; typeDossier: string }
+  /** Legacy article-based format (optional, for backward compatibility) */
+  zoneClassification?: string
+  zoneDescription?: string
+  summary?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export async function POST(request: NextRequest) {
@@ -20,58 +58,50 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // If no API key, return mock analysis for demo
     if (!GEMINI_API_KEY) {
       return NextResponse.json({
         success: true,
-        analysis: generateMockAnalysis(body),
+        analysis: generateFallbackAnalysis(body),
+        source: "fallback",
       })
     }
 
-    // Call Gemini API
-    const prompt = buildAnalysisPrompt(body)
-    
+    const prompt = buildInDepthAnalysisPrompt(body)
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2048,
+            temperature: 0.2,
+            maxOutputTokens: 16384,
+            responseMimeType: "application/json",
           },
         }),
       }
     )
 
     if (!response.ok) {
-      const errorData = await response.text();
-      console.error("Gemini API error:", response.status, errorData);
-      // Fall back to mock analysis if API fails
+      const errorData = await response.text()
+      console.error("Gemini API error:", response.status, errorData)
       return NextResponse.json({
         success: true,
-        analysis: generateMockAnalysis(body),
+        analysis: generateFallbackAnalysis(body),
+        source: "fallback",
       })
     }
 
     const data = await response.json()
-    const analysisText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+    const analysis = parseGeminiResponse(rawText)
 
     return NextResponse.json({
       success: true,
-      analysis: parseGeminiResponse(analysisText),
+      analysis,
+      source: "gemini",
     })
   } catch (error) {
     console.error("PLU Analysis error:", error)
@@ -82,87 +112,192 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function buildAnalysisPrompt(body: AnalysisRequest): string {
-  return `You are an expert urban planning analyst. Analyze the following PLU (Plan Local d'Urbanisme) document and extract key construction regulations.
+function buildInDepthAnalysisPrompt(body: AnalysisRequest): string {
+  const address = body.parcelAddress || "non précisée"
+  const zone = body.zoneType || "non spécifiée"
+  const description = body.description || "non fournie"
+  const docContent = body.documentContent.slice(0, 80000)
 
-Document Content:
-${body.documentContent}
+  return `Analyze the provided urban planning regulation document (PLU) for a specific construction project and produce a structured analysis in JSON format.
 
-${body.parcelAddress ? `Parcel Address: ${body.parcelAddress}` : ""}
-${body.zoneType ? `Zone Type: ${body.zoneType}` : ""}
+**Project Details:**
+- Address: ${address}
+- PLU Zone: ${zone}
+- Project Description: ${description}
 
-Please extract and summarize the following information in JSON format:
-1. Zone classification (UA, UB, UC, etc.)
-2. Maximum building height (in meters)
-3. Setback requirements (front, side, rear in meters)
-4. Maximum ground coverage ratio (CES - Coefficient d'Emprise au Sol)
-5. Maximum floor area ratio (COS - Coefficient d'Occupation des Sols)
-6. Minimum parking requirements
-7. Green space requirements
-8. Architectural constraints
-9. Any special restrictions or requirements
-10. Key recommendations for the project
+**Your Task:**
+1. Thoroughly review the attached regulation (document content below).
+2. For the 'situationProjet' object, fill in the details based on the project information and what you can find in the document. Specifically, determine if the project is in a subdivision ("lotissement"), an ABF zone (Architecte des Bâtiments de France), or a PPR zone (Plan de Prévention des Risques).
+3. For each regulatory point listed in the "Analysis Structure and Required Points" section below, find the relevant rule in the document for the project's PLU zone.
+4. Compare the project description against each rule.
+5. For each point, determine the compliance status: "OUI" (compliant), "NON" (non-compliant), or "A VERIFIER" (more information needed).
+6. If a rule for a specific point is not mentioned in the PLU document, you MUST still include the item in your response. For such cases, write "Non réglementé" in the 'reglementation' field and "Non concerné" in the 'conformite' field.
+7. The term 'hauteur à l'égout de toiture' might be referred to as 'hauteur en façade' or 'hauteur à l'égout'. Intelligently link these concepts.
+8. Structure your entire output as a single JSON object matching the provided schema. Do not include any text or markdown formatting outside of the JSON object.
+9. **Crucially**: In addition to the required points listed below, if you identify any other significant regulations in the document that are relevant to the project (e.g., rules about renewable energy, specific local heritage requirements, etc.), you MUST add them as new items within the most appropriate section of your analysis, or in "autresReglementations" if they do not fit elsewhere.
 
-Respond in the following JSON structure:
+**Analysis Structure and Required Points:**
+You must create sections as titled below and include all the specified items within them.
+
+**Section: USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS** (output key: usageDesSols)
+- Item: "Destinations et sous-destinations interdites"
+- Item: "Interdictions ou limitations d'usages spécifiques"
+- Item: "Règles de Mixité sociale"
+- Item: "Règles de Mixité fonctionnelle"
+
+**Section: CONDITIONS D'OCCUPATION DU SOL** (output key: conditionsOccupation)
+- Item: "Surface de plancher maximale (COS si applicable)"
+- Item: "Emprise au sol maximale (CES)"
+- Item: "Coefficient de Biotope par surface (CBS)"
+- Item: "Surface minimale d'espace vert en pleine terre"
+
+**Section: IMPLANTATION ET VOLUMETRIE** (output key: implantationVolumetrie)
+- Item: "Implantation par rapport aux voies et emprises publiques"
+- Item: "Implantation par rapport aux limites séparatives"
+- Item: "Implantation des constructions les unes par rapport aux autres"
+- Item: "Hauteurs maximales à l'égout / en façade"
+- Item: "Hauteurs maximales au faîtage"
+- Item: "Définition de la hauteur de référence (TN, NGF, etc.)"
+- Item: "Volumétrie, gabarit et forme de la construction"
+
+**Section: ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE** (output key: aspectExterieur)
+- Item: "Toitures (pentes, matériaux, couleurs, éléments techniques)"
+- Item: "Façades (matériaux, couleurs, modénatures)"
+- Item: "Menuiseries (matériaux, couleurs, proportions)"
+- Item: "Clôtures sur rue (hauteur, type, matériaux)"
+- Item: "Clôtures sur limites séparatives (hauteur, type, matériaux)"
+- Item: "Portails et portillons"
+- Item: "Annexes (abris de jardin, garages, piscines, etc.)"
+
+**Section: STATIONNEMENT** (output key: stationnement)
+- Item: "Nombre de places pour véhicules motorisés"
+- Item: "Caractéristiques des aires de stationnement (dimensions, revêtement)"
+- Item: "Nombre de places pour vélos"
+
+**Section: ESPACES LIBRES ET PLANTATIONS** (output key: espacesLibres)
+- Item: "Traitement des espaces non bâtis"
+- Item: "Obligations de plantations et essences végétales"
+- Item: "Gestion des eaux pluviales à la parcelle"
+
+**Section: RESEAUX ET DESSERTE (VRD)** (output key: reseauxVrd)
+- Item: "Conditions de desserte par les voies (accès)"
+- Item: "Alimentation en eau potable"
+- Item: "Assainissement des eaux usées (EU)"
+- Item: "Gestion des eaux pluviales (EP)"
+- Item: "Desserte Électricité et Télécommunications"
+
+**Conclusion:**
+- In the 'conclusion.resume' field, provide a general summary of the project's feasibility.
+- In the 'conclusion.typeDossier' field, suggest the type of permit required (e.g., "Déclaration Préalable", "Permis de Construire").
+
+**Required JSON schema (output exactly this structure):**
 {
-  "zoneClassification": "",
-  "maxHeight": 0,
-  "setbacks": { "front": 0, "side": 0, "rear": 0 },
-  "maxCoverageRatio": 0,
-  "maxFloorAreaRatio": 0,
-  "parkingRequirements": "",
-  "greenSpaceRequirements": "",
-  "architecturalConstraints": [],
-  "restrictions": [],
-  "recommendations": []
-}`
+  "situationProjet": { "lotissement": false, "abf": false, "ppr": false, "details": "" },
+  "usageDesSols": { "sectionTitle": "USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS", "items": [{"item": "...", "reglementation": "...", "conformite": "OUI"|"NON"|"A VERIFIER"|"Non concerné"}] },
+  "conditionsOccupation": { "sectionTitle": "CONDITIONS D'OCCUPATION DU SOL", "items": [...] },
+  "implantationVolumetrie": { "sectionTitle": "IMPLANTATION ET VOLUMETRIE", "items": [...] },
+  "aspectExterieur": { "sectionTitle": "ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE", "items": [...] },
+  "stationnement": { "sectionTitle": "STATIONNEMENT", "items": [...] },
+  "espacesLibres": { "sectionTitle": "ESPACES LIBRES ET PLANTATIONS", "items": [...] },
+  "reseauxVrd": { "sectionTitle": "RESEAUX ET DESSERTE (VRD)", "items": [...] },
+  "autresReglementations": { "sectionTitle": "AUTRES RÉGLEMENTATIONS", "items": [] },
+  "conclusion": { "resume": "...", "typeDossier": "..." }
 }
 
-function parseGeminiResponse(text: string): object {
+**Document content (PLU regulation):**
+${docContent}`
+}
+
+function parseGeminiResponse(text: string): DeepPluAnalysis & Record<string, unknown> {
   try {
-    // Try to extract JSON from the response
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0])
-    }
+    return JSON.parse(text) as DeepPluAnalysis & Record<string, unknown>
   } catch {
-    // If parsing fails, return text as summary
+    // empty
   }
-  
-  return { summary: text }
+
+  const cleaned = text.replace(/```(?:json)?\s*/gi, "").replace(/```\s*/g, "").trim()
+  try {
+    return JSON.parse(cleaned) as DeepPluAnalysis & Record<string, unknown>
+  } catch {
+    // empty
+  }
+
+  const start = cleaned.indexOf("{")
+  if (start >= 0) {
+    let depth = 0
+    let end = start
+    for (let i = start; i < cleaned.length; i++) {
+      if (cleaned[i] === "{") depth++
+      else if (cleaned[i] === "}") {
+        depth--
+        if (depth === 0) {
+          end = i
+          break
+        }
+      }
+    }
+    if (end > start) {
+      try {
+        const block = cleaned.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1")
+        return JSON.parse(block) as DeepPluAnalysis & Record<string, unknown>
+      } catch {
+        // empty
+      }
+    }
+  }
+
+  return {
+    conclusion: { resume: text.slice(0, 500), typeDossier: "À déterminer" },
+    parseError: true,
+  }
 }
 
-function generateMockAnalysis(body: AnalysisRequest): object {
+function generateFallbackAnalysis(body: AnalysisRequest): DeepPluAnalysis {
+  const zone = body.zoneType || "Zone non spécifiée"
   return {
-    zoneClassification: "UB - Zone Urbaine Mixte",
-    maxHeight: 12,
-    setbacks: {
-      front: 5,
-      side: 3,
-      rear: 4,
+    situationProjet: { lotissement: false, abf: false, ppr: false, details: "Non déterminé (analyse non disponible)." },
+    usageDesSols: {
+      sectionTitle: "USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS",
+      items: [
+        { item: "Destinations et sous-destinations interdites", reglementation: "Non réglementé", conformite: "Non concerné" },
+        { item: "Interdictions ou limitations d'usages spécifiques", reglementation: "Non réglementé", conformite: "Non concerné" },
+      ],
     },
-    maxCoverageRatio: 0.4,
-    maxFloorAreaRatio: 1.2,
-    parkingRequirements: "1 place per 60m² of floor area",
-    greenSpaceRequirements: "Minimum 20% of parcel area must be landscaped",
-    architecturalConstraints: [
-      "Roof pitch between 30-45 degrees",
-      "Natural materials for facades (stone, wood, render)",
-      "Maximum 2 colors for exterior walls",
-      "Traditional window proportions required",
-    ],
-    restrictions: [
-      "No industrial activities permitted",
-      "Maximum 2 dwelling units per building",
-      "Construction prohibited within 10m of watercourse",
-    ],
-    recommendations: [
-      "Consider solar panel integration with roof design",
-      "Rainwater collection system recommended",
-      "Native vegetation for landscaping preferred",
-      "EV charging infrastructure recommended for parking",
-    ],
-    confidence: 0.85,
-    analyzedAt: new Date().toISOString(),
+    conditionsOccupation: {
+      sectionTitle: "CONDITIONS D'OCCUPATION DU SOL",
+      items: [
+        { item: "Emprise au sol maximale (CES)", reglementation: "Non réglementé", conformite: "Non concerné" },
+        { item: "Surface minimale d'espace vert en pleine terre", reglementation: "Non réglementé", conformite: "Non concerné" },
+      ],
+    },
+    implantationVolumetrie: {
+      sectionTitle: "IMPLANTATION ET VOLUMETRIE",
+      items: [
+        { item: "Hauteurs maximales à l'égout / en façade", reglementation: "Non réglementé", conformite: "Non concerné" },
+        { item: "Hauteurs maximales au faîtage", reglementation: "Non réglementé", conformite: "Non concerné" },
+      ],
+    },
+    aspectExterieur: {
+      sectionTitle: "ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE",
+      items: [{ item: "Toitures (pentes, matériaux, couleurs)", reglementation: "Non réglementé", conformite: "Non concerné" }],
+    },
+    stationnement: {
+      sectionTitle: "STATIONNEMENT",
+      items: [{ item: "Nombre de places pour véhicules motorisés", reglementation: "Non réglementé", conformite: "Non concerné" }],
+    },
+    espacesLibres: {
+      sectionTitle: "ESPACES LIBRES ET PLANTATIONS",
+      items: [{ item: "Obligations de plantations", reglementation: "Non réglementé", conformite: "Non concerné" }],
+    },
+    reseauxVrd: {
+      sectionTitle: "RESEAUX ET DESSERTE (VRD)",
+      items: [{ item: "Conditions de desserte par les voies", reglementation: "Non réglementé", conformite: "Non concerné" }],
+    },
+    conclusion: {
+      resume: `Analyse automatique non disponible (clé API manquante). Zone indiquée : ${zone}. Uploadez le document PLU pour une analyse complète.`,
+      typeDossier: "À déterminer (Déclaration Préalable ou Permis de Construire selon le projet).",
+    },
+    zoneClassification: zone,
+    zoneDescription: "Résultats par défaut — document PLU requis pour une analyse complète.",
   }
 }

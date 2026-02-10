@@ -1,0 +1,5 @@
+{
+  "framework": "next",
+  "buildCommand": "prisma generate && next build --webpack",
+  "installCommand": "npm install"
+}

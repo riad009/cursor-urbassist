@@ -18,17 +18,19 @@ import {
   Clock,
   Download,
   FolderKanban,
+  FileBarChart,
+  Pencil,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 
-type DocStatus = "To do" | "In progress" | "Done" | "Downloadable";
+type DocStatus = "To do" | "In progress" | "Completed" | "Downloadable";
 
-/** Done = document record exists (content complete); Downloadable = file ready */
+/** Completed = document record exists (content ready); Downloadable = file exported */
 
 const DOCUMENT_TYPES: { type: string; label: string; icon: React.ElementType; href: (id: string) => string }[] = [
-  { type: "LOCATION_PLAN", label: "Location plan", icon: Map, href: (id) => `/location-plan?project=${id}` },
+  { type: "LOCATION_PLAN", label: "Location plan (situation)", icon: Map, href: (id) => `/location-plan?project=${id}` },
   { type: "SITE_PLAN", label: "Site plan", icon: Layers, href: (id) => `/editor?project=${id}` },
   { type: "SECTION", label: "Section", icon: Scissors, href: (id) => `/terrain?project=${id}` },
   { type: "ELEVATION", label: "Elevations", icon: Building2, href: (id) => `/terrain?project=${id}` },
@@ -38,7 +40,7 @@ const DOCUMENT_TYPES: { type: string; label: string; icon: React.ElementType; hr
 
 function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null }): DocStatus {
   if (doc.fileUrl || doc.fileData) return "Downloadable";
-  return "Done"; // document exists, content complete, file not yet exported
+  return "Completed";
 }
 
 export default function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
@@ -123,45 +125,98 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           )}
         </div>
 
-        <h2 className="text-lg font-semibold text-white mb-4">Application progress</h2>
+        {/* PLU Analysis – priority, with PDF export */}
+        <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+          <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+            <FileBarChart className="w-5 h-5 text-blue-400" />
+            PLU Analysis
+          </h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Summary and recommendations from the applicable regulation. Export the report as PDF for your dossier.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href={`/regulations?project=${project.id}`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+            >
+              View analysis
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link
+              href={`/regulations/report?project=${project.id}`}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
+            >
+              <Download className="w-4 h-4" />
+              Export PDF (report)
+            </Link>
+          </div>
+        </div>
+
+        <h2 className="text-lg font-semibold text-white mb-4">Documents to produce</h2>
         <p className="text-slate-400 text-sm mb-6">
-          Each document can be: To do → In progress → Done → Downloadable.
+          Each document can be: To do → In progress → Completed → Downloadable. For finalized documents use Edit to change content or Export PDF to download.
         </p>
 
         <ul className="space-y-3">
           {DOCUMENT_TYPES.map(({ type, label, icon: Icon, href }) => {
             const doc = docsByType[type];
             const status: DocStatus = doc ? getDocStatus(doc) : "To do";
+            const isFinalized = status === "Completed" || status === "Downloadable";
             const statusIcon =
               status === "Downloadable" ? (
                 <Download className="w-4 h-4 text-emerald-400" />
-              ) : status === "Done" ? (
+              ) : status === "Completed" ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               ) : (
                 <Circle className="w-4 h-4 text-slate-500" />
               );
+            const isSitePlan = type === "SITE_PLAN";
             return (
               <li
                 key={type}
-                className="flex items-center gap-4 p-4 rounded-xl bg-slate-800/50 border border-white/10"
+                className="flex flex-wrap items-center gap-4 p-4 rounded-xl bg-slate-800/50 border border-white/10"
               >
                 <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center shrink-0">
                   <Icon className="w-5 h-5 text-blue-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-white">{label}</p>
+                  {isSitePlan && (
+                    <p className="text-xs text-slate-500 mt-0.5">Auto-generated from project address and selected parcels.</p>
+                  )}
                   <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                     {statusIcon}
                     {status}
                   </p>
                 </div>
-                <Link
-                  href={href(project.id)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30 shrink-0"
-                >
-                  {status === "To do" ? "Start" : status === "Done" ? "Edit / Export" : "View / Download"}
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {isFinalized ? (
+                    <>
+                      <Link
+                        href={href(project.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit
+                      </Link>
+                      <Link
+                        href={`/export?project=${project.id}&doc=${type}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export PDF
+                      </Link>
+                    </>
+                  ) : (
+                    <Link
+                      href={href(project.id)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+                    >
+                      {status === "To do" ? "Start" : "Continue"}
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  )}
+                </div>
               </li>
             );
           })}

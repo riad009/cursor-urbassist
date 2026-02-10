@@ -48,3 +48,25 @@ Do **not** commit `.env` or `.env.local`; only the example file is committed.
 ## 4. Deploy on Vercel
 
 After setting the env vars in Vercel (step 2), deploy (or redeploy). The build will use `DATABASE_URL` at runtime. Run `npx prisma db push` and `npm run db:seed` from your machine (with `DATABASE_URL` and `DIRECT_URL` in `.env`) once so your Neon database has the schema and seed data; no extra Neon features are required.
+
+### Deploy from your machine (CLI)
+
+```bash
+npx vercel --yes          # preview
+npx vercel --prod --yes   # production
+```
+
+If you get **“Not logged in”** or **“No token”**: run `npx vercel login` and complete the browser login, then run the deploy again.
+
+---
+
+## 5. Troubleshooting: “Unable to deploy”
+
+| Problem | What to do |
+|--------|-------------|
+| **CLI: not logged in** | Run `npx vercel login` and sign in in the browser, then deploy again. |
+| **CLI: project not linked** | Run `npx vercel link`, pick your team and the **urbassist** project (or create one), then run `npx vercel --yes`. |
+| **Build fails on Vercel** | Open the deployment in the Vercel dashboard → **Deployments** → click the failed deployment → **Building** tab. Check the log; often it’s missing env vars (see step 2) or a TypeScript/compile error. |
+| **Site is “deployed” but shows 500 / error** | Add `DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET`, `AUTH_SECRET`, `NEXTAUTH_URL`, and `AUTH_URL` in **Vercel → Project → Settings → Environment Variables**, then **Redeploy** (Deployments → ⋮ → Redeploy). |
+| **Deploy from Git (GitHub/GitLab)** | In Vercel: **Add New Project** → import your repo → set the same env vars in Settings → Environment Variables. Pushes to the connected branch will trigger deploys. Ensure the env vars are set for **Production** (and Preview if you use previews). |
+| **Prisma / database errors** | Confirm `DATABASE_URL` and `DIRECT_URL` in Vercel point to Neon (pooled and direct). Run `npx prisma db push` and `npm run db:seed` once from your machine against that Neon DB so the schema and seed data exist. |

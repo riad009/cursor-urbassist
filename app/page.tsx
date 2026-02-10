@@ -8,6 +8,7 @@ import {
   FolderKanban,
   PenTool,
   FileText,
+  FileCheck,
   Calculator,
   Download,
   ArrowUpRight,
@@ -84,6 +85,20 @@ const quickActions = [
     icon: Sparkles,
     href: "/regulations",
     gradient: "from-violet-600 to-violet-400",
+  },
+  {
+    title: "Feasibility",
+    description: "Study and feasibility tools",
+    icon: FileCheck,
+    href: "/feasibility",
+    gradient: "from-amber-600 to-amber-400",
+  },
+  {
+    title: "Developer",
+    description: "Visual and AI tools",
+    icon: Zap,
+    href: "/developer",
+    gradient: "from-purple-600 to-purple-400",
   },
   {
     title: "Export Plans",
