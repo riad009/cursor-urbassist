@@ -19,6 +19,7 @@ import {
   CheckSquare,
   Square,
   X,
+  Pencil,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,8 @@ export default function ProjectsPage() {
   const [parcels, setParcels] = useState<{ id: string; section: string; number: string; area: number; geometry?: unknown }[]>([]);
   const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
   const [pluInfo, setPluInfo] = useState<{ zoneType: string | null; zoneName: string | null; pluType?: string | null } | null>(null);
+  const [manualPluZone, setManualPluZone] = useState<string>("");
+  const [showManualPluEdit, setShowManualPluEdit] = useState(false);
   const [zoneFeatures, setZoneFeatures] = useState<unknown[]>([]);
   const [protectedAreas, setProtectedAreas] = useState<{ name: string; type: string }[]>([]);
   const [loadingAddress, setLoadingAddress] = useState(false);
@@ -71,6 +74,19 @@ export default function ProjectsPage() {
       .then((data) => setProjects(data.projects || []))
       .catch(() => setProjects([]))
       .finally(() => setLoading(false));
+  }, [user]);
+
+  // Auto-open new project modal when ?openNew=1 (e.g. from "Start my urban planning application")
+  useEffect(() => {
+    if (typeof window === "undefined" || !user) return;
+    const openNew = new URLSearchParams(window.location.search).get("openNew") === "1";
+    if (openNew) {
+      setShowNewModal(true);
+      // Clean URL without reload
+      const url = new URL(window.location.href);
+      url.searchParams.delete("openNew");
+      window.history.replaceState({}, "", url.toString());
+    }
   }, [user]);
 
   // Pre-fill from dossier flow (step1 = address + parcels, step2 = project types, step3 = description)
@@ -108,6 +124,7 @@ export default function ProjectsPage() {
         if (Array.isArray(step1.parcels)) setParcels(step1.parcels);
         if (Array.isArray(step1.parcelIds)) setSelectedParcelIds(step1.parcelIds);
         if (step1.pluZone != null || step1.pluName != null) setPluInfo({ zoneType: step1.pluZone ?? null, zoneName: step1.pluName ?? null });
+        if (step1.pluZone) setManualPluZone(step1.pluZone);
       }
       if (step1 || step3?.description) {
         setShowNewModal(true);
@@ -151,6 +168,8 @@ export default function ProjectsPage() {
     setCadastreError(null);
     setParcels([]);
     setPluInfo(null);
+    setManualPluZone("");
+    setShowManualPluEdit(false);
     setZoneFeatures([]);
     setProtectedAreas([]);
     fetch("/api/address/geo-data", {
@@ -222,7 +241,7 @@ export default function ProjectsPage() {
           parcelIds: parcelIds.length ? parcelIds : undefined,
           parcelArea,
           northAngle: northAngleDegrees != null ? northAngleDegrees : undefined,
-          zoneType: pluInfo?.zoneType || pluInfo?.zoneName,
+          zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName,
           projectType: projectType || undefined,
           protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined,
         }),
@@ -236,10 +255,14 @@ export default function ProjectsPage() {
         setSelectedAddress(null);
         setParcels([]);
         setSelectedParcelIds([]);
-      setPluInfo(null);
-      setZoneFeatures([]);
-      setProtectedAreas([]);
-      setNorthAngleDegrees(null);
+        setPluInfo(null);
+        setManualPluZone("");
+        setShowManualPluEdit(false);
+        setZoneFeatures([]);
+        setProtectedAreas([]);
+        setNorthAngleDegrees(null);
+        window.location.href = `/projects/${data.project.id}?step=details`;
+        return;
       }
     } catch (err) {
       console.error(err);
@@ -493,15 +516,57 @@ export default function ProjectsPage() {
                         <div className="h-4 bg-slate-700 rounded w-3/4" />
                         <div className="h-3 bg-slate-700 rounded w-1/2" />
                       </div>
-                    ) : pluInfo?.zoneType || pluInfo?.zoneName ? (
+                    ) : showManualPluEdit ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={manualPluZone}
+                          onChange={(e) => setManualPluZone(e.target.value)}
+                          placeholder="e.g. UB, UC, AU..."
+                          className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm placeholder-slate-500"
+                          autoFocus
+                        />
+                        <p className="text-xs text-slate-500">You can correct this if you know the correct zone from your PLU document.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowManualPluEdit(false);
+                            if (manualPluZone.trim()) setPluInfo({ zoneType: manualPluZone.trim(), zoneName: manualPluZone.trim(), pluType: null });
+                          }}
+                          className="text-xs text-blue-400 hover:text-blue-300"
+                        >
+                          Save zone
+                        </button>
+                      </div>
+                    ) : pluInfo?.zoneType || pluInfo?.zoneName || manualPluZone.trim() ? (
                       <>
-                        <p className="text-sm font-semibold text-blue-400">{pluInfo.zoneType || pluInfo.zoneName}</p>
+                        <p className="text-sm font-semibold text-blue-400">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</p>
                         <p className="text-xs text-slate-500 mt-0.5">{pluInfo?.pluType === "PLUi" ? "PLU intercommunal" : "PLU communal"}</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowManualPluEdit(true);
+                            if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || "");
+                          }}
+                          className="mt-1 text-xs text-slate-400 hover:text-white inline-flex items-center gap-1"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          Add / Edit zone
+                        </button>
                       </>
                     ) : (
                       <>
                         <p className="text-sm text-slate-500">Non détectée</p>
                         <p className="text-xs text-slate-500 mt-0.5">PLU peut être indisponible pour cette adresse ou zone non couverte.</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowManualPluEdit(true)}
+                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 text-xs font-medium hover:bg-amber-500/30"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          Add / Edit
+                        </button>
+                        <p className="text-xs text-slate-500 mt-1">You can correct this if you know the correct zone from your PLU document.</p>
                       </>
                     )}
                   </div>
@@ -520,6 +585,17 @@ export default function ProjectsPage() {
                       </p>
                     )}
                   </div>
+                {selectedAddress && !loadingCadastre && !loadingPlu && protectedAreas.some((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)) && (
+                  <div className="sm:col-span-3 rounded-xl bg-amber-500/15 border border-amber-500/40 p-4 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-amber-200">Protected or restricted zone detected</p>
+                      <p className="text-sm text-slate-300 mt-1">
+                        Your project is located in {protectedAreas.filter((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)).map((a) => a.name).join(", ")}. Additional approvals or specific rules may apply (e.g. ABF for Architects of Historical Buildings, PPR for flood risk). Check with your mairie for details.
+                      </p>
+                    </div>
+                  </div>
+                )}
                   <div className="rounded-xl bg-slate-800/80 border border-white/10 p-4">
                     <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Total land area</p>
                     {!selectedAddress || loadingCadastre || loadingPlu ? (
@@ -638,7 +714,7 @@ export default function ProjectsPage() {
                               );
                             })}
                           </div>
-                          <p className="text-xs text-slate-500 mt-2">Select one or more parcels. You can own several parcels.</p>
+                          <p className="text-xs text-slate-500 mt-2">Select one or more parcels. Parcels from different cadastral sections can be selected.</p>
                         </>
                       ) : (
                         <p className="text-sm text-slate-500 py-4">No parcels at this address. Enter another address or create without parcels.</p>

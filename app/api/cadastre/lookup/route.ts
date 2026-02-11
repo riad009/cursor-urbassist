@@ -5,7 +5,9 @@ import { NextRequest, NextResponse } from "next/server";
 // Smart selection: point-in-polygon for parcel containing the address, else closest centroid.
 // Geocoding is done by the caller (api-adresse.data.gouv.fr).
 
-const BBOX_DELTA = 0.0008; // ~±90 m at mid-latitudes; small search square around address
+// ~0.000009 degrees per meter at mid-latitudes (45°)
+const DEG_PER_M = 0.000009;
+const DEFAULT_BUFFER_M = 120; // ~±120m to include contiguous parcels
 
 /** Normalize coordinates to [lng, lat] from various request shapes. */
 function normalizeCoordinates(
@@ -30,8 +32,8 @@ function normalizeCoordinates(
 }
 
 /** GeoJSON Polygon coordinates (exterior ring, closed). [lng, lat] per point. */
-function bboxPolygon(lng: number, lat: number): number[][][] {
-  const d = BBOX_DELTA;
+function bboxPolygon(lng: number, lat: number, bufferMeters: number = DEFAULT_BUFFER_M): number[][][] {
+  const d = bufferMeters * DEG_PER_M;
   return [[
     [lng - d, lat - d],
     [lng + d, lat - d],
@@ -113,7 +115,7 @@ function ensureUniqueParcelIds<T extends { id: string; section: string; number: 
 
 export async function POST(request: NextRequest) {
   try {
-    let body: { citycode?: string; coordinates?: unknown; address?: string };
+    let body: { citycode?: string; coordinates?: unknown; address?: string; bufferMeters?: number };
     try {
       body = await request.json();
     } catch {
@@ -123,8 +125,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { citycode, coordinates: rawCoordinates, address } = body;
+    const { citycode, coordinates: rawCoordinates, address, bufferMeters: reqBuffer } = body;
     const coordinates = rawCoordinates != null ? normalizeCoordinates(rawCoordinates) : null;
+    const bufferMeters = typeof reqBuffer === "number" && reqBuffer >= 50 && reqBuffer <= 400
+      ? reqBuffer
+      : DEFAULT_BUFFER_M;
 
     if (!coordinates && !citycode) {
       return NextResponse.json(
@@ -168,7 +173,7 @@ export async function POST(request: NextRequest) {
       try {
         const bboxGeom = JSON.stringify({
           type: "Polygon",
-          coordinates: bboxPolygon(lng, lat),
+          coordinates: bboxPolygon(lng, lat, bufferMeters),
         });
         const parcelRes = await fetch(
           `https://apicarto.ign.fr/api/cadastre/parcelle?geom=${encodeURIComponent(bboxGeom)}`,

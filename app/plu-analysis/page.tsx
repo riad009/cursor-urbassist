@@ -254,11 +254,10 @@ function PluAnalysisPageContent() {
       <div className="p-6 lg:p-8 max-w-4xl mx-auto">
         <div className="mb-8">
           <Link
-            href="/projects"
+            href={projectId ? `/projects/${projectId}` : "/projects"}
             className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
           >
-            <FolderKanban className="w-4 h-4" />
-            Projects
+            ← {projectId ? "Back to project" : "Projects"}
           </Link>
           <h1 className="text-2xl lg:text-3xl font-bold text-white mt-2 flex items-center gap-3">
             <FileCheck className="w-8 h-8 text-sky-400" />

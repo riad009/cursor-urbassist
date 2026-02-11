@@ -2,6 +2,7 @@
 
 import React, { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
   MapPin,
@@ -45,6 +46,8 @@ function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null }
 
 export default function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
+  const searchParams = useSearchParams();
+  const stepDetails = searchParams.get("step") === "details";
   const [project, setProject] = useState<{
     id: string;
     name: string;
@@ -105,6 +108,9 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     {} as Record<string, { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }>
   );
 
+  const hasDescriptiveStatement = !!docsByType["DESCRIPTIVE_STATEMENT"];
+  const showDetailsPrompt = stepDetails && !hasDescriptiveStatement;
+
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-3xl mx-auto">
@@ -125,6 +131,26 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           )}
         </div>
 
+        {/* Project details prompt (essential step before payment) */}
+        {showDetailsPrompt && (
+          <div className="mb-8 p-5 rounded-2xl bg-amber-500/15 border border-amber-500/30">
+            <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-amber-400" />
+              Next: Describe your project
+            </h2>
+            <p className="text-slate-300 text-sm mb-4">
+              Provide project details to determine whether a building permit (permis de construire) or prior declaration (déclaration préalable) is required. This step is required before payment and PLU analysis.
+            </p>
+            <Link
+              href={`/statement?project=${project.id}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 font-medium hover:bg-amber-500/30"
+            >
+              Complete project description
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        )}
+
         {/* PLU Analysis – priority, with PDF export */}
         <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
           <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
@@ -143,11 +169,11 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
-              href={`/regulations/report?project=${project.id}`}
+              href={`/plu-analysis?project=${project.id}`}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
             >
               <Download className="w-4 h-4" />
-              Export PDF (report)
+              Export analysis PDF
             </Link>
           </div>
         </div>

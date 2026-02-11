@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       const cadastreRes = await fetch(`${origin}/api/cadastre/lookup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coordinates: [lng, lat] }),
+        body: JSON.stringify({ coordinates: [lng, lat], bufferMeters: 200 }),
         signal: AbortSignal.timeout(15000),
       });
       const cadastreData = await cadastreRes.json();

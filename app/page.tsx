@@ -188,7 +188,7 @@ export default function Dashboard() {
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/dossier/qualification"
+                href="/projects?openNew=1"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all group"
               >
                 <Play className="w-4 h-4" />

@@ -60,13 +60,21 @@ function MapController({
   onZoomChange: (z: number) => void;
 }) {
   const map = useMap();
+  const lastCenterRef = React.useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
     if (center) {
-      map.setView([center.lat, center.lng], 17);
+      const latLng = `${center.lat},${center.lng}`;
+      const lastLatLng = lastCenterRef.current ? `${lastCenterRef.current.lat},${lastCenterRef.current.lng}` : null;
+      // Only set view when address changes; do not reset zoom on parcel selection (parent re-renders)
+      if (latLng !== lastLatLng) {
+        lastCenterRef.current = { lat: center.lat, lng: center.lng };
+        map.setView([center.lat, center.lng], 18);
+      }
     } else {
+      lastCenterRef.current = null;
       map.setView(FRANCE_CENTER, zoom);
     }
-  }, [center, map]);
+  }, [center?.lat, center?.lng, map, zoom]);
   useMapEvents({
     zoomend: () => onZoomChange(map.getZoom()),
   });
@@ -298,7 +306,9 @@ export function ZoneMapInner({
           <style>{`.parcel-label-marker { border: none !important; background: transparent !important; }`}</style>
           <MapContainer
             center={center ? [center.lat, center.lng] : FRANCE_CENTER}
-            zoom={center ? 17 : 6}
+            zoom={center ? 18 : 6}
+            minZoom={6}
+            maxZoom={21}
             className="w-full rounded-xl"
             zoomControl={false}
             style={{ height: showRegulationSidebar ? 320 : "100%", minHeight: showRegulationSidebar ? 320 : 380 }}

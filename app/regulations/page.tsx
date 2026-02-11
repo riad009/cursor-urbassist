@@ -1,12 +1,15 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
   Upload,
   FileText,
   Sparkles,
   Brain,
+  ArrowLeft,
   CheckCircle2,
   AlertTriangle,
   XCircle,
@@ -152,7 +155,7 @@ const categoryIcons: Record<string, React.ElementType> = {
   Conclusion: FileText,
 };
 
-export default function RegulationsPage() {
+function RegulationsPageContent() {
   const [file, setFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisComplete, setAnalysisComplete] = useState(false);
@@ -172,6 +175,15 @@ export default function RegulationsPage() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoMessage, setAutoMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [addressSearchDone, setAddressSearchDone] = useState(false);
+  const searchParams = useSearchParams();
+  const projectIdFromUrl = searchParams.get("project");
+
+  useEffect(() => {
+    if (projectIdFromUrl && projects.some((p) => p.id === projectIdFromUrl)) {
+      setSelectedProjectId(projectIdFromUrl);
+      setAnalysisMode("project");
+    }
+  }, [projectIdFromUrl, projects]);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -839,6 +851,15 @@ Context:
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
+            {projectIdFromUrl && (
+              <Link
+                href={`/projects/${projectIdFromUrl}`}
+                className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white mb-3 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to project
+              </Link>
+            )}
             <div className="flex items-center gap-2 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
                 <Brain className="w-5 h-5 text-white" />
@@ -1451,5 +1472,19 @@ Context:
         )}
       </div>
     </Navigation>
+  );
+}
+
+export default function RegulationsPage() {
+  return (
+    <React.Suspense fallback={
+      <Navigation>
+        <div className="p-6 flex justify-center min-h-[40vh]">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+        </div>
+      </Navigation>
+    }>
+      <RegulationsPageContent />
+    </React.Suspense>
   );
 }
