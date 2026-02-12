@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
+import Link from "next/link";
 import {
   FileText,
   Loader2,
@@ -116,7 +118,21 @@ const QUESTIONS = [
     question: "Describe access arrangements and parking:",
     type: "textarea",
     placeholder:
-      "e.g., Vehicle access from Rue de la Paix via 3.5m wide driveway. 2 outdoor parking spaces (2.50m x 5.00m each) plus attached garage. Pedestrian access via garden path.",
+      "e.g., Vehicle access from Rue de la Paix via 3.5m wide driveway. Pedestrian access via garden path.",
+  },
+  {
+    id: "parkingExisting",
+    section: "Access & Parking",
+    question: "Number of existing parking spaces:",
+    type: "number",
+    placeholder: "0",
+  },
+  {
+    id: "parkingNew",
+    section: "Access & Parking",
+    question: "Number of new parking spaces to be created:",
+    type: "number",
+    placeholder: "2",
   },
   {
     id: "utilities",
@@ -152,10 +168,13 @@ const QUESTIONS = [
   },
 ];
 
-export default function StatementPage() {
+function StatementPageContent() {
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
+  const fromPayment = searchParams.get("from") === "payment";
+  const projectParam = searchParams.get("project");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["Project Description"])
@@ -171,6 +190,13 @@ export default function StatementPage() {
       .then((data) => setProjects(data.projects || []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (projectParam && projects.length > 0 && !selectedProject) {
+      const exists = projects.some((p) => p.id === projectParam);
+      if (exists) setSelectedProject(projectParam);
+    }
+  }, [projectParam, projects, selectedProject]);
 
   const toggleSection = (section: string) => {
     const newSections = new Set(expandedSections);
@@ -264,6 +290,21 @@ export default function StatementPage() {
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+        {fromPayment && (
+          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
+            <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <p className="font-medium text-emerald-200">Payment complete</p>
+              <p className="text-sm text-slate-400">Complete your descriptive statement to finalize your dossier.</p>
+            </div>
+            <Link
+              href={projectParam ? `/projects/${projectParam}` : "/projects"}
+              className="ml-auto text-sm text-emerald-400 hover:text-emerald-300"
+            >
+              Back to project
+            </Link>
+          </div>
+        )}
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -400,6 +441,20 @@ export default function StatementPage() {
                                 </option>
                               ))}
                             </select>
+                          ) : q.type === "number" ? (
+                            <input
+                              type="number"
+                              min={0}
+                              value={answers[q.id] ?? ""}
+                              onChange={(e) =>
+                                setAnswers({
+                                  ...answers,
+                                  [q.id]: e.target.value,
+                                })
+                              }
+                              placeholder={q.placeholder}
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            />
                           ) : q.type === "textarea" ? (
                             <textarea
                               value={answers[q.id] || ""}
@@ -514,5 +569,13 @@ export default function StatementPage() {
         </div>
       </div>
     </Navigation>
+  );
+}
+
+export default function StatementPage() {
+  return (
+    <Suspense fallback={<Navigation><div className="p-6 flex justify-center min-h-[40vh]"><Loader2 className="w-8 h-8 text-indigo-400 animate-spin" /></div></Navigation>}>
+      <StatementPageContent />
+    </Suspense>
   );
 }

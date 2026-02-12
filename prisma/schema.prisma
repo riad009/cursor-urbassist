@@ -135,6 +135,8 @@ model Project {
   northAngle      Float?        @map("north_angle")    // degrees from cadastre
   status          ProjectStatus @default(DRAFT)
   projectType     String?       @map("project_type") // construction, extension, renovation
+  authorizationType String?     @map("authorization_type") // DP, PC, ARCHITECT_REQUIRED
+  authorizationExplanation String? @map("authorization_explanation")
   scale           String        @default("1:100")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")

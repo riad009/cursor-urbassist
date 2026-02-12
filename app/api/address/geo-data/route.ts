@@ -26,6 +26,21 @@ export async function POST(request: NextRequest) {
 
     const origin = request.nextUrl.origin;
 
+    // 0) Commune (code + name) for PLU/RNU — fetch once and pass to plu-detection
+    let citycode: string | undefined;
+    try {
+      const communeRes = await fetch(
+        `https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=code,nom&limit=1`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (communeRes.ok) {
+        const communes = (await communeRes.json()) as { code: string; nom: string }[];
+        if (communes[0]) citycode = communes[0].code;
+      }
+    } catch {
+      // optional
+    }
+
     // 1) Cadastre: parcels + north angle + bestMatchId (parcel under address or closest)
     let parcels: Array<{ id: string; section: string; number: string; area: number; geometry?: unknown; coordinates?: number[] }> = [];
     let northAngleDegrees: number | null = null;
@@ -71,7 +86,11 @@ export async function POST(request: NextRequest) {
       const pluRes = await fetch(`${origin}/api/plu-detection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coordinates: [lng, lat] }),
+        body: JSON.stringify({
+          coordinates: [lng, lat],
+          citycode: citycode ?? undefined,
+          address: typeof body.address === "string" ? body.address : undefined,
+        }),
         signal: AbortSignal.timeout(12000),
       });
       const pluData = await pluRes.json();

@@ -6,6 +6,7 @@ import {
   type PDFProjectInfo,
   type PDFExportOptions,
 } from "@/lib/pdf-generator";
+import { fetchStaticMapBase64, fetchThreeMapViews } from "@/lib/fetchStaticMap";
 
 const CREDIT_COSTS: Record<string, number> = {
   LOCATION_PLAN: 2,
@@ -270,12 +271,54 @@ export async function POST(request: NextRequest) {
         ? Object.values(contentObj.sections as Record<string, string>).join("\n\n")
         : project.descriptiveStatement?.generatedText || "");
 
+    // Fetch three map views for Plan de situation (LOCATION_PLAN, FULL_PACKAGE)
+    let mapImage: string | undefined;
+    let mapImages: { aerial?: string | null; ign?: string | null; plan?: string | null } | undefined;
+    const needsMap = documentType === "LOCATION_PLAN" || documentType === "FULL_PACKAGE";
+    if (needsMap && project.coordinates) {
+      try {
+        const coords = JSON.parse(project.coordinates) as unknown;
+        let lat: number | undefined;
+        let lng: number | undefined;
+        if (Array.isArray(coords)) {
+          lat = coords[1];
+          lng = coords[0];
+        } else if (coords && typeof coords === "object") {
+          const o = coords as Record<string, unknown>;
+          lat = (o.lat ?? o.latitude) as number | undefined;
+          lng = (o.lng ?? o.longitude) as number | undefined;
+        }
+        if (typeof lat === "number" && typeof lng === "number" && Number.isFinite(lat) && Number.isFinite(lng)) {
+          try {
+            const views = await fetchThreeMapViews(lat, lng, 16);
+            mapImages = {
+              aerial: views.aerial && views.aerial.length > 100 ? `data:image/png;base64,${views.aerial}` : null,
+              ign: views.ign && views.ign.length > 100 ? `data:image/jpeg;base64,${views.ign}` : null,
+              plan: views.plan && views.plan.length > 100 ? `data:image/png;base64,${views.plan}` : null,
+            };
+            if (views.aerial && views.aerial.length > 100) mapImage = `data:image/png;base64,${views.aerial}`;
+            else if (views.ign && views.ign.length > 100) mapImage = `data:image/jpeg;base64,${views.ign}`;
+            else if (views.plan && views.plan.length > 100) mapImage = `data:image/png;base64,${views.plan}`;
+            else {
+              const b64 = await fetchStaticMapBase64(lat, lng, 16);
+              mapImage = b64 && b64.length > 100 ? `data:image/png;base64,${b64}` : undefined;
+            }
+          } catch {
+            // Continue without map; PDF will show "Carte non disponible"
+          }
+        }
+      } catch {
+        // Invalid coordinates or parse error; continue without map
+      }
+    }
+
     const pdfContent = {
       type: documentType,
       text: statementText,
       surfaceData,
       mainImage,
-      mapImage: undefined as string | undefined,
+      mapImage,
+      mapImages,
     };
 
     const pdfBuffer = await generateStyledPDF(pdfProject, pdfOptions, pdfContent);

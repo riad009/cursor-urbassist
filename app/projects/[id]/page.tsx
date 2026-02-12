@@ -2,7 +2,6 @@
 
 import React, { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
   MapPin,
@@ -46,23 +45,24 @@ function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null }
 
 export default function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
-  const searchParams = useSearchParams();
-  const stepDetails = searchParams.get("step") === "details";
   const [project, setProject] = useState<{
     id: string;
     name: string;
     address: string | null;
     documents?: { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }[];
+    regulatoryAnalysis?: { id: string } | null;
+    protectedAreas?: { type: string; name: string }[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
     if (!projectId || !user) {
-      setLoading(false);
+      if (!authLoading) setLoading(false);
       return;
     }
     let cancelled = false;
+    setLoading(true);
     fetch(`/api/projects/${projectId}`, { credentials: "include" })
       .then((r) => r.json())
       .then((data) => {
@@ -75,13 +75,15 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     return () => {
       cancelled = true;
     };
-  }, [projectId, user]);
+  }, [projectId, user, authLoading]);
 
-  if (loading) {
+  const showLoading = authLoading || (!!user && !!projectId && loading);
+  if (showLoading) {
     return (
       <Navigation>
-        <div className="p-6 flex justify-center min-h-[40vh]">
+        <div className="p-6 flex flex-col items-center justify-center min-h-[40vh] gap-3">
           <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <p className="text-slate-400 text-sm">Loading project…</p>
         </div>
       </Navigation>
     );
@@ -108,9 +110,6 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     {} as Record<string, { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }>
   );
 
-  const hasDescriptiveStatement = !!docsByType["DESCRIPTIVE_STATEMENT"];
-  const showDetailsPrompt = stepDetails && !hasDescriptiveStatement;
-
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-3xl mx-auto">
@@ -131,34 +130,38 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           )}
         </div>
 
-        {/* Project details prompt (essential step before payment) */}
-        {showDetailsPrompt && (
-          <div className="mb-8 p-5 rounded-2xl bg-amber-500/15 border border-amber-500/30">
-            <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-amber-400" />
-              Next: Describe your project
-            </h2>
-            <p className="text-slate-300 text-sm mb-4">
-              Provide project details to determine whether a building permit (permis de construire) or prior declaration (déclaration préalable) is required. This step is required before payment and PLU analysis.
-            </p>
-            <Link
-              href={`/statement?project=${project.id}`}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 font-medium hover:bg-amber-500/30"
-            >
-              Complete project description
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+        {project.regulatoryAnalysis && (
+          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <p className="font-medium text-emerald-200">PLU analysis completed</p>
+            <div className="flex flex-wrap gap-2 ml-auto">
+              <Link
+                href={`/regulations?project=${project.id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 text-sm font-medium hover:bg-emerald-500/30"
+              >
+                View analysis
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+              <Link
+                href={`/plu-analysis?project=${project.id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
+              >
+                <Download className="w-4 h-4" />
+                Export analysis as PDF
+              </Link>
+            </div>
           </div>
         )}
 
-        {/* PLU Analysis – priority, with PDF export */}
+        {/* PLU Analysis – when not yet completed */}
+        {!project.regulatoryAnalysis && (
         <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
           <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
             <FileBarChart className="w-5 h-5 text-blue-400" />
             PLU Analysis
           </h2>
           <p className="text-slate-400 text-sm mb-4">
-            Summary and recommendations from the applicable regulation. Export the report as PDF for your dossier.
+            Complete your project description, then launch the PLU analysis to get summary and recommendations. Export the report as PDF for your dossier.
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
@@ -177,6 +180,18 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             </Link>
           </div>
         </div>
+        )}
+
+        {Array.isArray(project.protectedAreas) && project.protectedAreas.length > 0 && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+            <h3 className="text-sm font-semibold text-amber-200 mb-2">Protected Area</h3>
+            <ul className="text-sm text-slate-300 space-y-1">
+              {project.protectedAreas.filter((a) => a.type !== "INFO").map((a, i) => (
+                <li key={i}>{a.name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <h2 className="text-lg font-semibold text-white mb-4">Documents to produce</h2>
         <p className="text-slate-400 text-sm mb-6">

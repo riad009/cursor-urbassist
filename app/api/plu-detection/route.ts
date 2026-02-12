@@ -24,22 +24,86 @@ const GPU_LAYERS = [
   "info-pct",
 ] as const;
 
+const POINT_GEOM = (lng: number, lat: number) =>
+  JSON.stringify({ type: "Point", coordinates: [lng, lat] });
+
+const API_HEADERS = { "User-Agent": "UrbAssist/1.0 (urbanisme)" };
+const API_TIMEOUT = 12000;
+
+/** API Carto GPU: intersection géométrique. Try GET lon/lat first (most reliable), then POST geom, then GET geom. */
 async function fetchGpuLayer(
   baseUrl: string,
   path: string,
   lng: number,
   lat: number
 ): Promise<unknown[]> {
+  const geom = { type: "Point" as const, coordinates: [lng, lat] };
+
+  // 1. GET lon/lat (simplest; API Carto doc supports "par attribut" and "par intersection")
   try {
     const res = await fetch(`${baseUrl}/${path}?lon=${lng}&lat=${lat}`, {
-      signal: AbortSignal.timeout(8000),
+      headers: API_HEADERS,
+      signal: AbortSignal.timeout(API_TIMEOUT),
     });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data?.features ?? [];
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
   } catch {
-    return [];
+    // continue
   }
+
+  // 2. POST with geom
+  try {
+    const res = await fetch(`${baseUrl}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...API_HEADERS },
+      body: JSON.stringify({ geom }),
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
+  } catch {
+    // continue
+  }
+
+  // 3. POST with body = raw geometry (some clients send this)
+  try {
+    const res = await fetch(`${baseUrl}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...API_HEADERS },
+      body: JSON.stringify(geom),
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
+  } catch {
+    // continue
+  }
+
+  // 4. GET geom (URL-encoded GeoJSON)
+  try {
+    const geomParam = encodeURIComponent(POINT_GEOM(lng, lat));
+    const res = await fetch(`${baseUrl}/${path}?geom=${geomParam}`, {
+      headers: API_HEADERS,
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
 }
 
 /** Broad category codes only (CNIG typezone). */
@@ -61,6 +125,30 @@ function libellePriority(libelle: string): number {
   return i === -1 ? ZONE_LIBELLE_PRIORITY.length : i;
 }
 
+/** Get zone code from feature properties (API Carto and Geoportail may use different keys). */
+function getZoneLibelle(props: Record<string, unknown> | undefined): string | null {
+  if (!props) return null;
+  const v =
+    (props.libelle as string) ??
+    (props.LIBELLE as string) ??
+    (props.typezone as string) ??
+    (props.TYPESZONE as string) ??
+    (props.code as string) ??
+    (props.zone as string);
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/** Get zone long name from feature properties. */
+function getZoneLibelong(props: Record<string, unknown> | undefined): string | null {
+  if (!props) return null;
+  const v =
+    (props.libelong as string) ??
+    (props.LIBELLONG as string) ??
+    (props.libelle as string) ??
+    (props.LIBELLE as string);
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
 /**
  * When the API returns multiple zone features at a point, pick the best applicable zone:
  * - Exclude broad codes (U, AU, A, N) when a more specific code exists.
@@ -70,19 +158,16 @@ function pickBestZoneFeature(
   features: Array<{ properties?: Record<string, unknown> }>
 ): { properties?: Record<string, unknown> } | null {
   if (!features.length) return null;
-  const withLibelle = features.filter(
-    (f) => f.properties?.libelle && typeof f.properties.libelle === "string"
-  );
+  const withLibelle = features.filter((f) => getZoneLibelle(f.properties));
   if (withLibelle.length === 0) return features[0];
   const specific = withLibelle.filter(
-    (f) => !BROAD_ZONE_CODES.has(String(f.properties?.libelle).trim().toUpperCase())
+    (f) => !BROAD_ZONE_CODES.has(String(getZoneLibelle(f.properties) ?? "").toUpperCase())
   );
   if (specific.length === 0) return withLibelle[0] ?? features[0];
-  // Prefer by priority (AUD before Uj, etc.)
   const best = specific.sort(
     (a, b) =>
-      libellePriority(String(a.properties?.libelle ?? "")) -
-      libellePriority(String(b.properties?.libelle ?? ""))
+      libellePriority(String(getZoneLibelle(a.properties) ?? "")) -
+      libellePriority(String(getZoneLibelle(b.properties) ?? ""))
   )[0];
   return best ?? specific[0] ?? features[0];
 }
@@ -138,37 +223,76 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 2: Zone from GPU — try official GPU then API Carto (GET /api/gpu/zone-urba)
+    // Step 2: Zone from GPU — Geoportail feature-info/du (official) and API Carto zone-urba
     let zoneFeatures: unknown[] = [];
-    const zoneUrls: string[] = [
-      `${GPU_BASE}/gpu/zone-urba?lon=${lng}&lat=${lat}`,
-      `${GPU_BASE}/feature-info/du?lon=${lng}&lat=${lat}&typeName=zone_urba`,
-      `${APICARTO_GPU}/zone-urba?lon=${lng}&lat=${lat}`,
-    ];
-    for (const url of zoneUrls) {
-      try {
-        const gpuRes = await fetch(url, { signal: AbortSignal.timeout(10000) });
-        if (gpuRes.ok) {
-          const gpuData = await gpuRes.json();
-          if (gpuData.features && gpuData.features.length > 0) {
-            zoneFeatures = gpuData.features;
-            const features = gpuData.features as Array<{ properties?: Record<string, unknown> }>;
-            const zone = pickBestZoneFeature(features)?.properties ?? features[0].properties;
-            if (zone) {
-              pluInfo.zoneType = (zone.libelle as string) || (zone.typezone as string) || null;
-              pluInfo.zoneName = (zone.libelong as string) || (zone.libelle as string) || (zone.typezone as string) || null;
-              const idurba = zone.idurba as string | undefined;
-              pluInfo.pluType = idurba
-                ? idurba.includes("PLUi")
-                  ? "PLUi"
-                  : "PLU"
-                : null;
+    // 2a. Geoportail API: /feature-info/du with typeName=zone_urba (lon, lat required per swagger)
+    const geoportailUrl = `${GPU_BASE}/feature-info/du?lon=${lng}&lat=${lat}&typeName=zone_urba&zone=production`;
+    try {
+      const gpuRes = await fetch(geoportailUrl, {
+        headers: API_HEADERS,
+        signal: AbortSignal.timeout(API_TIMEOUT),
+      });
+      if (gpuRes.ok) {
+        const gpuData = await gpuRes.json();
+        if (gpuData.features && gpuData.features.length > 0) {
+          zoneFeatures = gpuData.features;
+        }
+      }
+    } catch {
+      // continue to API Carto
+    }
+    // 2b. API Carto (IGN) zone-urba if Geoportail returned nothing
+    if (zoneFeatures.length === 0) {
+      zoneFeatures = await fetchGpuLayer(APICARTO_GPU, "zone-urba", lng, lat) as unknown[];
+    }
+    if (zoneFeatures.length > 0) {
+      const features = zoneFeatures as Array<{ properties?: Record<string, unknown> }>;
+      const zone = pickBestZoneFeature(features)?.properties ?? features[0].properties;
+      if (zone) {
+        pluInfo.zoneType = getZoneLibelle(zone) ?? null;
+        pluInfo.zoneName = getZoneLibelong(zone) || pluInfo.zoneType;
+        const idurba = (zone.idurba ?? zone.IDURBA ?? zone.du_type) as string | undefined;
+        pluInfo.pluType = idurba
+          ? String(idurba).includes("PLUi")
+            ? "PLUi"
+            : "PLU"
+          : null;
+        pluInfo.pluStatus = pluInfo.pluStatus ?? (zone.etat as string) ?? "detected";
+      }
+    }
+
+    // Step 2a: Check municipality for RNU (Règlement National d'Urbanisme) — prefer code_insee when available
+    if (!pluInfo.zoneType && communeCode) {
+      const munUrls: string[] = [
+        `${APICARTO_GPU}/municipality?code_insee=${communeCode}`,
+        `${APICARTO_GPU}/municipality?lon=${lng}&lat=${lat}`,
+        `${APICARTO_GPU}/municipality?geom=${encodeURIComponent(POINT_GEOM(lng, lat))}`,
+      ];
+      for (const url of munUrls) {
+        try {
+          const munRes = await fetch(url, { signal: AbortSignal.timeout(6000) });
+          if (munRes.ok) {
+            const munData = await munRes.json();
+            const munFeatures = munData?.features ?? [];
+            if (munFeatures.length > 0) {
+              const props = (munFeatures[0] as { properties?: Record<string, unknown> })?.properties;
+              const raw = props?.est_rnu ?? props?.rnu ?? props?.RNU;
+              const isRnu =
+                raw === true ||
+                String(raw).toLowerCase() === "true" ||
+                String(raw).toLowerCase() === "oui";
+              if (isRnu) {
+                pluInfo.zoneType = "RNU";
+                pluInfo.zoneName = "Règlement National d'Urbanisme";
+                pluInfo.pluType = "RNU";
+                pluInfo.pluStatus = pluInfo.pluStatus ?? "detected";
+                break;
+              }
             }
           }
-          break;
+        } catch {
+          // try next URL
         }
-      } catch {
-        continue;
       }
     }
 
@@ -218,44 +342,13 @@ export async function POST(request: NextRequest) {
         pluInfo.zoneType = (first.libelle as string) || "CC";
         pluInfo.zoneName = (first.libelong as string) || (first.libelle as string) || "Secteur Carte Communale";
         pluInfo.pluType = pluInfo.pluType || "CC";
+        pluInfo.pluStatus = pluInfo.pluStatus ?? "detected";
       }
     }
 
-    // Step 3: If still no zone, provide estimated zone
-    if (!pluInfo.zoneType) {
-      // Estimate zone based on commune population and location
-      try {
-        const communeInfoRes = await fetch(
-          `https://geo.api.gouv.fr/communes/${communeCode}?fields=population,surface`
-        );
-        if (communeInfoRes.ok) {
-          const commune = await communeInfoRes.json();
-          communeName = communeName || commune.nom;
-          const pop = commune.population || 0;
-          const density = pop / ((commune.surface || 1) / 100); // hab/km²
-
-          if (density > 3000) {
-            pluInfo.zoneType = "UA";
-            pluInfo.zoneName = "Zone Urbaine Dense";
-          } else if (density > 1000) {
-            pluInfo.zoneType = "UB";
-            pluInfo.zoneName = "Zone Urbaine Mixte";
-          } else if (density > 300) {
-            pluInfo.zoneType = "UC";
-            pluInfo.zoneName = "Zone Urbaine Résidentielle";
-          } else if (density > 100) {
-            pluInfo.zoneType = "AU";
-            pluInfo.zoneName = "Zone À Urbaniser";
-          } else {
-            pluInfo.zoneType = "A/N";
-            pluInfo.zoneName = "Zone Agricole ou Naturelle";
-          }
-        }
-      } catch {
-        pluInfo.zoneType = "UB";
-        pluInfo.zoneName = "Zone Urbaine (estimated)";
-      }
-    }
+    // Step 3: If no zone from PLU/RNU/CC APIs, leave zone null so the UI can show:
+    // "We were unable to automatically detect your PLU or RNU zone. We will help you determine it after your project has been validated."
+    // No estimated zone is set here to avoid blocking or misleading the user; they are not required to enter a zone manually.
 
     pluInfo.communeName = communeName;
 
@@ -312,7 +405,7 @@ Only return the JSON, no other text.`;
       success: true,
       plu: pluInfo,
       zoneFeatures,
-      source: pluInfo.pluStatus ? "gpu" : "estimated",
+      source: pluInfo.zoneType ? (pluInfo.pluStatus ? "gpu" : "estimated") : "none",
       gpu: {
         document: documentFeatures,
         zone: zoneFeatures,

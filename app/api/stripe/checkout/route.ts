@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { type, packageId, planId } = await request.json();
+    const { type, packageId, planId, projectId } = await request.json();
 
     if (type === "credits") {
       // One-time credit purchase
@@ -71,6 +71,9 @@ export async function POST(request: NextRequest) {
       const Stripe = (await import("stripe")).default;
       const stripe = new Stripe(STRIPE_SECRET);
 
+      const successPath = projectId
+        ? `/statement?project=${encodeURIComponent(projectId)}&from=payment`
+        : `/admin?session_id={CHECKOUT_SESSION_ID}&success=true`;
       const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           line_items: [
@@ -87,12 +90,13 @@ export async function POST(request: NextRequest) {
             },
           ],
           mode: "payment",
-          success_url: `${SITE_URL}/admin?session_id={CHECKOUT_SESSION_ID}&success=true`,
+          success_url: `${SITE_URL}${successPath}`,
           cancel_url: `${SITE_URL}/admin?cancelled=true`,
           metadata: {
             userId: user.id,
             type: "credits",
             credits: String(pkg.credits),
+            ...(projectId ? { projectId: String(projectId) } : {}),
           },
         });
 

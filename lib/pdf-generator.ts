@@ -259,12 +259,53 @@ export function createCoverPage(
   );
 }
 
-/** Create plan de situation page with map panels */
+/** Add a single map panel with optional image */
+function addMapPanel(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  panelW: number,
+  panelH: number,
+  title: string,
+  imgData: string | null,
+  format: "PNG" | "JPEG" = "PNG",
+  headerBg: [number, number, number] = [55, 65, 81]
+) {
+  const headerH = 12;
+  doc.setFillColor(headerBg[0], headerBg[1], headerBg[2]);
+  doc.rect(x, y, panelW, headerH, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text(title, x + panelW / 2, y + 8, { align: "center" });
+  const imgY = y + headerH;
+  const imgH = panelH - headerH;
+  if (imgData) {
+    try {
+      doc.addImage(imgData, format, x, imgY, panelW, imgH);
+    } catch {
+      doc.setFillColor(245, 245, 245);
+      doc.rect(x, imgY, panelW, imgH, "F");
+      doc.setTextColor(156, 163, 175);
+      doc.setFontSize(10);
+      doc.text("Carte non disponible", x + panelW / 2, imgY + imgH / 2 - 4, { align: "center" });
+    }
+  } else {
+    doc.setFillColor(245, 245, 245);
+    doc.rect(x, imgY, panelW, imgH, "F");
+    doc.setTextColor(156, 163, 175);
+    doc.setFontSize(10);
+    doc.text("Carte non disponible", x + panelW / 2, imgY + imgH / 2 - 4, { align: "center" });
+  }
+}
+
+/** Create plan de situation page with three map views (aerial, IGN, cadastral/plan) */
 export function createPlanSituationPage(
   doc: jsPDF,
   project: PDFProjectInfo,
   options: PDFExportOptions,
-  mapImageBase64?: string
+  mapImageBase64?: string,
+  mapImages?: { aerial?: string | null; ign?: string | null; plan?: string | null }
 ) {
   const { w, h } = PAPER_SIZES_MM[options.paperSize || "A3"];
   doc.addPage([w, h], "portrait");
@@ -276,17 +317,55 @@ export function createPlanSituationPage(
   // Compass at top center
   drawCompass(doc, w / 2, margin + 15, 14);
 
-  // Map panel
   const panelY = 45;
   doc.setFillColor(panelHeaderBg[0], panelHeaderBg[1], panelHeaderBg[2]);
   doc.rect(0, panelY - headerH, w, headerH, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("PLAN DE SITUATION - PLAN IGN 1/5000ème", w / 2, panelY - 8, { align: "center" });
+  doc.text("PLAN DE SITUATION - VUE AÉRIENNE, IGN, CADASTRE", w / 2, panelY - 8, { align: "center" });
 
   const mapH = h - panelY - 50;
-  if (mapImageBase64) {
+  const gap = 6;
+  const threePanelW = (w - margin * 2 - gap * 2) / 3;
+
+  if (mapImages?.aerial ?? mapImages?.ign ?? mapImages?.plan) {
+    // Three-panel layout: aerial | IGN | plan
+    addMapPanel(
+      doc,
+      margin,
+      panelY,
+      threePanelW,
+      mapH,
+      "Vue aérienne",
+      mapImages?.aerial ?? null,
+      "PNG",
+      panelHeaderBg
+    );
+    addMapPanel(
+      doc,
+      margin + threePanelW + gap,
+      panelY,
+      threePanelW,
+      mapH,
+      "IGN Orthophoto",
+      mapImages?.ign ?? null,
+      "JPEG",
+      panelHeaderBg
+    );
+    addMapPanel(
+      doc,
+      margin + (threePanelW + gap) * 2,
+      panelY,
+      threePanelW,
+      mapH,
+      "Plan cadastral",
+      mapImages?.plan ?? null,
+      "PNG",
+      panelHeaderBg
+    );
+  } else if (mapImageBase64) {
+    // Fallback: single map (legacy)
     try {
       doc.addImage(mapImageBase64, "PNG", margin, panelY, w - margin * 2, mapH);
     } catch {
@@ -559,6 +638,7 @@ export async function generateStyledPDF(
     surfaceProjet?: Array<{ description: string; surface: string }>;
     mainImage?: string;
     mapImage?: string;
+    mapImages?: { aerial?: string | null; ign?: string | null; plan?: string | null };
     images?: Array<{ src: string; caption: string }>;
   }
 ): Promise<Buffer> {
@@ -590,7 +670,13 @@ export async function generateStyledPDF(
   switch (content.type) {
     case "LOCATION_PLAN":
       createCoverPage(doc, project, { ...options, pcmNumber: "PCMI 1" }, content.mainImage);
-      createPlanSituationPage(doc, project, { ...options, pcmNumber: "PCML 1" }, content.mapImage);
+      createPlanSituationPage(
+        doc,
+        project,
+        { ...options, pcmNumber: "PCML 1" },
+        content.mapImage,
+        content.mapImages
+      );
       break;
 
     case "SITE_PLAN":
@@ -619,7 +705,13 @@ export async function generateStyledPDF(
 
     case "FULL_PACKAGE":
       createCoverPage(doc, project, { ...options, pcmNumber: "PCMI 1" }, content.mainImage);
-      createPlanSituationPage(doc, project, { ...options, pcmNumber: "PCML 1" }, content.mapImage);
+      createPlanSituationPage(
+        doc,
+        project,
+        { ...options, pcmNumber: "PCML 1" },
+        content.mapImage,
+        content.mapImages
+      );
       createSurfaceTablePage(
         doc,
         project,

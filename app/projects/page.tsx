@@ -175,7 +175,7 @@ export default function ProjectsPage() {
     fetch("/api/address/geo-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords }),
+      body: JSON.stringify({ coordinates: coords, address: addr.label }),
     })
       .then(async (r) => {
         const d = await r.json();
@@ -261,7 +261,7 @@ export default function ProjectsPage() {
         setZoneFeatures([]);
         setProtectedAreas([]);
         setNorthAngleDegrees(null);
-        window.location.href = `/projects/${data.project.id}?step=details`;
+        window.location.href = `/projects/${data.project.id}/authorization`;
         return;
       }
     } catch (err) {
@@ -526,7 +526,7 @@ export default function ProjectsPage() {
                           className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm placeholder-slate-500"
                           autoFocus
                         />
-                        <p className="text-xs text-slate-500">You can correct this if you know the correct zone from your PLU document.</p>
+                        <p className="text-xs text-slate-500">Optional: correct if you know the zone from your PLU document.</p>
                         <button
                           type="button"
                           onClick={() => {
@@ -535,13 +535,13 @@ export default function ProjectsPage() {
                           }}
                           className="text-xs text-blue-400 hover:text-blue-300"
                         >
-                          Save zone
+                          Save
                         </button>
                       </div>
                     ) : pluInfo?.zoneType || pluInfo?.zoneName || manualPluZone.trim() ? (
                       <>
                         <p className="text-sm font-semibold text-blue-400">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{pluInfo?.pluType === "PLUi" ? "PLU intercommunal" : "PLU communal"}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{pluInfo?.pluType === "PLUi" ? "PLU intercommunal" : pluInfo?.pluType === "RNU" ? "RNU (Règlement National d'Urbanisme)" : pluInfo?.pluType === "CC" ? "Carte Communale" : "PLU communal"}</p>
                         <button
                           type="button"
                           onClick={() => {
@@ -551,22 +551,15 @@ export default function ProjectsPage() {
                           className="mt-1 text-xs text-slate-400 hover:text-white inline-flex items-center gap-1"
                         >
                           <Pencil className="w-3 h-3" />
-                          Add / Edit zone
+                          Edit zone (optional)
                         </button>
                       </>
                     ) : (
                       <>
-                        <p className="text-sm text-slate-500">Non détectée</p>
-                        <p className="text-xs text-slate-500 mt-0.5">PLU peut être indisponible pour cette adresse ou zone non couverte.</p>
-                        <button
-                          type="button"
-                          onClick={() => setShowManualPluEdit(true)}
-                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 text-xs font-medium hover:bg-amber-500/30"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          Add / Edit
-                        </button>
-                        <p className="text-xs text-slate-500 mt-1">You can correct this if you know the correct zone from your PLU document.</p>
+                        <p className="text-sm text-slate-400">Non détectée</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          We were unable to automatically detect your PLU or RNU zone. We will help you determine it after your project has been validated.
+                        </p>
                       </>
                     )}
                   </div>

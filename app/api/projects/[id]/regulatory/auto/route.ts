@@ -3,7 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 import { fetchPdfText } from "@/lib/fetchPdfText";
 
-const ANALYSIS_CREDIT_COST = 3; // credits for deep PLU analysis
+const ANALYSIS_CREDIT_COST = parseInt(
+  process.env.PLU_ANALYSIS_CREDITS || "3",
+  10
+) || 3;
 
 /**
  * Deep PLU analysis pipeline:

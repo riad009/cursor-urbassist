@@ -54,6 +54,8 @@ function PluAnalysisPageContent() {
   const [loading, setLoading] = useState(true);
   const [runningDetection, setRunningDetection] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
+  const [pluCreditsCost, setPluCreditsCost] = useState(3);
   const [pluFootprintDifferent, setPluFootprintDifferent] = useState(false);
   const [savingFootprintPref, setSavingFootprintPref] = useState(false);
   const [complianceSummary, setComplianceSummary] = useState<{
@@ -79,6 +81,13 @@ function PluAnalysisPageContent() {
   useEffect(() => {
     loadProject();
   }, [loadProject]);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => setPluCreditsCost(d.pluAnalysisCredits ?? 3))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!project?.regulatoryAnalysis?.aiAnalysis) return;
@@ -109,6 +118,7 @@ function PluAnalysisPageContent() {
 
   const runPluDetection = async () => {
     if (!projectId) return;
+    setShowLaunchConfirm(false);
     setRunningDetection(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/regulatory/auto`, {
@@ -272,25 +282,56 @@ function PluAnalysisPageContent() {
         </div>
 
         {!project.regulatoryAnalysis && (
-          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-white">PLU not yet analyzed</p>
-                <p className="text-sm text-slate-400 mt-1">
-                  Run detection to load the building footprint rules, regulatory constraints, and compliance basis for this address.
-                </p>
+          <>
+            <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-white">PLU not yet analyzed</p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Launch the PLU analysis to load the building footprint rules, regulatory constraints, and compliance basis for this address.
+                  </p>
+                </div>
               </div>
+              <button
+                onClick={() => setShowLaunchConfirm(true)}
+                disabled={runningDetection || !project.coordinates}
+                className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 font-medium hover:bg-amber-500/30 disabled:opacity-50"
+              >
+                {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+                {runningDetection ? "Running…" : "Launch PLU analysis"}
+              </button>
             </div>
-            <button
-              onClick={runPluDetection}
-              disabled={runningDetection || !project.coordinates}
-              className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 font-medium hover:bg-amber-500/30 disabled:opacity-50"
-            >
-              {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
-              {runningDetection ? "Running…" : "Run PLU detection"}
-            </button>
-          </div>
+            {showLaunchConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowLaunchConfirm(false)}>
+                <div
+                  className="rounded-2xl bg-slate-800 border border-white/10 p-6 max-w-md w-full mx-4 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="text-lg font-semibold text-white mb-2">Launch PLU analysis?</h3>
+                  <p className="text-sm text-slate-400 mb-6">
+                    Are you sure you want to launch the PLU analysis? Once validated, any additional analysis will be charged {pluCreditsCost} credits.
+                  </p>
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      onClick={() => setShowLaunchConfirm(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-700 text-white hover:bg-slate-600"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={runPluDetection}
+                      disabled={runningDetection}
+                      className="px-4 py-2 rounded-xl bg-amber-500/80 text-white font-medium hover:bg-amber-500 disabled:opacity-50 inline-flex items-center gap-2"
+                    >
+                      {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Launch
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {project.regulatoryAnalysis && (

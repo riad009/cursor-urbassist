@@ -27,6 +27,37 @@ export async function POST(request: NextRequest) {
 
     const [lng, lat] = coordinates || [0, 0];
     const areas: ProtectedAreaResult[] = [];
+    const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
+
+    // 0. Check GPU servitudes d'utilité publique (SUP) - prescriptions, protection perimeters
+    try {
+      for (const path of ["assiette-sup-s", "assiette-sup-l", "assiette-sup-p", "prescription-surf", "prescription-lin", "prescription-pct"]) {
+        const res = await fetch(`${APICARTO_GPU}/${path}?lon=${lng}&lat=${lat}`, {
+          signal: AbortSignal.timeout(6000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const features = data?.features ?? [];
+          for (const f of features.slice(0, 5)) {
+            const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
+            const name = (props.libelle ?? props.nom ?? props.type ?? path) as string;
+            if (name && !areas.some((a) => a.name === name)) {
+              areas.push({
+                type: "PRESCRIPTION",
+                name: String(name),
+                description: "Prescription or public utility easement (SUP) applies to this parcel. Verify with your mairie.",
+                distance: null,
+                constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
+                sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+                severity: "medium",
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log("GPU SUP/prescription API unavailable:", e);
+    }
 
     // 1. Check Monuments Historiques (ABF perimeters - 500m around listed monuments)
     try {
