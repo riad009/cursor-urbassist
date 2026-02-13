@@ -33,7 +33,17 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
   const [determination, setDetermination] = useState<DeterminationType | null>(null);
   const [explanation, setExplanation] = useState("");
   const [shortcutUsed, setShortcutUsed] = useState(false);
-  const [projectType, setProjectType] = useState<ProjectTypeChoice>("new_construction");
+  const [projectTypes, setProjectTypes] = useState<ProjectTypeChoice[]>(["new_construction"]);
+
+  const toggleProjectType = (type: ProjectTypeChoice) => {
+    setProjectTypes((prev) => {
+      if (prev.includes(type)) {
+        const next = prev.filter((t) => t !== type);
+        return next.length === 0 ? [type] : next; // At least one must be selected
+      }
+      return [...prev, type];
+    });
+  };
   const [floorAreaCreated, setFloorAreaCreated] = useState(80);
   const [existingFloorArea, setExistingFloorArea] = useState(0);
   const [groundAreaExtension, setGroundAreaExtension] = useState<number | undefined>();
@@ -64,13 +74,13 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
             .then((data2) => {
               if (!cancelled && data2.project) setProject(data2.project);
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
               if (!cancelled) setLoading(false);
             });
         }, 600);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         if (!cancelled && !willRetry) setLoading(false);
       });
@@ -95,11 +105,17 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
   };
 
   const handleCalculate = () => {
+    // Use most restrictive type: existing_extension > new_construction > outdoor
+    const effectiveType: ProjectTypeChoice = projectTypes.includes("existing_extension")
+      ? "existing_extension"
+      : projectTypes.includes("new_construction")
+        ? "new_construction"
+        : "outdoor";
     const result = calculateDpPc({
-      projectType,
+      projectType: effectiveType,
       floorAreaCreated,
-      existingFloorArea: projectType === "existing_extension" ? existingFloorArea : undefined,
-      groundAreaExtension: projectType === "existing_extension" ? groundAreaExtension : undefined,
+      existingFloorArea: effectiveType === "existing_extension" ? existingFloorArea : undefined,
+      groundAreaExtension: effectiveType === "existing_extension" ? groundAreaExtension : undefined,
       inUrbanZone,
     });
     setDetermination(result.determination);
@@ -202,7 +218,7 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
         <div className="mb-8 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
           <p className="text-sm text-slate-300">
-            Le système vous aide à identifier le type d&apos;autorisation requis. En zone PLU (U, AU, AUD…), 
+            Le système vous aide à identifier le type d&apos;autorisation requis. En zone PLU (U, AU, AUD…),
             les règles dépendent des surfaces créées et existantes.
           </p>
         </div>
@@ -214,22 +230,20 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
             <button
               type="button"
               onClick={() => handleShortcut("DP")}
-              className={`px-6 py-3 rounded-xl font-medium transition-all ${
-                determination === "DP" && shortcutUsed
+              className={`px-6 py-3 rounded-xl font-medium transition-all ${determination === "DP" && shortcutUsed
                   ? "bg-emerald-500/30 border-2 border-emerald-500 text-emerald-300"
                   : "bg-slate-800 border border-white/10 text-slate-200 hover:bg-slate-700"
-              }`}
+                }`}
             >
               Déclaration Préalable
             </button>
             <button
               type="button"
               onClick={() => handleShortcut("PC")}
-              className={`px-6 py-3 rounded-xl font-medium transition-all ${
-                determination === "PC" && shortcutUsed
+              className={`px-6 py-3 rounded-xl font-medium transition-all ${determination === "PC" && shortcutUsed
                   ? "bg-amber-500/30 border-2 border-amber-500 text-amber-300"
                   : "bg-slate-800 border border-white/10 text-slate-200 hover:bg-slate-700"
-              }`}
+                }`}
             >
               Permis de Construire
             </button>
@@ -241,16 +255,30 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
           <h2 className="text-lg font-semibold text-white mb-4">Ou laisser le système calculer</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm text-slate-400 mb-2">Type de projet</label>
-              <select
-                value={projectType}
-                onChange={(e) => setProjectType(e.target.value as ProjectTypeChoice)}
-                className="w-full px-4 py-2.5 rounded-lg bg-slate-700 border border-white/10 text-white"
-              >
-                <option value="new_construction">Construction neuve</option>
-                <option value="existing_extension">Extension d&apos;un bâtiment existant</option>
-                <option value="outdoor">Aménagement extérieur</option>
-              </select>
+              <label className="block text-sm text-slate-400 mb-2">Type de projet (plusieurs choix possibles)</label>
+              <div className="space-y-2">
+                {[
+                  { value: "new_construction" as ProjectTypeChoice, label: "Construction neuve" },
+                  { value: "existing_extension" as ProjectTypeChoice, label: "Extension d'un bâtiment existant" },
+                  { value: "outdoor" as ProjectTypeChoice, label: "Aménagement extérieur" },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${projectTypes.includes(opt.value)
+                        ? "bg-blue-500/20 border-2 border-blue-500 text-blue-200"
+                        : "bg-slate-700 border border-white/10 text-slate-300 hover:bg-slate-600"
+                      }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={projectTypes.includes(opt.value)}
+                      onChange={() => toggleProjectType(opt.value)}
+                      className="rounded border-white/20 bg-slate-800 text-blue-500 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span className="text-sm font-medium">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div>
               <label className="block text-sm text-slate-400 mb-2">
@@ -264,7 +292,7 @@ export default function AuthorizationPage({ params }: { params: Promise<{ id: st
                 className="w-full px-4 py-2.5 rounded-lg bg-slate-700 border border-white/10 text-white"
               />
             </div>
-            {projectType === "existing_extension" && (
+            {projectTypes.includes("existing_extension") && (
               <>
                 <div>
                   <label className="block text-sm text-slate-400 mb-2">

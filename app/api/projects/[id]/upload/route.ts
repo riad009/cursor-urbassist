@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import path from "path";
 import fs from "fs/promises";
 
@@ -83,7 +84,7 @@ export async function POST(
         await prisma.project.update({
             where: { id: projectId },
             data: {
-                projectDescription: { ...desc, uploads } as Record<string, unknown>,
+                projectDescription: { ...desc, uploads } as Prisma.InputJsonValue,
             },
         });
 
