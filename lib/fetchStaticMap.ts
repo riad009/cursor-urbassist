@@ -18,6 +18,8 @@ const ESRI_IMAGERY =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile";
 const IGN_ORTHO =
   "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
+const IGN_CADASTRE =
+  "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
 const OSM_PLAN = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 const TILE_TIMEOUT_MS = 8000;
@@ -53,15 +55,15 @@ export async function fetchStaticMapBase64(
   return fetchTileAsBase64(url);
 }
 
-/** Three map views for A3 Plan de situation: aerial, IGN orthophoto, cadastral/plan */
+/** Four map views for A3 Plan de situation: aerial, IGN orthophoto, plan (OSM), cadastral */
 export async function fetchThreeMapViews(
   lat: number,
   lng: number,
   zoom: number = 16
-): Promise<{ aerial: string | null; ign: string | null; plan: string | null }> {
+): Promise<{ aerial: string | null; ign: string | null; plan: string | null; cadastre: string | null }> {
   const { x, y } = latLngToTile(lat, lng, zoom);
 
-  const [aerial, ign, plan] = await Promise.all([
+  const [aerial, ign, plan, cadastre] = await Promise.all([
     fetchTileAsBase64(`${ESRI_IMAGERY}/${zoom}/${y}/${x}`),
     fetchTileAsBase64(
       IGN_ORTHO.replace("{z}", String(zoom)).replace("{y}", String(y)).replace("{x}", String(x))
@@ -69,7 +71,10 @@ export async function fetchThreeMapViews(
     fetchTileAsBase64(
       OSM_PLAN.replace("{z}", String(zoom)).replace("{x}", String(x)).replace("{y}", String(y))
     ),
+    fetchTileAsBase64(
+      IGN_CADASTRE.replace("{z}", String(zoom)).replace("{y}", String(y)).replace("{x}", String(x))
+    ),
   ]);
 
-  return { aerial, ign, plan };
+  return { aerial, ign, plan, cadastre };
 }

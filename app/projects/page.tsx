@@ -64,6 +64,7 @@ export default function ProjectsPage() {
   const [loadingAddress, setLoadingAddress] = useState(false);
   const [loadingCadastre, setLoadingCadastre] = useState(false);
   const [loadingPlu, setLoadingPlu] = useState(false);
+  const [loadingProtectedAreas, setLoadingProtectedAreas] = useState(false);
   const [cadastreError, setCadastreError] = useState<string | null>(null);
   const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
 
@@ -165,6 +166,7 @@ export default function ProjectsPage() {
     setAddressSuggestions([]);
     setLoadingCadastre(true);
     setLoadingPlu(true);
+    setLoadingProtectedAreas(true);
     setCadastreError(null);
     setParcels([]);
     setPluInfo(null);
@@ -172,41 +174,64 @@ export default function ProjectsPage() {
     setShowManualPluEdit(false);
     setZoneFeatures([]);
     setProtectedAreas([]);
-    fetch("/api/address/geo-data", {
+
+    // ── 3 SEPARATE parallel calls for PROGRESSIVE rendering ──
+    // Parcels/map appear in ~2-3s, PLU/protected areas fill in as they arrive.
+
+    // 1) CADASTRE — renders parcels + map immediately when done (~2-3s)
+    fetch("/api/cadastre/lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords, address: addr.label }),
+      body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }),
     })
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) {
-          setCadastreError(d.error || "Failed to load location data");
-          setParcels([]);
-          setNorthAngleDegrees(null);
-          setLoadingCadastre(false);
-          setLoadingPlu(false);
+          setCadastreError(d.error || "Failed to load parcels");
           return;
         }
         const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown; coordinates?: number[] }[];
         setParcels(list);
         setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null);
-        if (d.cadastreError) setCadastreError(d.cadastreError);
-        if (list.length > 0) {
-          setSelectedParcelIds([]);
-        }
-        const plu = d.plu ?? {};
-        if (plu.zoneType || plu.zoneName) setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null });
-        setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []);
-        setProtectedAreas(Array.isArray(d.protectedAreas) ? d.protectedAreas : []);
+        if (d.source === "estimated") setCadastreError("Cadastre data estimated (IGN API unavailable).");
+        if (list.length > 0) setSelectedParcelIds([]);
       })
       .catch(() => {
         setCadastreError("Location data unavailable. You can still create the project with the address.");
-        setParcels([]);
       })
-      .finally(() => {
-        setLoadingCadastre(false);
-        setLoadingPlu(false);
-      });
+      .finally(() => setLoadingCadastre(false));
+
+    // 2) PLU DETECTION — fills in zone info when done (~4-8s)
+    fetch("/api/plu-detection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords, address: addr.label }),
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const d = await r.json();
+        const plu = d.plu ?? {};
+        if (plu.zoneType || plu.zoneName) {
+          setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null });
+        }
+        setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []);
+      })
+      .catch(() => { /* PLU detection failure is non-blocking */ })
+      .finally(() => setLoadingPlu(false));
+
+    // 3) PROTECTED AREAS — fills in protection info when done (~3-6s)
+    fetch("/api/protected-areas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords }),
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const d = await r.json();
+        setProtectedAreas(Array.isArray(d.areas) ? d.areas : []);
+      })
+      .catch(() => { /* Protected areas failure is non-blocking */ })
+      .finally(() => setLoadingProtectedAreas(false));
   }, []);
 
   const createProject = async (e: React.FormEvent) => {
@@ -353,11 +378,10 @@ export default function ProjectsPage() {
                     <MapPin className="w-6 h-6 text-blue-400" />
                   </div>
                   <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      project.status === "COMPLETED"
-                        ? "bg-emerald-500/20 text-emerald-400"
-                        : "bg-blue-500/20 text-blue-400"
-                    }`}
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${project.status === "COMPLETED"
+                      ? "bg-emerald-500/20 text-emerald-400"
+                      : "bg-blue-500/20 text-blue-400"
+                      }`}
                   >
                     {project.status}
                   </span>
@@ -460,7 +484,7 @@ export default function ProjectsPage() {
                         className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder-slate-500"
                         placeholder="123 Rue Example, 06000 Nice"
                       />
-                      {(loadingAddress || (selectedAddress && (loadingCadastre || loadingPlu))) && (
+                      {(loadingAddress || (selectedAddress && loadingCadastre)) && (
                         <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
                       )}
                     </div>
@@ -511,7 +535,7 @@ export default function ProjectsPage() {
                     <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                       <Check className="w-4 h-4 text-slate-500" /> PLU Zone
                     </p>
-                    {!selectedAddress || loadingCadastre || loadingPlu ? (
+                    {!selectedAddress || loadingPlu ? (
                       <div className="space-y-2 animate-pulse">
                         <div className="h-4 bg-slate-700 rounded w-3/4" />
                         <div className="h-3 bg-slate-700 rounded w-1/2" />
@@ -567,7 +591,7 @@ export default function ProjectsPage() {
                     <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                       <Shield className="w-4 h-4 text-slate-500" /> Protected areas
                     </p>
-                    {!selectedAddress || loadingCadastre || loadingPlu ? (
+                    {!selectedAddress || loadingProtectedAreas ? (
                       <div className="space-y-2 animate-pulse">
                         <div className="h-4 bg-slate-700 rounded w-full" />
                         <div className="h-3 bg-slate-700 rounded w-2/3" />
@@ -578,20 +602,20 @@ export default function ProjectsPage() {
                       </p>
                     )}
                   </div>
-                {selectedAddress && !loadingCadastre && !loadingPlu && protectedAreas.some((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)) && (
-                  <div className="sm:col-span-3 rounded-xl bg-amber-500/15 border border-amber-500/40 p-4 flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-medium text-amber-200">Protected or restricted zone detected</p>
-                      <p className="text-sm text-slate-300 mt-1">
-                        Your project is located in {protectedAreas.filter((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)).map((a) => a.name).join(", ")}. Additional approvals or specific rules may apply (e.g. ABF for Architects of Historical Buildings, PPR for flood risk). Check with your mairie for details.
-                      </p>
+                  {selectedAddress && !loadingProtectedAreas && protectedAreas.some((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)) && (
+                    <div className="sm:col-span-3 rounded-xl bg-amber-500/15 border border-amber-500/40 p-4 flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium text-amber-200">Protected or restricted zone detected</p>
+                        <p className="text-sm text-slate-300 mt-1">
+                          Your project is located in {protectedAreas.filter((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)).map((a) => a.name).join(", ")}. Additional approvals or specific rules may apply (e.g. ABF for Architects of Historical Buildings, PPR for flood risk). Check with your mairie for details.
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
                   <div className="rounded-xl bg-slate-800/80 border border-white/10 p-4">
                     <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Total land area</p>
-                    {!selectedAddress || loadingCadastre || loadingPlu ? (
+                    {!selectedAddress || loadingCadastre ? (
                       <div className="space-y-2 animate-pulse">
                         <div className="h-6 bg-slate-700 rounded w-1/2" />
                         <div className="h-3 bg-slate-700 rounded w-1/3" />
@@ -615,11 +639,11 @@ export default function ProjectsPage() {
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-sm font-medium text-white">Parcels</p>
-                        {selectedAddress && !loadingCadastre && !loadingPlu && parcels.length > 0 && (
+                        {selectedAddress && !loadingCadastre && parcels.length > 0 && (
                           <span className="text-xs text-slate-500">{parcels.length} found</span>
                         )}
                       </div>
-                      {(!selectedAddress || loadingCadastre || loadingPlu) ? (
+                      {(!selectedAddress || loadingCadastre) ? (
                         <div className="space-y-2 animate-pulse">
                           {[1, 2, 3, 4].map((i) => (
                             <div key={i} className="flex items-center gap-3 py-2.5">
@@ -713,7 +737,7 @@ export default function ProjectsPage() {
                         <p className="text-sm text-slate-500 py-4">No parcels at this address. Enter another address or create without parcels.</p>
                       )}
                     </div>
-                    {selectedAddress && !loadingCadastre && !loadingPlu && (
+                    {selectedAddress && !loadingPlu && (
                       <div className="rounded-xl bg-slate-800/50 border border-white/10 p-3">
                         <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Applicable regulation</p>
                         <p className="text-sm text-slate-200">
@@ -728,7 +752,7 @@ export default function ProjectsPage() {
                   <div className="lg:col-span-3 rounded-xl overflow-hidden border border-white/10 bg-slate-900 min-h-[420px] flex flex-col">
                     <p className="text-sm font-medium text-white px-3 py-2 border-b border-white/10">Map</p>
                     <div className="flex-1 min-h-[380px] flex items-center justify-center">
-                      {!selectedAddress || loadingCadastre || loadingPlu ? (
+                      {!selectedAddress || loadingCadastre ? (
                         <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
                           <MapPin className="w-12 h-12 text-slate-600" />
                           <p className="text-sm">Search for an address to load the map</p>

@@ -68,7 +68,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
       .then((data) => {
         if (!cancelled && data.project) setProject(data.project);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -155,31 +155,24 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
 
         {/* PLU Analysis – when not yet completed */}
         {!project.regulatoryAnalysis && (
-        <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
-          <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-            <FileBarChart className="w-5 h-5 text-blue-400" />
-            PLU Analysis
-          </h2>
-          <p className="text-slate-400 text-sm mb-4">
-            Complete your project description, then launch the PLU analysis to get summary and recommendations. Export the report as PDF for your dossier.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href={`/regulations?project=${project.id}`}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
-            >
-              View analysis
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              href={`/plu-analysis?project=${project.id}`}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
-            >
-              <Download className="w-4 h-4" />
-              Export analysis PDF
-            </Link>
+          <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+            <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+              <FileBarChart className="w-5 h-5 text-blue-400" />
+              PLU Analysis
+            </h2>
+            <p className="text-slate-400 text-sm mb-4">
+              Complete your project description to launch the PLU analysis and get regulatory constraints and recommendations.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link
+                href={`/projects/${project.id}/description`}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+              >
+                Complete description & launch
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
           </div>
-        </div>
         )}
 
         {Array.isArray(project.protectedAreas) && project.protectedAreas.length > 0 && (
@@ -192,6 +185,24 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             </ul>
           </div>
         )}
+
+        {/* Plan de Situation - A3 structured document with 3 map views */}
+        <div className="mb-8 p-5 rounded-2xl bg-purple-500/10 border border-purple-500/20">
+          <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+            <Map className="w-5 h-5 text-purple-400" />
+            Plan de Situation
+          </h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Generate your location plan with aerial, IGN, and cadastral views. Export as A3 or A4 PDF.
+          </p>
+          <Link
+            href={`/site-plan-document?project=${project.id}`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500/20 text-purple-300 text-sm font-medium hover:bg-purple-500/30"
+          >
+            Open Plan de Situation
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
 
         <h2 className="text-lg font-semibold text-white mb-4">Documents to produce</h2>
         <p className="text-slate-400 text-sm mb-6">

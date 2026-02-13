@@ -13,7 +13,9 @@ export async function POST(request: NextRequest) {
 
     // Use Adresse API (data.gouv.fr) for address search
     const searchUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(address)}&limit=5`;
-    const searchRes = await fetch(searchUrl);
+    const searchRes = await fetch(searchUrl, {
+      signal: AbortSignal.timeout(5000),
+    });
     if (!searchRes.ok) {
       throw new Error("Address search failed");
     }

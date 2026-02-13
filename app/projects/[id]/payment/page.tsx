@@ -49,7 +49,7 @@ export default function PaymentPage({ params }: { params: Promise<{ id: string }
       .then((data) => {
         if (data.project) setProject(data.project);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [projectId, user, authLoading]);
 
@@ -68,9 +68,23 @@ export default function PaymentPage({ params }: { params: Promise<{ id: string }
       });
       const data = await res.json();
       if (data.url) {
+        // Mark project as paid before redirect
+        await fetch(`/api/projects/${projectId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paidAt: new Date().toISOString() }),
+          credentials: "include",
+        }).catch(() => { });
         window.location.href = data.url;
       } else if (data.success && data.credits) {
-        window.location.href = `/statement?project=${projectId}&from=payment`;
+        // Mark project as paid
+        await fetch(`/api/projects/${projectId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paidAt: new Date().toISOString() }),
+          credentials: "include",
+        }).catch(() => { });
+        window.location.href = `/projects/${projectId}/description`;
       } else {
         alert(data.error || "Erreur lors du paiement");
       }

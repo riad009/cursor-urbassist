@@ -137,6 +137,8 @@ model Project {
   projectType     String?       @map("project_type") // construction, extension, renovation
   authorizationType String?     @map("authorization_type") // DP, PC, ARCHITECT_REQUIRED
   authorizationExplanation String? @map("authorization_explanation")
+  projectDescription Json?       @map("project_description") // structured description answers
+  paidAt          DateTime?     @map("paid_at")               // when payment was completed
   scale           String        @default("1:100")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")

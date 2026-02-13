@@ -45,6 +45,8 @@ export async function PUT(
     scale: body.scale,
     authorizationType: body.authorizationType,
     authorizationExplanation: body.authorizationExplanation,
+    projectDescription: body.projectDescription,
+    paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
   };
   if (body.parcelGeometry !== undefined) {
     data.parcelGeometry = typeof body.parcelGeometry === "string" ? body.parcelGeometry : (body.parcelGeometry != null ? JSON.stringify(body.parcelGeometry) : null);

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Protected Areas Detection API
-// Detects ABF perimeters, heritage sites, classified zones, flood zones, Natura 2000
-// Uses French government APIs: Atlas des patrimoines, Géorisques, etc.
+// Implements official API Carto (IGN) GPU endpoints per https://apicarto.ign.fr/api/doc/
+// - Prescriptions (prescription-surf/lin/pct)
+// - Public utility easements / SUP (assiette-sup-s/l/p, acte-sup)
+// - Protection perimeters → ABF zone, heritage, flood, etc.
+// Plus Monuments Historiques, Géorisques, Sites Patrimoniaux Remarquables.
 
 interface ProtectedAreaResult {
   type: string;
@@ -14,9 +17,109 @@ interface ProtectedAreaResult {
   severity: "high" | "medium" | "low" | "info";
 }
 
+const API_HEADERS = { "User-Agent": "UrbAssist/1.0 (urbanisme)" };
+const API_TIMEOUT = 12000;
+const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
+
+/** GeoJSON Point for API Carto (EPSG:4326). */
+function pointGeom(lng: number, lat: number): { type: "Point"; coordinates: [number, number] } {
+  return { type: "Point", coordinates: [lng, lat] };
+}
+
+/** Small GeoJSON Polygon buffer (~11m) for reliable intersection. */
+function smallPolygonGeom(lng: number, lat: number): { type: "Polygon"; coordinates: number[][][] } {
+  const d = 0.0001; // ~11m
+  return {
+    type: "Polygon",
+    coordinates: [[
+      [lng - d, lat - d],
+      [lng + d, lat - d],
+      [lng + d, lat + d],
+      [lng - d, lat + d],
+      [lng - d, lat - d],
+    ]],
+  };
+}
+
+/** Fetch GPU layer by geometric intersection (official API Carto method).
+ *  Per the official spec, GPU endpoints only accept `geom` (GeoJSON) and optionally `partition`.
+ *  They do NOT accept `lon`/`lat` parameters.
+ *  Uses polygon geometry for better intersection reliability. */
+async function fetchGpuByGeom(
+  path: string,
+  lng: number,
+  lat: number,
+  category?: string
+): Promise<unknown[]> {
+  // Use a small polygon buffer for better intersection results
+  const geom = smallPolygonGeom(lng, lat);
+  const geomEnc = encodeURIComponent(JSON.stringify(geom));
+  const catParam = category ? `&categorie=${encodeURIComponent(category)}` : "";
+
+  // 1. GET with geom (documented primary method)
+  try {
+    const res = await fetch(`${APICARTO_GPU}/${path}?geom=${geomEnc}${catParam}`, {
+      headers: API_HEADERS,
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
+  } catch {
+    // continue to POST
+  }
+
+  // 2. POST with JSON body (documented: "toutes les requêtes peuvent se faire en POST ou en GET")
+  try {
+    const body: Record<string, unknown> = { geom };
+    if (category) body.categorie = category;
+    const res = await fetch(`${APICARTO_GPU}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...API_HEADERS },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const features = data?.features ?? [];
+      if (features.length > 0) return features;
+    }
+  } catch {
+    // continue
+  }
+
+  // 3. Last resort: try with point geometry (smaller footprint)
+  try {
+    const ptGeom = pointGeom(lng, lat);
+    const ptEnc = encodeURIComponent(JSON.stringify(ptGeom));
+    const res = await fetch(`${APICARTO_GPU}/${path}?geom=${ptEnc}${catParam}`, {
+      headers: API_HEADERS,
+      signal: AbortSignal.timeout(API_TIMEOUT),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data?.features ?? [];
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+/** Determine if a SUP/prescription feature indicates ABF (e.g. AC1 = Monuments historiques). */
+function isAbfRelated(props: Record<string, unknown> | undefined): boolean {
+  if (!props) return false;
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
+  if (cat.includes("AC1") || cat.includes("MONUMENT") || lib.includes("monument historique") || lib.includes("abf") || lib.includes("site classé") || lib.includes("secteur sauvegardé")) return true;
+  return false;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { coordinates, citycode, address } = await request.json();
+    const { coordinates, citycode } = await request.json();
 
     if (!coordinates && !citycode) {
       return NextResponse.json(
@@ -27,39 +130,92 @@ export async function POST(request: NextRequest) {
 
     const [lng, lat] = coordinates || [0, 0];
     const areas: ProtectedAreaResult[] = [];
-    const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
+    const seenKeys = new Set<string>();
 
-    // 0. Check GPU servitudes d'utilité publique (SUP) - prescriptions, protection perimeters
-    try {
-      for (const path of ["assiette-sup-s", "assiette-sup-l", "assiette-sup-p", "prescription-surf", "prescription-lin", "prescription-pct"]) {
-        const res = await fetch(`${APICARTO_GPU}/${path}?lon=${lng}&lat=${lat}`, {
-          signal: AbortSignal.timeout(6000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const features = data?.features ?? [];
-          for (const f of features.slice(0, 5)) {
-            const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
-            const name = (props.libelle ?? props.nom ?? props.type ?? path) as string;
-            if (name && !areas.some((a) => a.name === name)) {
-              areas.push({
-                type: "PRESCRIPTION",
-                name: String(name),
-                description: "Prescription or public utility easement (SUP) applies to this parcel. Verify with your mairie.",
-                distance: null,
-                constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
-                sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-                severity: "medium",
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.log("GPU SUP/prescription API unavailable:", e);
+    function addArea(area: ProtectedAreaResult, key?: string) {
+      const k = key ?? `${area.type}:${area.name}`;
+      if (seenKeys.has(k)) return;
+      seenKeys.add(k);
+      areas.push(area);
     }
 
-    // 1. Check Monuments Historiques (ABF perimeters - 500m around listed monuments)
+    // 1. Prescriptions (PLU/PLUi) — official API Carto geom intersection
+    const prescriptionLayers = ["prescription-surf", "prescription-lin", "prescription-pct"];
+    for (const path of prescriptionLayers) {
+      try {
+        const features = await fetchGpuByGeom(path, lng, lat);
+        for (const f of features.slice(0, 10)) {
+          const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
+          const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? path) as string;
+          if (!name) continue;
+          const desc = (props.libelong ?? props.LIBELLONG ?? props.description) as string;
+          if (isAbfRelated(props)) {
+            addArea({
+              type: "ABF",
+              name: String(name),
+              description: desc || "Prescription or SUP related to heritage/ABF. Approval from the Architecte des Bâtiments de France (ABF) may be required.",
+              distance: null,
+              constraints: [
+                "ABF approval may be required for exterior modifications",
+                "Verify with your mairie and PLU document",
+              ],
+              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+              severity: "high",
+            });
+          } else {
+            addArea({
+              type: "PRESCRIPTION",
+              name: String(name),
+              description: desc || "Prescription from the urban planning document applies to this parcel. Verify with your mairie.",
+              distance: null,
+              constraints: ["Check PLU document for specific rules", "Prescriptions may impose additional constraints"],
+              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+              severity: "medium",
+            });
+          }
+        }
+      } catch (e) {
+        console.log(`GPU ${path} unavailable:`, e);
+      }
+    }
+
+    // 2. Servitudes d'utilité publique (SUP) — assiettes and optionally ABF (AC1)
+    const supLayers = ["assiette-sup-s", "assiette-sup-l", "assiette-sup-p"];
+    for (const path of supLayers) {
+      try {
+        const features = await fetchGpuByGeom(path, lng, lat);
+        for (const f of features.slice(0, 10)) {
+          const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
+          const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? props.type_sup ?? path) as string;
+          if (!name) continue;
+          if (isAbfRelated(props)) {
+            addArea({
+              type: "ABF",
+              name: `SUP – ${String(name)}`,
+              description: "Public utility easement (SUP) related to heritage or monuments. ABF approval may be required.",
+              distance: null,
+              constraints: ["ABF approval may be required", "SUP imposes constraints; verify with mairie"],
+              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+              severity: "high",
+            });
+          } else {
+            addArea({
+              type: "SUP",
+              name: String(name),
+              description: "Servitude d'utilité publique (SUP) applies to this parcel. Verify with your mairie.",
+              distance: null,
+              constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
+              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+              severity: "medium",
+            });
+          }
+        }
+      } catch (e) {
+        console.log(`GPU ${path} unavailable:`, e);
+      }
+    }
+
+    // 3. Monuments Historiques (ABF perimeters - 500m around listed monuments)
     try {
       const mhRes = await fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/liste-des-immeubles-proteges-au-titre-des-monuments-historiques/records?where=within_distance(geolocalisation%2C%20geom'POINT(${lng}%20${lat})'%2C%20500m)&limit=10`,
@@ -92,7 +248,7 @@ export async function POST(request: NextRequest) {
       console.log("Monuments historiques API unavailable:", e);
     }
 
-    // 2. Check natural risk zones (Géorisques)
+    // 4. Natural risk zones (Géorisques)
     try {
       const riskRes = await fetch(
         `https://georisques.gouv.fr/api/v1/resultats_rapport_risques?latlon=${lat},${lng}`,
@@ -142,7 +298,7 @@ export async function POST(request: NextRequest) {
       console.log("Géorisques API unavailable:", e);
     }
 
-    // 3. Check Sites Patrimoniaux Remarquables (SPR) and Sites classés
+    // 5. Sites Patrimoniaux Remarquables (SPR) and Sites classés
     try {
       const siteRes = await fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/sites-patrimoniaux-remarquables/records?where=within_distance(geo_point_2d%2C%20geom'POINT(${lng}%20${lat})'%2C%201000m)&limit=5`,
@@ -176,7 +332,7 @@ export async function POST(request: NextRequest) {
       console.log("SPR API unavailable:", e);
     }
 
-    // 4. If no results from APIs, check based on commune data
+    // 6. If no results from APIs, check based on commune data
     if (areas.length === 0 && citycode) {
       // Use the commune data to provide general information
       try {

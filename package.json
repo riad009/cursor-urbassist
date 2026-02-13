@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "dev:win": "powershell -ExecutionPolicy Bypass -File ./run-dev.ps1",
     "build": "prisma generate && next build --webpack",
     "build:next": "next build",
     "start": "next start",
