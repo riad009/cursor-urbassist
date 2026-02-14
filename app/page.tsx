@@ -68,7 +68,7 @@ const quickActions = [
     title: "New Project",
     description: "Start from scratch or template",
     icon: Plus,
-    href: "/projects",
+    href: "/projects/new",
     gradient: "from-blue-600 to-blue-400",
     featured: true,
   },
@@ -170,7 +170,7 @@ export default function Dashboard() {
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-white/10 p-8 lg:p-12">
           <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-blue-500/20 to-purple-500/20 blur-3xl rounded-full -translate-y-1/2 translate-x-1/2" />
           <div className="absolute bottom-0 left-0 w-64 h-64 bg-gradient-to-tr from-pink-500/20 to-orange-500/20 blur-3xl rounded-full translate-y-1/2 -translate-x-1/2" />
-          
+
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4">
               <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium border border-blue-500/30">
@@ -188,7 +188,7 @@ export default function Dashboard() {
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/projects?openNew=1"
+                href="/projects/new"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all group"
               >
                 <Play className="w-4 h-4" />
@@ -246,11 +246,10 @@ export default function Dashboard() {
                 <Link
                   key={action.title}
                   href={action.href}
-                  className={`group flex items-center gap-4 p-4 rounded-xl border transition-all hover:-translate-y-0.5 ${
-                    action.featured
-                      ? "bg-gradient-to-r from-blue-500/10 to-purple-500/10 border-blue-500/30 hover:border-blue-500/50"
-                      : "bg-slate-800/50 border-white/10 hover:border-white/20"
-                  }`}
+                  className={`group flex items-center gap-4 p-4 rounded-xl border transition-all hover:-translate-y-0.5 ${action.featured
+                    ? "bg-gradient-to-r from-blue-500/10 to-purple-500/10 border-blue-500/30 hover:border-blue-500/50"
+                    : "bg-slate-800/50 border-white/10 hover:border-white/20"
+                    }`}
                 >
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${action.gradient} flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform`}>
                     <action.icon className="w-5 h-5 text-white" />
@@ -288,13 +287,12 @@ export default function Dashboard() {
                       {project.thumbnail}
                     </div>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        project.status === "completed"
-                          ? "bg-emerald-500/20 text-emerald-400"
-                          : project.status === "review"
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${project.status === "completed"
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : project.status === "review"
                           ? "bg-amber-500/20 text-amber-400"
                           : "bg-blue-500/20 text-blue-400"
-                      }`}
+                        }`}
                     >
                       {project.status}
                     </span>
@@ -305,11 +303,10 @@ export default function Dashboard() {
                   <p className="text-xs text-slate-500 mb-3">{project.type} • {project.lastUpdated}</p>
                   <div className="relative h-1.5 bg-slate-700 rounded-full overflow-hidden">
                     <div
-                      className={`absolute inset-y-0 left-0 rounded-full ${
-                        project.progress === 100
-                          ? "bg-gradient-to-r from-emerald-500 to-teal-500"
-                          : "bg-gradient-to-r from-blue-500 to-purple-500"
-                      }`}
+                      className={`absolute inset-y-0 left-0 rounded-full ${project.progress === 100
+                        ? "bg-gradient-to-r from-emerald-500 to-teal-500"
+                        : "bg-gradient-to-r from-blue-500 to-purple-500"
+                        }`}
                       style={{ width: `${project.progress}%` }}
                     />
                   </div>

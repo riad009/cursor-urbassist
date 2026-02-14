@@ -1,26 +1,29 @@
 /**
  * Planning application step order. Used for step bar UI and "Next step" navigation.
- * New flow: Authorization → Payment → Description → PLU Analysis → Overview → …
+ * New flow: Project → Authorization → Payment → Description → PLU Analysis → Overview → …
  */
 export const PLANNING_STEPS = [
-  { step: 1, label: "Authorization", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/authorization$/.test(p), href: (id: string) => `/projects/${id}/authorization` },
-  { step: 2, label: "Payment", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/payment$/.test(p), href: (id: string) => `/projects/${id}/payment` },
-  { step: 3, label: "Description", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/description$/.test(p), href: (id: string) => `/projects/${id}/description` },
-  { step: 4, label: "PLU Analysis", path: "/plu-analysis", pathMatch: (p: string) => p === "/plu-analysis" || p.startsWith("/plu-analysis/"), href: (id: string) => `/plu-analysis?project=${id}` },
-  { step: 5, label: "Overview", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+$/.test(p), href: (id: string) => `/projects/${id}` },
-  { step: 6, label: "Location Plan", path: "/location-plan", pathMatch: (p: string) => p === "/location-plan" || p.startsWith("/location-plan/"), href: (id: string) => `/location-plan?project=${id}` },
-  { step: 7, label: "Site Plan", path: "/site-plan", pathMatch: (p: string) => p === "/site-plan" || p.startsWith("/site-plan/") || p === "/editor" || p.startsWith("/editor/"), href: (id: string) => `/site-plan?project=${id}` },
-  { step: 8, label: "Statement", path: "/statement", pathMatch: (p: string) => p === "/statement" || p.startsWith("/statement/"), href: (id: string) => `/statement?project=${id}` },
-  { step: 9, label: "Export", path: "/export", pathMatch: (p: string) => p === "/export" || p.startsWith("/export/"), href: (id: string) => `/export?project=${id}` },
+  { step: 1, label: "Project", path: "/projects/new", pathMatch: (p: string) => p === "/projects/new", href: (_id: string) => `/projects/new` },
+  { step: 2, label: "Authorization", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/authorization$/.test(p), href: (id: string) => `/projects/${id}/authorization` },
+  { step: 3, label: "Payment", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/payment$/.test(p), href: (id: string) => `/projects/${id}/payment` },
+  { step: 4, label: "Description", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+\/description$/.test(p), href: (id: string) => `/projects/${id}/description` },
+  { step: 5, label: "PLU Analysis", path: "/plu-analysis", pathMatch: (p: string) => p === "/plu-analysis" || p.startsWith("/plu-analysis/"), href: (id: string) => `/plu-analysis?project=${id}` },
+  { step: 6, label: "Overview", path: "/projects/", pathMatch: (p: string) => /^\/projects\/[^/]+$/.test(p) && p !== "/projects/new", href: (id: string) => `/projects/${id}` },
+  { step: 7, label: "Location Plan", path: "/location-plan", pathMatch: (p: string) => p === "/location-plan" || p.startsWith("/location-plan/"), href: (id: string) => `/location-plan?project=${id}` },
+  { step: 8, label: "Site Plan", path: "/site-plan", pathMatch: (p: string) => p === "/site-plan" || p.startsWith("/site-plan/") || p === "/editor" || p.startsWith("/editor/"), href: (id: string) => `/site-plan?project=${id}` },
+  { step: 9, label: "Statement", path: "/statement", pathMatch: (p: string) => p === "/statement" || p.startsWith("/statement/"), href: (id: string) => `/statement?project=${id}` },
+  { step: 10, label: "Export", path: "/export", pathMatch: (p: string) => p === "/export" || p.startsWith("/export/"), href: (id: string) => `/export?project=${id}` },
 ] as const;
 
 /** Paths that accept ?project= for step context (without being under /projects/[id]) */
 const PROJECT_QUERY_PATHS = ["/plu-analysis", "/site-plan", "/editor", "/location-plan", "/terrain", "/building-3d", "/landscape", "/statement", "/export"];
 
 export function getProjectIdFromRoute(pathname: string, projectParam: string | null): string | null {
+  // /projects/new is step 1 — no project ID yet
+  if (pathname === "/projects/new") return projectParam || null;
   // Match /projects/[id] or /projects/[id]/authorization or /projects/[id]/payment or /projects/[id]/description
   const match = pathname.match(/^\/projects\/([^/]+)(?:\/(?:authorization|payment|description))?$/);
-  if (match) return match[1];
+  if (match && match[1] !== "new") return match[1];
   if (projectParam && PROJECT_QUERY_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     return projectParam;
   }

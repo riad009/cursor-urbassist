@@ -1,9 +1,17 @@
 /**
  * DP / PC (Déclaration Préalable / Permis de Construire) calculation for French planning.
- * Multi-level and extension projects with floor area (surface de plancher).
+ * Comprehensive rules covering independent constructions, extensions, swimming pools,
+ * facade/use changes, and submitter type (individual vs company).
  */
 
-export type ProjectTypeChoice = "new_construction" | "existing_extension" | "outdoor";
+export type ProjectTypeChoice =
+  | "new_construction"
+  | "existing_extension"
+  | "outdoor"
+  | "swimming_pool"
+  | "facade_change";
+
+export type SubmitterType = "individual" | "company";
 
 /** Floor area is estimated as: ground × levels × (1 - 0.21) ≈ ground × levels × 0.79 */
 export const FLOOR_AREA_COEFFICIENT = 0.79;
@@ -17,7 +25,7 @@ export function estimateFloorAreaCreated(groundAreaM2: number, numberOfLevels: n
   return Math.round(groundAreaM2 * numberOfLevels * FLOOR_AREA_COEFFICIENT);
 }
 
-export type DeterminationType = "DP" | "PC" | "ARCHITECT_REQUIRED" | "REVIEW";
+export type DeterminationType = "NONE" | "DP" | "PC" | "ARCHITECT_REQUIRED" | "REVIEW";
 
 export interface DpPcInput {
   projectType: ProjectTypeChoice;
@@ -31,6 +39,10 @@ export interface DpPcInput {
   changeOfUseOrFacade?: boolean;
   /** Urban zone (PLU U, UD, AUD…) for extension rules */
   inUrbanZone?: boolean;
+  /** Submitter type — company always requires architect for PC */
+  submitterType?: SubmitterType;
+  /** Swimming pool: height of shelter/cover in meters (> 1.80m triggers PC) */
+  shelterHeight?: number;
 }
 
 export interface DpPcResult {
@@ -39,89 +51,290 @@ export interface DpPcResult {
   explanation: string;
   /** Optional detail for admin/review */
   detail?: string;
+  /** Whether an architect is required */
+  architectRequired?: boolean;
+  /** Whether we cannot offer this service (architect required) */
+  cannotOffer?: boolean;
 }
 
-/**
- * Compute DP vs PC (and architect requirement) from project type and areas.
- *
- * DP (Déclaration préalable):
- * - Independent construction: created < 20 m² → DP
- * - Extension: created ≤ 40 m² (ground or floor in urban zone) AND total after work ≤ 150 m² → DP
- *
- * PC (Permis de construire):
- * - Independent construction > 20 m²
- * - Extension > 40 m² ground or total after work > 150 m²
- * - Change of use or facade modification (any surface)
- * - Architect required: PC when total > 150 m² or SCI
- */
-export function calculateDpPc(input: DpPcInput): DpPcResult {
+// ─── Swimming Pool Rules ────────────────────────────────────────────────────
+
+function calculateSwimmingPool(input: DpPcInput): DpPcResult {
+  const area = input.floorAreaCreated;
+  const shelterHeight = input.shelterHeight ?? 0;
+
+  if (area < 10) {
+    return {
+      determination: "NONE",
+      explanation: `La piscine fait ${area} m² (moins de 10 m²). Aucune autorisation n'est requise.`,
+      detail: "pool<10",
+    };
+  }
+
+  if (area <= 100) {
+    // Exception: shelter > 1.80m → PC
+    if (shelterHeight > 1.80) {
+      const result: DpPcResult = {
+        determination: "PC",
+        explanation: `La piscine fait ${area} m² avec un abri de ${shelterHeight} m (supérieur à 1,80 m). Un permis de construire est nécessaire.`,
+        detail: "pool_shelter>1.80",
+      };
+      return applyCompanyArchitect(result, input.submitterType);
+    }
+    return {
+      determination: "DP",
+      explanation: `La piscine fait ${area} m² (entre 10 et 100 m²). Une déclaration préalable est requise.`,
+      detail: "pool_10-100",
+    };
+  }
+
+  // > 100 m²
+  const result: DpPcResult = {
+    determination: "PC",
+    explanation: `La piscine fait ${area} m² (supérieure à 100 m²). Un permis de construire est nécessaire.`,
+    detail: "pool>100",
+  };
+  return applyCompanyArchitect(result, input.submitterType);
+}
+
+// ─── Independent Construction Rules ─────────────────────────────────────────
+
+function calculateNewConstruction(input: DpPcInput): DpPcResult {
+  const area = input.floorAreaCreated;
+  const totalAfterWork = (input.existingFloorArea ?? 0) + area;
+
+  if (area < 5) {
+    return {
+      determination: "NONE",
+      explanation: `La surface créée est de ${area} m² (moins de 5 m²). Aucune autorisation n'est requise.`,
+      detail: "new<5",
+    };
+  }
+
+  if (area <= 20) {
+    return {
+      determination: "DP",
+      explanation: `La surface de plancher créée est de ${area} m² (entre 5 et 20 m²). Une déclaration préalable suffit.`,
+      detail: "new_5-20",
+    };
+  }
+
+  // > 20 m²
+  if (totalAfterWork > 150) {
+    return {
+      determination: "ARCHITECT_REQUIRED",
+      explanation: `La surface créée est de ${area} m². Comme la surface totale dépasse 150 m², un permis de construire et le recours à un architecte sont obligatoires.`,
+      detail: "new>150_architect",
+      architectRequired: true,
+      cannotOffer: true,
+    };
+  }
+
+  const result: DpPcResult = {
+    determination: "PC",
+    explanation: `La surface de plancher créée est de ${area} m² (supérieure à 20 m²). Un permis de construire est nécessaire.`,
+    detail: "new>20",
+  };
+  return applyCompanyArchitect(result, input.submitterType);
+}
+
+// ─── Existing Building Extension Rules ──────────────────────────────────────
+
+function calculateExistingExtension(input: DpPcInput): DpPcResult {
   const {
-    projectType,
-    floorAreaCreated,
+    floorAreaCreated: area,
     existingFloorArea = 0,
     groundAreaExtension,
     changeOfUseOrFacade,
     inUrbanZone = true,
+    submitterType,
   } = input;
 
-  const totalAfterWork = existingFloorArea + floorAreaCreated;
+  const totalAfterWork = existingFloorArea + area;
 
+  // Facade modification or change of use → PC regardless
   if (changeOfUseOrFacade) {
-    return {
+    const result: DpPcResult = {
       determination: "PC",
       explanation:
         "Un projet avec changement de destination ou modification de façade est soumis au permis de construire, quelle que soit la surface.",
-      detail: "changeOfUseOrFacade",
+      detail: "facade_change",
     };
-  }
-
-  if (projectType === "outdoor") {
-    return {
-      determination: "REVIEW",
-      explanation:
-        "Pour un aménagement extérieur (piscine, clôture, etc.), le type d'autorisation dépend des règles locales. Vérification recommandée.",
-      detail: "outdoor",
-    };
-  }
-
-  if (projectType === "new_construction") {
-    if (floorAreaCreated < 20) {
-      return {
-        determination: "DP",
-        explanation: `La surface de plancher créée est de ${floorAreaCreated} m² (moins de 20 m²). Une déclaration préalable suffit.`,
-      };
-    }
     if (totalAfterWork > 150) {
       return {
         determination: "ARCHITECT_REQUIRED",
-        explanation: `La surface créée est de ${floorAreaCreated} m². Comme la surface totale dépasse 150 m², un permis de construire et le recours à un architecte sont obligatoires.`,
-        detail: "totalAfterWork>150",
+        explanation: `${result.explanation} De plus, la surface totale après travaux (${totalAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
+        detail: "facade_change_architect",
+        architectRequired: true,
+        cannotOffer: true,
       };
     }
+    return applyCompanyArchitect(result, submitterType);
+  }
+
+  // < 20 m² → DP
+  if (area < 20) {
     return {
-      determination: "PC",
-      explanation: `La surface de plancher créée est de ${floorAreaCreated} m² (≥ 20 m²). Un permis de construire est nécessaire.`,
+      determination: "DP",
+      explanation: `La surface créée est de ${area} m² (moins de 20 m²). Une déclaration préalable suffit.`,
+      detail: "ext<20",
     };
   }
 
-  // existing_extension
+  // 20-40 m² in urban zone → check total
+  if (area <= 40 && inUrbanZone) {
+    if (totalAfterWork <= 150) {
+      return {
+        determination: "DP",
+        explanation: `La surface créée est de ${area} m² en zone urbaine (entre 20 et 40 m²), et la surface totale après travaux est de ${totalAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`,
+        detail: "ext_20-40_urban_dp",
+      };
+    }
+    // > 150 m² total
+    return {
+      determination: "ARCHITECT_REQUIRED",
+      explanation: `La surface créée est de ${area} m² en zone urbaine, mais la surface totale après travaux est de ${totalAfterWork} m² (supérieure à 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
+      detail: "ext_20-40_urban_architect",
+      architectRequired: true,
+      cannotOffer: true,
+    };
+  }
+
+  // > 40 m² or > 20 m² outside urban zone
   const extensionOver40 =
     (typeof groundAreaExtension === "number" && groundAreaExtension > 40) ||
-    (inUrbanZone && floorAreaCreated > 40);
+    area > 40 ||
+    (!inUrbanZone && area >= 20);
+
   if (extensionOver40 || totalAfterWork > 150) {
     const reasons: string[] = [];
     if (extensionOver40) reasons.push("surface créée > 40 m²");
     if (totalAfterWork > 150) reasons.push("surface totale après travaux > 150 m²");
     const needsArchitect = totalAfterWork > 150;
-    return {
-      determination: needsArchitect ? "ARCHITECT_REQUIRED" : "PC",
-      explanation: `La surface créée est de ${floorAreaCreated} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire est nécessaire${needsArchitect ? " ainsi qu’un architecte (surface totale > 150 m²)" : ""}.`,
-      detail: needsArchitect ? "totalAfterWork>150" : "extensionOver40",
+
+    if (needsArchitect) {
+      return {
+        determination: "ARCHITECT_REQUIRED",
+        explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire avec architecte obligatoire est nécessaire.`,
+        detail: "ext_architect",
+        architectRequired: true,
+        cannotOffer: true,
+      };
+    }
+
+    const result: DpPcResult = {
+      determination: "PC",
+      explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire est nécessaire.`,
+      detail: "ext>40",
     };
+    return applyCompanyArchitect(result, submitterType);
   }
 
   return {
     determination: "DP",
-    explanation: `La surface créée est de ${floorAreaCreated} m²${existingFloorArea ? `, surface existante ${existingFloorArea} m²` : ""}, surface totale après travaux ${totalAfterWork} m². Une déclaration préalable suffit.`,
+    explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, surface existante ${existingFloorArea} m²` : ""}, surface totale après travaux ${totalAfterWork} m². Une déclaration préalable suffit.`,
+    detail: "ext_dp",
   };
+}
+
+// ─── Company submitter → architect required ─────────────────────────────────
+
+function applyCompanyArchitect(result: DpPcResult, submitterType?: SubmitterType): DpPcResult {
+  if (submitterType === "company" && (result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED")) {
+    return {
+      ...result,
+      determination: "ARCHITECT_REQUIRED",
+      explanation: `${result.explanation} En tant qu'entreprise (personne morale), le recours à un architecte est obligatoire pour un permis de construire.`,
+      architectRequired: true,
+      cannotOffer: true,
+    };
+  }
+  return result;
+}
+
+// ─── Main Calculator ────────────────────────────────────────────────────────
+
+/**
+ * Compute DP vs PC (and architect requirement) from project type and areas.
+ * 
+ * Rules implemented:
+ * 
+ * Independent constructions (new_construction):
+ *   < 5 m²  → NONE (no authorization)
+ *   5–20 m² → DP
+ *   > 20 m² → PC
+ *   Total > 150 m² → ARCHITECT_REQUIRED
+ * 
+ * Existing building work (existing_extension):
+ *   < 20 m² → DP
+ *   20–40 m² urban zone, total ≤ 150 → DP
+ *   20–40 m² urban zone, total > 150 → ARCHITECT_REQUIRED
+ *   > 40 m² → PC (or ARCHITECT if total > 150)
+ *   Facade/use change → PC regardless
+ * 
+ * Swimming pools (swimming_pool):
+ *   < 10 m²  → NONE
+ *   10–100 m² → DP (shelter > 1.80m → PC)
+ *   > 100 m² → PC
+ * 
+ * Company submitter → ARCHITECT_REQUIRED when PC is determined
+ */
+export function calculateDpPc(input: DpPcInput): DpPcResult {
+  const { projectType, changeOfUseOrFacade } = input;
+
+  // Facade/change of use override (applies to any type)
+  if (changeOfUseOrFacade && projectType !== "swimming_pool") {
+    const totalAfterWork = (input.existingFloorArea ?? 0) + input.floorAreaCreated;
+    if (totalAfterWork > 150) {
+      return {
+        determination: "ARCHITECT_REQUIRED",
+        explanation:
+          "Un projet avec changement de destination ou modification de façade est soumis au permis de construire. De plus, la surface totale dépasse 150 m², le recours à un architecte est obligatoire.",
+        detail: "changeOfUseOrFacade_architect",
+        architectRequired: true,
+        cannotOffer: true,
+      };
+    }
+    const result: DpPcResult = {
+      determination: "PC",
+      explanation:
+        "Un projet avec changement de destination ou modification de façade est soumis au permis de construire, quelle que soit la surface.",
+      detail: "changeOfUseOrFacade",
+    };
+    return applyCompanyArchitect(result, input.submitterType);
+  }
+
+  switch (projectType) {
+    case "swimming_pool":
+      return calculateSwimmingPool(input);
+
+    case "new_construction":
+      return calculateNewConstruction(input);
+
+    case "existing_extension":
+      return calculateExistingExtension(input);
+
+    case "facade_change":
+      return {
+        determination: "PC",
+        explanation:
+          "Une modification de façade ou un changement de destination nécessite un permis de construire.",
+        detail: "facade_change_type",
+      };
+
+    case "outdoor":
+      return {
+        determination: "REVIEW",
+        explanation:
+          "Pour un aménagement extérieur (clôture, terrasse, etc.), le type d'autorisation dépend des règles locales. Vérification recommandée auprès de votre mairie.",
+        detail: "outdoor",
+      };
+
+    default:
+      return {
+        determination: "REVIEW",
+        explanation: "Impossible de déterminer automatiquement le type d'autorisation. Vérification recommandée.",
+        detail: "unknown",
+      };
+  }
 }

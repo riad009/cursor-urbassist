@@ -31,15 +31,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // ── Demo / hardcoded user: always add credits directly ──
+      // This user has no DB row, so we can't use Stripe checkout (no customer).
+      // Credits are granted instantly and the frontend redirects to the next step.
+      if (user.id === HARDCODED_USER_ID) {
+        return NextResponse.json({
+          success: true,
+          credits: user.credits + pkg.credits,
+          message: `${pkg.credits} credits added (demo account - register to persist credits)`,
+        });
+      }
+
+      // ── No Stripe key → demo mode for registered users too ──
       if (!STRIPE_SECRET) {
-        // Demo mode: directly add credits when Stripe is not configured
-        if (user.id === HARDCODED_USER_ID) {
-          return NextResponse.json({
-            success: true,
-            credits: user.credits + pkg.credits,
-            message: `${pkg.credits} credits added (demo account - register to persist credits)`,
-          });
-        }
         await prisma.user.update({
           where: { id: user.id },
           data: { credits: { increment: pkg.credits } },
@@ -61,58 +65,57 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Real Stripe integration (requires registered user in DB)
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json(
-          { error: "Checkout requires a registered account. Please register or sign in with a real account." },
-          { status: 400 }
-        );
-      }
+      // ── Real Stripe checkout session ──
       const Stripe = (await import("stripe")).default;
       const stripe = new Stripe(STRIPE_SECRET);
 
+      // After payment, redirect back into the project flow
       const successPath = projectId
-        ? `/statement?project=${encodeURIComponent(projectId)}&from=payment`
-        : `/admin?session_id={CHECKOUT_SESSION_ID}&success=true`;
+        ? `/projects/${encodeURIComponent(projectId)}/description?from=payment&success=true`
+        : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelPath = projectId
+        ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
+        : `/projects?cancelled=true`;
+
       const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [
-            {
-              price_data: {
-                currency: "eur",
-                product_data: {
-                  name: pkg.label,
-                  description: `${pkg.credits} credits for UrbAssist platform`,
-                },
-                unit_amount: pkg.price,
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: "eur",
+              product_data: {
+                name: pkg.label,
+                description: `${pkg.credits} credits for UrbAssist platform`,
               },
-              quantity: 1,
+              unit_amount: pkg.price,
             },
-          ],
-          mode: "payment",
-          success_url: `${SITE_URL}${successPath}`,
-          cancel_url: `${SITE_URL}/admin?cancelled=true`,
-          metadata: {
-            userId: user.id,
-            type: "credits",
-            credits: String(pkg.credits),
-            ...(projectId ? { projectId: String(projectId) } : {}),
+            quantity: 1,
           },
-        });
+        ],
+        mode: "payment",
+        success_url: `${SITE_URL}${successPath}`,
+        cancel_url: `${SITE_URL}${cancelPath}`,
+        metadata: {
+          userId: user.id,
+          type: "credits",
+          credits: String(pkg.credits),
+          ...(projectId ? { projectId: String(projectId) } : {}),
+        },
+      });
 
-        // Record payment intent
-        await prisma.payment.create({
-          data: {
-            userId: user.id,
-            stripeSessionId: session.id,
-            amount: pkg.price / 100,
-            type: "credits",
-            creditsAmount: pkg.credits,
-            status: "pending",
-          },
-        });
+      // Record payment intent in DB
+      await prisma.payment.create({
+        data: {
+          userId: user.id,
+          stripeSessionId: session.id,
+          amount: pkg.price / 100,
+          type: "credits",
+          creditsAmount: pkg.credits,
+          status: "pending",
+        },
+      });
 
-        return NextResponse.json({ url: session.url });
+      return NextResponse.json({ url: session.url });
     }
 
     if (type === "subscription") {
@@ -128,6 +131,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Hardcoded user: instant demo subscription
+      if (user.id === HARDCODED_USER_ID) {
+        return NextResponse.json({
+          success: true,
+          message: `Subscribed to ${plan.name} (demo). Register an account to persist credits.`,
+          credits: user.credits + plan.creditsPerMonth,
+        });
+      }
+
       if (plan.stripePriceId && !STRIPE_SECRET) {
         return NextResponse.json(
           { error: "Stripe is not configured. Set STRIPE_SECRET_KEY to enable subscription payments." },
@@ -136,12 +148,6 @@ export async function POST(request: NextRequest) {
       }
 
       if (STRIPE_SECRET && plan.stripePriceId) {
-        if (user.id === HARDCODED_USER_ID) {
-          return NextResponse.json(
-            { error: "Checkout requires a registered account. Please register or sign in with a real account." },
-            { status: 400 }
-          );
-        }
         const Stripe = (await import("stripe")).default;
         const stripe = new Stripe(STRIPE_SECRET);
 
@@ -149,8 +155,8 @@ export async function POST(request: NextRequest) {
           payment_method_types: ["card"],
           line_items: [{ price: plan.stripePriceId, quantity: 1 }],
           mode: "subscription",
-          success_url: `${SITE_URL}/admin?session_id={CHECKOUT_SESSION_ID}&success=true`,
-          cancel_url: `${SITE_URL}/admin?cancelled=true`,
+          success_url: `${SITE_URL}/projects?session_id={CHECKOUT_SESSION_ID}&success=true`,
+          cancel_url: `${SITE_URL}/projects?cancelled=true`,
           metadata: {
             userId: user.id,
             type: "subscription",
@@ -165,13 +171,7 @@ export async function POST(request: NextRequest) {
       const whyNoStripe = !STRIPE_SECRET
         ? "Set STRIPE_SECRET_KEY in .env and add a Stripe Price ID to this plan in Admin."
         : "Add a Stripe Price ID to this plan in Admin (Plans → edit plan → Stripe Price ID).";
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json({
-          success: true,
-          message: `Subscribed to ${plan.name} (demo). To open Stripe checkout: ${whyNoStripe}`,
-          credits: user.credits + plan.creditsPerMonth,
-        });
-      }
+
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 1);
 

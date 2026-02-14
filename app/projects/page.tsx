@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Navigation from "@/components/layout/Navigation";
 import {
@@ -11,24 +11,8 @@ import {
   Loader2,
   Trash2,
   ArrowRight,
-  Search,
-  ChevronDown,
-  Shield,
-  AlertTriangle,
-  Check,
-  CheckSquare,
-  Square,
-  X,
-  Pencil,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { cn } from "@/lib/utils";
-import dynamic from "next/dynamic";
-
-const ZoneMap = dynamic(
-  () => import("@/components/dossier/ZoneMap").then((m) => m.ZoneMap),
-  { ssr: false, loading: () => <div className="h-64 rounded-xl bg-slate-800/50 border border-white/10 flex items-center justify-center text-slate-500 text-sm">Loading map…</div> }
-);
 
 interface Project {
   id: string;
@@ -41,32 +25,10 @@ interface Project {
   _count?: { documents: number };
 }
 
-const DOSSIER_STORAGE_KEY = "urbassist_dossier";
-
 export default function ProjectsPage() {
   const { user, loading: authLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showNewModal, setShowNewModal] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newAddress, setNewAddress] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [addressQuery, setAddressQuery] = useState("");
-  const [addressSuggestions, setAddressSuggestions] = useState<{ label: string; city: string; postcode: string; coordinates?: number[] }[]>([]);
-  const [selectedAddress, setSelectedAddress] = useState<{ label: string; city: string; postcode: string; coordinates: number[] } | null>(null);
-  const [parcels, setParcels] = useState<{ id: string; section: string; number: string; area: number; geometry?: unknown }[]>([]);
-  const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
-  const [pluInfo, setPluInfo] = useState<{ zoneType: string | null; zoneName: string | null; pluType?: string | null } | null>(null);
-  const [manualPluZone, setManualPluZone] = useState<string>("");
-  const [showManualPluEdit, setShowManualPluEdit] = useState(false);
-  const [zoneFeatures, setZoneFeatures] = useState<unknown[]>([]);
-  const [protectedAreas, setProtectedAreas] = useState<{ name: string; type: string }[]>([]);
-  const [loadingAddress, setLoadingAddress] = useState(false);
-  const [loadingCadastre, setLoadingCadastre] = useState(false);
-  const [loadingPlu, setLoadingPlu] = useState(false);
-  const [loadingProtectedAreas, setLoadingProtectedAreas] = useState(false);
-  const [cadastreError, setCadastreError] = useState<string | null>(null);
-  const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -77,223 +39,17 @@ export default function ProjectsPage() {
       .finally(() => setLoading(false));
   }, [user]);
 
-  // Auto-open new project modal when ?openNew=1 (e.g. from "Start my urban planning application")
+  // Auto-redirect to /projects/new when ?openNew=1
   useEffect(() => {
     if (typeof window === "undefined" || !user) return;
-    const openNew = new URLSearchParams(window.location.search).get("openNew") === "1";
-    if (openNew) {
-      setShowNewModal(true);
-      // Clean URL without reload
-      const url = new URL(window.location.href);
-      url.searchParams.delete("openNew");
-      window.history.replaceState({}, "", url.toString());
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("openNew") === "1") {
+      window.location.href = "/projects/new";
+    }
+    if (params.get("from") === "dossier") {
+      window.location.href = "/projects/new?from=dossier";
     }
   }, [user]);
-
-  // Pre-fill from dossier flow (step1 = address + parcels, step2 = project types, step3 = description)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const fromDossier = new URLSearchParams(window.location.search).get("from") === "dossier";
-    if (!fromDossier) return;
-    try {
-      const raw = sessionStorage.getItem(DOSSIER_STORAGE_KEY);
-      if (!raw) return;
-      const dossier = JSON.parse(raw) as {
-        step1?: {
-          address?: string;
-          city?: string;
-          postcode?: string;
-          coordinates?: number[];
-          parcels?: { id: string; section: string; number: string; area: number }[];
-          parcelIds?: string[];
-          pluZone?: string | null;
-          pluName?: string | null;
-        };
-        step3?: { description?: string };
-      };
-      const step1 = dossier?.step1;
-      const step3 = dossier?.step3;
-      if (step1?.address && step1?.coordinates?.length) {
-        setShowNewModal(true);
-        setNewAddress(step1.address);
-        setSelectedAddress({
-          label: step1.address,
-          city: step1.city || "",
-          postcode: step1.postcode || "",
-          coordinates: step1.coordinates,
-        });
-        if (Array.isArray(step1.parcels)) setParcels(step1.parcels);
-        if (Array.isArray(step1.parcelIds)) setSelectedParcelIds(step1.parcelIds);
-        if (step1.pluZone != null || step1.pluName != null) setPluInfo({ zoneType: step1.pluZone ?? null, zoneName: step1.pluName ?? null });
-        if (step1.pluZone) setManualPluZone(step1.pluZone);
-      }
-      if (step1 || step3?.description) {
-        setShowNewModal(true);
-        if (typeof step3?.description === "string" && step3.description.trim()) setNewName(step3.description.slice(0, 80));
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const searchAddress = useCallback(() => {
-    if (!addressQuery.trim() || addressQuery.length < 4) {
-      setAddressSuggestions([]);
-      return;
-    }
-    setLoadingAddress(true);
-    fetch("/api/address/lookup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: addressQuery }),
-    })
-      .then((r) => r.json())
-      .then((d) => setAddressSuggestions(d.results || []))
-      .catch(() => setAddressSuggestions([]))
-      .finally(() => setLoadingAddress(false));
-  }, [addressQuery]);
-
-  useEffect(() => {
-    const t = setTimeout(searchAddress, 400);
-    return () => clearTimeout(t);
-  }, [addressQuery, searchAddress]);
-
-  const selectAddress = useCallback((addr: { label: string; city: string; postcode: string; coordinates?: number[] }) => {
-    const coords = addr.coordinates;
-    if (!coords || coords.length < 2) return;
-    setSelectedAddress({ ...addr, coordinates: coords });
-    setNewAddress(addr.label);
-    setAddressSuggestions([]);
-    setLoadingCadastre(true);
-    setLoadingPlu(true);
-    setLoadingProtectedAreas(true);
-    setCadastreError(null);
-    setParcels([]);
-    setPluInfo(null);
-    setManualPluZone("");
-    setShowManualPluEdit(false);
-    setZoneFeatures([]);
-    setProtectedAreas([]);
-
-    // ── 3 SEPARATE parallel calls for PROGRESSIVE rendering ──
-    // Parcels/map appear in ~2-3s, PLU/protected areas fill in as they arrive.
-
-    // 1) CADASTRE — renders parcels + map immediately when done (~2-3s)
-    fetch("/api/cadastre/lookup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }),
-    })
-      .then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) {
-          setCadastreError(d.error || "Failed to load parcels");
-          return;
-        }
-        const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown; coordinates?: number[] }[];
-        setParcels(list);
-        setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null);
-        if (d.source === "estimated") setCadastreError("Cadastre data estimated (IGN API unavailable).");
-        if (list.length > 0) setSelectedParcelIds([]);
-      })
-      .catch(() => {
-        setCadastreError("Location data unavailable. You can still create the project with the address.");
-      })
-      .finally(() => setLoadingCadastre(false));
-
-    // 2) PLU DETECTION — fills in zone info when done (~4-8s)
-    fetch("/api/plu-detection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords, address: addr.label }),
-    })
-      .then(async (r) => {
-        if (!r.ok) return;
-        const d = await r.json();
-        const plu = d.plu ?? {};
-        if (plu.zoneType || plu.zoneName) {
-          setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null });
-        }
-        setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []);
-      })
-      .catch(() => { /* PLU detection failure is non-blocking */ })
-      .finally(() => setLoadingPlu(false));
-
-    // 3) PROTECTED AREAS — fills in protection info when done (~3-6s)
-    fetch("/api/protected-areas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords }),
-    })
-      .then(async (r) => {
-        if (!r.ok) return;
-        const d = await r.json();
-        setProtectedAreas(Array.isArray(d.areas) ? d.areas : []);
-      })
-      .catch(() => { /* Protected areas failure is non-blocking */ })
-      .finally(() => setLoadingProtectedAreas(false));
-  }, []);
-
-  const createProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      let projectType: string | undefined;
-      try {
-        const raw = sessionStorage.getItem(DOSSIER_STORAGE_KEY);
-        const dossier = raw ? (JSON.parse(raw) as { step2?: { projectTypes?: string[] } }) : {};
-        const types = dossier?.step2?.projectTypes ?? [];
-        if (types.includes("new_construction")) projectType = "construction";
-        else if (types.includes("existing_extension")) projectType = "extension";
-        else if (types.includes("outdoor")) projectType = "outdoor";
-      } catch {
-        // ignore
-      }
-      const parcelIds = selectedParcelIds.length > 0 ? selectedParcelIds : parcels.map((p) => p.id);
-      const parcelArea = selectedParcelIds.length > 0
-        ? parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((sum, p) => sum + p.area, 0)
-        : parcels.reduce((sum, p) => sum + p.area, 0) || parcels[0]?.area;
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          description: newName.trim() || undefined,
-          address: newAddress.trim() || undefined,
-          municipality: selectedAddress?.city,
-          coordinates: selectedAddress?.coordinates,
-          parcelIds: parcelIds.length ? parcelIds : undefined,
-          parcelArea,
-          northAngle: northAngleDegrees != null ? northAngleDegrees : undefined,
-          zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName,
-          projectType: projectType || undefined,
-          protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.project) {
-        setProjects((p) => [data.project, ...p]);
-        setShowNewModal(false);
-        setNewName("");
-        setNewAddress("");
-        setSelectedAddress(null);
-        setParcels([]);
-        setSelectedParcelIds([]);
-        setPluInfo(null);
-        setManualPluZone("");
-        setShowManualPluEdit(false);
-        setZoneFeatures([]);
-        setProtectedAreas([]);
-        setNorthAngleDegrees(null);
-        window.location.href = `/projects/${data.project.id}/authorization`;
-        return;
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setCreating(false);
-  };
 
   const deleteProject = async (id: string) => {
     if (!confirm("Delete this project?")) return;
@@ -340,13 +96,13 @@ export default function ProjectsPage() {
               Manage your construction projects • {user.credits} credits
             </p>
           </div>
-          <button
-            onClick={() => setShowNewModal(true)}
+          <Link
+            href="/projects/new"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25"
           >
             <Plus className="w-5 h-5" />
             New Project
-          </button>
+          </Link>
         </div>
 
         {loading ? (
@@ -358,13 +114,13 @@ export default function ProjectsPage() {
             <FolderKanban className="w-16 h-16 text-slate-600 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-white mb-2">No projects yet</h2>
             <p className="text-slate-400 mb-6">Create your first project to get started</p>
-            <button
-              onClick={() => setShowNewModal(true)}
+            <Link
+              href="/projects/new"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold"
             >
               <Plus className="w-5 h-5" />
               Create Project
-            </button>
+            </Link>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -425,374 +181,6 @@ export default function ProjectsPage() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-
-        {showNewModal && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-6xl my-8 shadow-xl">
-              <div className="flex items-start justify-between p-6 pb-4 border-b border-white/10">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">New Project</h2>
-                  <p className="text-slate-400 mt-1">Enter the project address first to load parcels and PLU zone.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowNewModal(false)}
-                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <form onSubmit={createProject} className="p-6 space-y-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-slate-400 mb-2">Project address</label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                      <input
-                        type="text"
-                        value={selectedAddress ? newAddress : addressQuery}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setAddressQuery(v);
-                          setNewAddress(v);
-                          if (selectedAddress) {
-                            setSelectedAddress(null);
-                            setPluInfo(null);
-                            setZoneFeatures([]);
-                            setParcels([]);
-                            setSelectedParcelIds([]);
-                            setProtectedAreas([]);
-                            setCadastreError(null);
-                            setNorthAngleDegrees(null);
-                          }
-                        }}
-                        onFocus={() => {
-                          if (selectedAddress) {
-                            setSelectedAddress(null);
-                            setPluInfo(null);
-                            setZoneFeatures([]);
-                            setParcels([]);
-                            setSelectedParcelIds([]);
-                            setProtectedAreas([]);
-                            setCadastreError(null);
-                            setNorthAngleDegrees(null);
-                          }
-                        }}
-                        className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder-slate-500"
-                        placeholder="123 Rue Example, 06000 Nice"
-                      />
-                      {(loadingAddress || (selectedAddress && loadingCadastre)) && (
-                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
-                      )}
-                    </div>
-                    {addressSuggestions.length > 0 && (
-                      <div className="absolute z-20 top-full left-0 right-0 mt-1 rounded-xl bg-slate-800 border border-white/10 overflow-hidden shadow-xl">
-                        {addressSuggestions.map((a, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => selectAddress({
-                              label: a.label,
-                              city: a.city,
-                              postcode: a.postcode,
-                              coordinates: a.coordinates,
-                            })}
-                            className="w-full px-4 py-2.5 text-left text-sm text-white hover:bg-slate-700 flex items-center gap-2"
-                          >
-                            <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
-                            <span className="truncate">{a.label}</span>
-                            <span className="text-slate-500 text-xs shrink-0">{a.postcode} {a.city}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {selectedAddress && (
-                      <p className="flex items-center gap-2 mt-2 text-sm text-slate-300">
-                        <MapPin className="w-4 h-4 text-blue-400 shrink-0" />
-                        {selectedAddress.label} — {selectedAddress.postcode} {selectedAddress.city}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-2">Project name</label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder-slate-500"
-                      placeholder="e.g. Villa Méditerranée"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Preload: always show three info cards — skeleton when no address or loading, real when loaded */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="rounded-xl bg-slate-800/80 border border-white/10 p-4">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-slate-500" /> PLU Zone
-                    </p>
-                    {!selectedAddress || loadingPlu ? (
-                      <div className="space-y-2 animate-pulse">
-                        <div className="h-4 bg-slate-700 rounded w-3/4" />
-                        <div className="h-3 bg-slate-700 rounded w-1/2" />
-                      </div>
-                    ) : showManualPluEdit ? (
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          value={manualPluZone}
-                          onChange={(e) => setManualPluZone(e.target.value)}
-                          placeholder="e.g. UB, UC, AU..."
-                          className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm placeholder-slate-500"
-                          autoFocus
-                        />
-                        <p className="text-xs text-slate-500">Optional: correct if you know the zone from your PLU document.</p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowManualPluEdit(false);
-                            if (manualPluZone.trim()) setPluInfo({ zoneType: manualPluZone.trim(), zoneName: manualPluZone.trim(), pluType: null });
-                          }}
-                          className="text-xs text-blue-400 hover:text-blue-300"
-                        >
-                          Save
-                        </button>
-                      </div>
-                    ) : pluInfo?.zoneType || pluInfo?.zoneName || manualPluZone.trim() ? (
-                      <>
-                        <p className="text-sm font-semibold text-blue-400">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{pluInfo?.pluType === "PLUi" ? "PLU intercommunal" : pluInfo?.pluType === "RNU" ? "RNU (Règlement National d'Urbanisme)" : pluInfo?.pluType === "CC" ? "Carte Communale" : "PLU communal"}</p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowManualPluEdit(true);
-                            if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || "");
-                          }}
-                          className="mt-1 text-xs text-slate-400 hover:text-white inline-flex items-center gap-1"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          Edit zone (optional)
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm text-slate-400">Non détectée</p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          We were unable to automatically detect your PLU or RNU zone. We will help you determine it after your project has been validated.
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  <div className="rounded-xl bg-slate-800/80 border border-white/10 p-4">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <Shield className="w-4 h-4 text-slate-500" /> Protected areas
-                    </p>
-                    {!selectedAddress || loadingProtectedAreas ? (
-                      <div className="space-y-2 animate-pulse">
-                        <div className="h-4 bg-slate-700 rounded w-full" />
-                        <div className="h-3 bg-slate-700 rounded w-2/3" />
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-300">
-                        {protectedAreas.length > 0 ? protectedAreas.map((a) => a.name).join(", ") : "General construction regulations"}
-                      </p>
-                    )}
-                  </div>
-                  {selectedAddress && !loadingProtectedAreas && protectedAreas.some((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)) && (
-                    <div className="sm:col-span-3 rounded-xl bg-amber-500/15 border border-amber-500/40 p-4 flex items-start gap-3">
-                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-amber-200">Protected or restricted zone detected</p>
-                        <p className="text-sm text-slate-300 mt-1">
-                          Your project is located in {protectedAreas.filter((a) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type)).map((a) => a.name).join(", ")}. Additional approvals or specific rules may apply (e.g. ABF for Architects of Historical Buildings, PPR for flood risk). Check with your mairie for details.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  <div className="rounded-xl bg-slate-800/80 border border-white/10 p-4">
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Total land area</p>
-                    {!selectedAddress || loadingCadastre ? (
-                      <div className="space-y-2 animate-pulse">
-                        <div className="h-6 bg-slate-700 rounded w-1/2" />
-                        <div className="h-3 bg-slate-700 rounded w-1/3" />
-                      </div>
-                    ) : (
-                      <>
-                        <p className="text-lg font-bold text-emerald-400 tabular-nums">
-                          {parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((s, p) => s + p.area, 0) || 0} m²
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {selectedParcelIds.length} parcel{selectedParcelIds.length !== 1 ? "s" : ""} selected
-                        </p>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Two-column: parcel list (left) + map (right). Map is larger for better visibility */}
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 min-h-[400px]">
-                  <div className="lg:col-span-1 space-y-3 overflow-y-auto max-h-[520px]">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm font-medium text-white">Parcels</p>
-                        {selectedAddress && !loadingCadastre && parcels.length > 0 && (
-                          <span className="text-xs text-slate-500">{parcels.length} found</span>
-                        )}
-                      </div>
-                      {(!selectedAddress || loadingCadastre) ? (
-                        <div className="space-y-2 animate-pulse">
-                          {[1, 2, 3, 4].map((i) => (
-                            <div key={i} className="flex items-center gap-3 py-2.5">
-                              <div className="w-4 h-4 rounded bg-slate-700" />
-                              <div className="h-4 bg-slate-700 rounded flex-1" />
-                              <div className="h-4 bg-slate-700 rounded w-12" />
-                            </div>
-                          ))}
-                        </div>
-                      ) : parcels.length > 0 ? (
-                        <>
-                          <div className="flex gap-2 mb-2" role="group" aria-label="Parcel selection">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setSelectedParcelIds(parcels.map((p) => p.id));
-                              }}
-                              className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-700 text-slate-200 hover:bg-slate-600 border border-white/10"
-                              aria-label="Select all parcels"
-                            >
-                              All
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setSelectedParcelIds([]);
-                              }}
-                              className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-700 text-slate-200 hover:bg-slate-600 border border-white/10"
-                              aria-label="Select no parcels"
-                            >
-                              None
-                            </button>
-                          </div>
-                          {cadastreError && (
-                            <p className="text-xs text-amber-400 mb-2">Cadastre: {cadastreError}</p>
-                          )}
-                          <div className="space-y-1" role="list">
-                            {parcels.map((p) => {
-                              const selected = selectedParcelIds.includes(p.id);
-                              const isMain = parcels[0]?.id === p.id;
-                              const toggle = () => {
-                                setSelectedParcelIds((prev) => {
-                                  if (prev.includes(p.id)) return prev.filter((x) => x !== p.id);
-                                  return [...prev, p.id];
-                                });
-                              };
-                              return (
-                                <div
-                                  key={p.id}
-                                  role="button"
-                                  tabIndex={0}
-                                  aria-pressed={selected}
-                                  aria-label={`Select parcel ${p.section} N°${p.number}`}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    toggle();
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                      e.preventDefault();
-                                      toggle();
-                                    }
-                                  }}
-                                  className={cn(
-                                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm transition-colors border cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
-                                    selected
-                                      ? "bg-amber-500/20 text-amber-200 border-amber-500/40"
-                                      : "bg-slate-800/50 text-slate-300 border-transparent hover:bg-slate-800 hover:border-white/10"
-                                  )}
-                                >
-                                  <span className="flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center pointer-events-none">
-                                    {selected ? <Check className="w-2.5 h-2.5 text-amber-400" /> : null}
-                                  </span>
-                                  <span className="flex-1 min-w-0 font-medium">
-                                    {isMain ? "Principale " : ""}Section {p.section} N°{p.number}
-                                  </span>
-                                  <span className="flex-shrink-0 text-slate-400 tabular-nums">{p.area} m²</span>
-                                  {selected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <p className="text-xs text-slate-500 mt-2">Select one or more parcels. Parcels from different cadastral sections can be selected.</p>
-                        </>
-                      ) : (
-                        <p className="text-sm text-slate-500 py-4">No parcels at this address. Enter another address or create without parcels.</p>
-                      )}
-                    </div>
-                    {selectedAddress && !loadingPlu && (
-                      <div className="rounded-xl bg-slate-800/50 border border-white/10 p-3">
-                        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Applicable regulation</p>
-                        <p className="text-sm text-slate-200">
-                          {pluInfo?.zoneType || pluInfo?.zoneName
-                            ? `Zone ${pluInfo.zoneType || pluInfo.zoneName}${pluInfo.zoneName && pluInfo.zoneName !== pluInfo.zoneType ? ` – ${pluInfo.zoneName}` : ""}`
-                            : "Aucune zone PLU détectée à cette adresse (données peut-être indisponibles)."}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1">Plan Local d&apos;Urbanisme{pluInfo?.pluType === "PLUi" ? " (PLUi)" : " (PLU)"}</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="lg:col-span-3 rounded-xl overflow-hidden border border-white/10 bg-slate-900 min-h-[420px] flex flex-col">
-                    <p className="text-sm font-medium text-white px-3 py-2 border-b border-white/10">Map</p>
-                    <div className="flex-1 min-h-[380px] flex items-center justify-center">
-                      {!selectedAddress || loadingCadastre ? (
-                        <div className="flex flex-col items-center justify-center gap-2 text-slate-500">
-                          <MapPin className="w-12 h-12 text-slate-600" />
-                          <p className="text-sm">Search for an address to load the map</p>
-                        </div>
-                      ) : selectedAddress ? (
-                        <ZoneMap
-                          center={{ lat: selectedAddress.coordinates[1], lng: selectedAddress.coordinates[0] }}
-                          parcels={parcels}
-                          selectedParcelIds={selectedParcelIds}
-                          onParcelSelect={(ids) => setSelectedParcelIds(ids)}
-                          zoneFeatures={zoneFeatures}
-                          pluZone={pluInfo?.zoneType ?? null}
-                          pluName={pluInfo?.zoneName ?? null}
-                          pluType={pluInfo?.pluType ?? null}
-                          showRegulationSidebar={false}
-                          className="h-full w-full min-h-[380px]"
-                        />
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4 border-t border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setShowNewModal(false)}
-                    className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600"
-                  >
-                    Retour
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating || (parcels.length > 0 && selectedParcelIds.length === 0)}
-                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50 hover:shadow-lg hover:shadow-purple-500/20"
-                  >
-                    {creating ? "Creating…" : "Create project"}
-                  </button>
-                </div>
-              </form>
-            </div>
           </div>
         )}
       </div>

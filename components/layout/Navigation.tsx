@@ -23,11 +23,13 @@ import {
   Settings,
   Bell,
   LogOut,
+  Plus,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute } from "@/lib/step-flow";
 
 const stepIcons = [
+  Plus,
   LayoutDashboard,
   FileCheck,
   MapPin,
@@ -51,7 +53,9 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
-  const currentStepIndex = projectId ? getStepIndex(pathname) : -1;
+  const isNewProjectPage = pathname === "/projects/new";
+  const showStepBar = !!projectId || isNewProjectPage;
+  const currentStepIndex = showStepBar ? getStepIndex(pathname) : -1;
   const [projectName, setProjectName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,7 +89,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               <p className="text-[10px] text-slate-400 -mt-1 flex items-center gap-1.5">
                 UrbAssist
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-700/80 text-slate-300 border border-white/10">
-                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "6"}
+                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "7"}
                 </span>
               </p>
             </div>
@@ -176,22 +180,30 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Planning application steps bar - shown when in a project context */}
-        {projectId && (
+        {showStepBar && (
           <div className="border-t border-white/10 bg-slate-900/90 px-4 py-2.5">
             <div className="flex flex-wrap items-center gap-3">
-              <Link
-                href={`/projects/${projectId}`}
-                className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white shrink-0"
-              >
-                <FolderKanban className="w-4 h-4 text-sky-400" />
-                <span className="hidden sm:inline">{projectName || "Project"}</span>
-                <span className="text-slate-500 text-xs font-normal">(steps)</span>
-              </Link>
+              {projectId && (
+                <Link
+                  href={`/projects/${projectId}`}
+                  className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white shrink-0"
+                >
+                  <FolderKanban className="w-4 h-4 text-sky-400" />
+                  <span className="hidden sm:inline">{projectName || "Project"}</span>
+                  <span className="text-slate-500 text-xs font-normal">(steps)</span>
+                </Link>
+              )}
+              {!projectId && isNewProjectPage && (
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-300 shrink-0">
+                  <FolderKanban className="w-4 h-4 text-sky-400" />
+                  <span className="hidden sm:inline">Nouveau projet</span>
+                </span>
+              )}
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
                 {PLANNING_STEPS.map((step, idx) => {
                   const isActive = idx === currentStepIndex;
                   const isPast = idx < currentStepIndex;
-                  const href = step.href(projectId);
+                  const href = projectId ? step.href(projectId) : (step.step === 1 ? "/projects/new" : "#");
                   const Icon = stepIcons[idx] ?? LayoutDashboard;
                   return (
                     <Link
@@ -252,7 +264,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main Content */}
-      <main className={cn("min-h-screen", projectId ? "pt-32" : "pt-16")}>
+      <main className={cn("min-h-screen", showStepBar ? "pt-32" : "pt-16")}>
         {children}
       </main>
     </div>

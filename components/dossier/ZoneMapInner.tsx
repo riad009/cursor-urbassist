@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -28,6 +28,14 @@ const FRANCE_CENTER: [number, number] = [46.603354, 1.888334];
 /** Aerial/satellite base map — avoids OSM tile grid look; cadastral outlines overlay clearly */
 const AERIAL_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const AERIAL_ATTRIBUTION = "Tiles © Esri, Maxar, Earthstar Geographics, and the GIS User Community";
+
+/** OpenStreetMap plan base (used in cadastre/plan mode) */
+const OSM_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+
+/** IGN Cadastral parcel overlay (WMTS) — shows detailed parcel numbers, boundaries, section labels */
+const CADASTRAL_TILE_URL =
+  "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
 
 /** Colors for PLU zone types (Géoportail-style) */
 const ZONE_COLORS: Record<string, string> = {
@@ -133,13 +141,67 @@ function getParcelCenter(parcel: ParcelWithGeometry): [number, number] | null {
 }
 
 /** Small parcel number label (e.g. "BI 259") at centroid — like cadastral map. */
-function createParcelLabelIcon(label: string): L.DivIcon {
+function createParcelLabelIcon(label: string, mode: "satellite" | "cadastre" = "satellite"): L.DivIcon {
+  const bg = mode === "cadastre" ? "rgba(30,58,138,0.75)" : "rgba(0,0,0,0.6)";
   return L.divIcon({
     className: "parcel-label-marker",
-    html: `<span style="display:inline-block;padding:2px 6px;background:rgba(0,0,0,0.6);color:white;font-size:11px;font-weight:600;border-radius:2px;pointer-events:none;">${label}</span>`,
-    iconSize: [60, 20],
-    iconAnchor: [30, 10],
+    html: `<span style="display:inline-block;padding:2px 6px;background:${bg};color:white;font-size:10px;font-weight:600;border-radius:3px;pointer-events:none;white-space:nowrap;letter-spacing:0.3px;">${label}</span>`,
+    iconSize: [80, 20],
+    iconAnchor: [40, 10],
   });
+}
+
+/** Floating toggle button for switching between Vue carte (cadastre) and Vue satellite */
+function ViewToggle({ mode, onChange }: { mode: "satellite" | "cadastre"; onChange: (m: "satellite" | "cadastre") => void }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 12,
+        left: 12,
+        zIndex: 1000,
+        display: "flex",
+        borderRadius: 8,
+        overflow: "hidden",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+        border: "1px solid rgba(255,255,255,0.15)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange("cadastre"); }}
+        style={{
+          padding: "6px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          border: "none",
+          background: mode === "cadastre" ? "#2563eb" : "rgba(30,41,59,0.85)",
+          color: mode === "cadastre" ? "#fff" : "#94a3b8",
+          transition: "all 0.15s",
+        }}
+      >
+        Vue carte
+      </button>
+      <button
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange("satellite"); }}
+        style={{
+          padding: "6px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          border: "none",
+          borderLeft: "1px solid rgba(255,255,255,0.1)",
+          background: mode === "satellite" ? "#2563eb" : "rgba(30,41,59,0.85)",
+          color: mode === "satellite" ? "#fff" : "#94a3b8",
+          transition: "all 0.15s",
+        }}
+      >
+        Vue satellite
+      </button>
+    </div>
+  );
 }
 
 export function ZoneMapInner({
@@ -166,6 +228,7 @@ export function ZoneMapInner({
   className?: string;
 }) {
   const [zoom, setZoom] = React.useState(17);
+  const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("cadastre");
 
   const handleParcelClick = useCallback(
     (id: string) => {
@@ -217,7 +280,10 @@ export function ZoneMapInner({
     for (const p of parcels) {
       if (!hasRealParcelGeometry(p)) continue;
       const pos = getParcelCenter(p);
-      if (pos) out.push({ position: pos, label: `${p.section} ${p.number}`.trim() || p.id });
+      if (pos) {
+        const areaStr = p.area >= 1000 ? `${(p.area / 1000).toFixed(1)}k` : `${p.area}`;
+        out.push({ position: pos, label: `${p.section} ${p.number} · ${areaStr}m²`.trim() });
+      }
     }
     return out;
   }, [parcels]);
@@ -228,9 +294,10 @@ export function ZoneMapInner({
     return {
       fillColor: color,
       color: color,
-      weight: 2,
-      opacity: 0.85,
-      fillOpacity: 0.35,
+      weight: 1.5,
+      opacity: 0.5,
+      fillOpacity: 0.08,
+      dashArray: "6 4",
     };
   };
 
@@ -250,7 +317,7 @@ export function ZoneMapInner({
 
   return (
     <div className={className}>
-      <div className={showRegulationSidebar ? "grid grid-cols-1 lg:grid-cols-3 gap-4" : "block"}>
+      <div className={showRegulationSidebar ? "grid grid-cols-1 lg:grid-cols-3 gap-4" : "block h-full"}>
         {/* Sidebar: Applicable regulation (like Géoportail) — hidden when map full width */}
         {showRegulationSidebar && (
           <div className="lg:col-span-1 order-2 lg:order-1 space-y-2">
@@ -302,25 +369,69 @@ export function ZoneMapInner({
         )}
 
         {/* Map — full width when no sidebar, else 2/3 */}
-        <div className={showRegulationSidebar ? "lg:col-span-2 order-1 lg:order-2 rounded-xl overflow-hidden border border-white/10 bg-slate-900" : "w-full h-full min-h-[380px] rounded-xl overflow-hidden border border-white/10 bg-slate-900"}>
+        <div className={showRegulationSidebar ? "lg:col-span-2 order-1 lg:order-2 rounded-xl overflow-hidden border border-white/10 bg-slate-900" : "w-full h-full rounded-xl overflow-hidden border border-white/10 bg-slate-900"} style={{ position: "relative" }}>
           <style>{`.parcel-label-marker { border: none !important; background: transparent !important; }`}</style>
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
           <MapContainer
             center={center ? [center.lat, center.lng] : FRANCE_CENTER}
             zoom={center ? 18 : 6}
-            minZoom={6}
+            minZoom={13}
             maxZoom={21}
             className="w-full rounded-xl"
             zoomControl={false}
-            style={{ height: showRegulationSidebar ? 320 : "100%", minHeight: showRegulationSidebar ? 320 : 380 }}
+            style={showRegulationSidebar ? { height: 320, minHeight: 320 } : { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
           >
             <ZoomControl position="topright" />
-            <TileLayer url={AERIAL_TILE_URL} attribution={AERIAL_ATTRIBUTION} />
+            {/* Base layer: satellite or OSM plan */}
+            {viewMode === "satellite" ? (
+              <TileLayer key="base-satellite" url={AERIAL_TILE_URL} attribution={AERIAL_ATTRIBUTION} maxNativeZoom={19} maxZoom={21} />
+            ) : (
+              <TileLayer key="base-osm" url={OSM_TILE_URL} attribution={OSM_ATTRIBUTION} maxNativeZoom={19} maxZoom={21} />
+            )}
+            {/* IGN Cadastral parcel overlay — only in cadastre/plan mode */}
+            {viewMode === "cadastre" && (
+              <TileLayer
+                key="cadastral-overlay"
+                url={CADASTRAL_TILE_URL}
+                attribution="© IGN Cadastre"
+                opacity={0.85}
+                zIndex={10}
+                minZoom={14}
+                maxNativeZoom={19}
+                maxZoom={20}
+              />
+            )}
             {center && <Marker position={[center.lat, center.lng]} />}
             {parcelCollection && (
               <GeoJSON
-                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-sel-${selectedParcelIds.join(",")}`}
+                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
                 data={parcelCollection as GeoJsonObject}
-                style={parcelStyle}
+                style={(feature) => {
+                  const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
+                  if (viewMode === "cadastre") {
+                    // In cadastre mode: subtle outline for unselected, bold highlight for selected
+                    return {
+                      color: selected ? "#b45309" : "#3b82f6",
+                      weight: selected ? 3 : 1.5,
+                      fillColor: selected ? "#eab308" : "#3b82f6",
+                      fillOpacity: selected ? 0.45 : 0.08,
+                      fill: true,
+                      fillRule: "nonzero" as const,
+                      opacity: selected ? 1 : 0.5,
+                      dashArray: selected ? undefined : "4 4",
+                    };
+                  }
+                  // Satellite mode: original cadastral-look styling
+                  return {
+                    color: selected ? "#b45309" : "#ffffff",
+                    weight: selected ? 3 : 1.5,
+                    fillColor: selected ? "#eab308" : "rgba(255,255,255,0.15)",
+                    fillOpacity: selected ? 0.7 : 0.2,
+                    fill: true,
+                    fillRule: "nonzero" as const,
+                    opacity: selected ? 1 : 0.95,
+                  };
+                }}
                 onEachFeature={(feature, layer) => {
                   const props = feature.properties as { id?: string; section?: string; number?: string; area?: number };
                   const id = props?.id;
@@ -345,8 +456,9 @@ export function ZoneMapInner({
                 }}
               />
             )}
+            {/* Parcel labels: shown in all modes with section, number, and area */}
             {parcelLabels.map(({ position, label }, i) => (
-              <Marker key={`label-${i}-${label}`} position={position} icon={createParcelLabelIcon(label)} zIndexOffset={400} />
+              <Marker key={`label-${i}-${label}-${viewMode}`} position={position} icon={createParcelLabelIcon(label, viewMode)} zIndexOffset={400} />
             ))}
             <MapController center={center} zoom={zoom} onZoomChange={setZoom} />
           </MapContainer>

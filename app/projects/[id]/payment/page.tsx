@@ -8,23 +8,15 @@ import {
   Loader2,
   CreditCard,
   FileText,
-  Map,
-  Layers,
-  Scissors,
-  Building2,
-  Image,
   CheckCircle2,
+  Info,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-
-const DOCUMENTS_PRODUCED = [
-  { type: "LOCATION_PLAN", label: "Plan de situation", icon: Map },
-  { type: "SITE_PLAN", label: "Plan de masse", icon: Layers },
-  { type: "SECTION", label: "Coupe", icon: Scissors },
-  { type: "ELEVATION", label: "Élévations", icon: Building2 },
-  { type: "LANDSCAPE_INSERTION", label: "Insertion paysagère", icon: Image },
-  { type: "DESCRIPTIVE_STATEMENT", label: "Notice descriptive", icon: FileText },
-];
+import {
+  getDocumentsForType,
+  PC_ADDITIONAL_NOTES,
+} from "@/lib/authorization-documents";
 
 export default function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -34,6 +26,9 @@ export default function PaymentPage({ params }: { params: Promise<{ id: string }
     name: string;
     address: string | null;
     authorizationType?: string | null;
+    wantPluAnalysis?: boolean;
+    wantCerfaFill?: boolean;
+    architectRequired?: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -119,6 +114,16 @@ export default function PaymentPage({ params }: { params: Promise<{ id: string }
     );
   }
 
+  const authType = project.authorizationType?.toUpperCase();
+  const isPC = authType === "PC" || authType === "ARCHITECT_REQUIRED";
+  const documents = getDocumentsForType(project.authorizationType);
+  const displayAuthType =
+    authType === "DP"
+      ? "Déclaration Préalable"
+      : authType === "PC" || authType === "ARCHITECT_REQUIRED"
+        ? "Permis de Construire"
+        : null;
+
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-2xl mx-auto">
@@ -126,58 +131,119 @@ export default function PaymentPage({ params }: { params: Promise<{ id: string }
           href={`/projects/${projectId}/authorization`}
           className="text-sm text-slate-400 hover:text-white inline-flex items-center gap-1 mb-6"
         >
-          ← Type d&apos;autorisation
+          ← Retour au type d&apos;autorisation
         </Link>
         <h1 className="text-2xl lg:text-3xl font-bold text-white mb-2 flex items-center gap-3">
           <CreditCard className="w-8 h-8 text-emerald-400" />
-          Paiement
+          Récapitulatif & Paiement
         </h1>
         <p className="text-slate-400 mb-8">
-          Procédez au paiement pour débloquer la production des documents de votre dossier.
+          Vérifiez votre commande puis procédez au paiement pour débloquer la production des documents.
         </p>
 
+        {/* Project info */}
         {project.address && (
-          <div className="mb-8 p-4 rounded-xl bg-slate-800/50 border border-white/10 flex items-center gap-3">
+          <div className="mb-6 p-4 rounded-xl bg-slate-800/50 border border-white/10 flex items-center gap-3">
             <MapPin className="w-5 h-5 text-slate-400 shrink-0" />
             <div>
               <p className="font-medium text-white">{project.name}</p>
               <p className="text-sm text-slate-400">{project.address}</p>
-              {project.authorizationType && (
+              {displayAuthType && (
                 <p className="text-xs text-slate-500 mt-1">
-                  Type: {project.authorizationType === "DP" ? "Déclaration Préalable" : "Permis de Construire"}
+                  Autorisation : {displayAuthType}
                 </p>
               )}
             </div>
           </div>
         )}
 
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-white mb-4">Documents qui seront produits</h2>
-          <ul className="space-y-3">
-            {DOCUMENTS_PRODUCED.map(({ type, label, icon: Icon }) => (
+        {/* Architect warning */}
+        {project.architectRequired && (
+          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-300">Architecte obligatoire</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Ce projet nécessite le recours à un architecte. Les documents produits devront être validés par un architecte DPLG/HMONP.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Document list */}
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-blue-400" />
+            Documents qui seront produits
+          </h2>
+          <ul className="space-y-2">
+            {documents.map((doc) => (
               <li
-                key={type}
+                key={doc.code}
                 className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50 border border-white/10"
               >
-                <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center shrink-0">
-                  <Icon className="w-5 h-5 text-blue-400" />
+                <span className="text-xs font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded shrink-0">
+                  {doc.code}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white">{doc.label}</p>
+                  {doc.description && (
+                    <p className="text-xs text-slate-500 mt-0.5">{doc.description}</p>
+                  )}
                 </div>
-                <span className="text-white">{label}</span>
-                <CheckCircle2 className="w-5 h-5 text-emerald-500/50 shrink-0 ml-auto" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-500/50 shrink-0" />
               </li>
             ))}
           </ul>
+          {isPC && (
+            <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <p className="text-xs font-medium text-amber-300 mb-1">
+                <Info className="w-3.5 h-3.5 inline mr-1" />
+                Notes complémentaires
+              </p>
+              <ul className="text-xs text-slate-400 space-y-1">
+                {PC_ADDITIONAL_NOTES.map((note, i) => (
+                  <li key={i}>• {note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
+        {/* Selected options */}
+        {(project.wantPluAnalysis || project.wantCerfaFill) && (
+          <div className="mb-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
+            <h3 className="text-sm font-medium text-blue-300 mb-2">Options sélectionnées</h3>
+            <ul className="space-y-1 text-sm text-slate-300">
+              {project.wantPluAnalysis && (
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                  Analyse PLU / RNU
+                </li>
+              )}
+              {project.wantCerfaFill && (
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                  Pré-remplissage CERFA automatique
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+
+        {/* Next steps */}
         <div className="mb-8 p-4 rounded-xl bg-slate-800/30 border border-white/5">
           <h3 className="font-medium text-white mb-2">Prochaines étapes</h3>
           <ol className="list-decimal list-inside space-y-1 text-sm text-slate-400">
             <li>Après le paiement, complétez la description détaillée de votre projet</li>
-            <li>Lancez l&apos;analyse PLU pour obtenir les recommandations réglementaires</li>
+            {project.wantPluAnalysis && (
+              <li>L&apos;analyse PLU/RNU vérifiera la conformité réglementaire</li>
+            )}
             <li>Éditez et exportez vos plans au format PDF</li>
           </ol>
         </div>
 
+        {/* Payment button */}
         <div className="border-t border-white/10 pt-8">
           <button
             onClick={handlePayment}
