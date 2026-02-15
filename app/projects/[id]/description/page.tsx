@@ -72,15 +72,15 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
     const [proposedProjectInfo, setProposedProjectInfo] = useState("");
     const [vrdConnections, setVrdConnections] = useState<Record<string, boolean>>({});
 
-    // PLU analysis
+    // Regulation analysis
     const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
     const [launchingPlu, setLaunchingPlu] = useState(false);
     const [pluCreditsCost, setPluCreditsCost] = useState(3);
 
-    // PLU document upload
-    const [pluDocumentFile, setPluDocumentFile] = useState<File | null>(null);
-    const [uploadingPluDoc, setUploadingPluDoc] = useState(false);
-    const [pluDocUploaded, setPluDocUploaded] = useState(false);
+    // Regulatory document upload (multi-file)
+    const [regulatoryFiles, setRegulatoryFiles] = useState<File[]>([]);
+    const [uploadingRegDocs, setUploadingRegDocs] = useState(false);
+    const [regDocsUploaded, setRegDocsUploaded] = useState(false);
 
     const isExistingBuilding = project?.projectType === "extension" || project?.projectType === "existing_extension";
 
@@ -266,7 +266,7 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                     Description détaillée du projet
                 </h1>
                 <p className="text-slate-400 mb-8">
-                    Complétez les informations de votre projet avant de lancer l&apos;analyse PLU.
+                    Complétez les informations de votre projet avant de lancer l&apos;analyse réglementaire.
                 </p>
 
                 {project.address && (
@@ -469,21 +469,21 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                     </button>
                 </div>
 
-                {/* PLU Document Upload */}
+                {/* Regulatory Document Upload (multi-file) */}
                 <div className="mb-4 rounded-2xl bg-slate-800/50 border border-white/10 overflow-hidden">
-                    <SectionHeader id="plu_upload" title="Document PLU (optionnel)" icon={FileText} />
+                    <SectionHeader id="plu_upload" title="Documents réglementaires (optionnel)" icon={FileText} />
                     {expandedSections.has("plu_upload") && (
                         <div className="p-5 pt-0 space-y-4">
                             <p className="text-xs text-slate-400">
-                                Si vous disposez du règlement PLU de votre commune (PDF), vous pouvez le joindre ici
+                                Si vous disposez du règlement PLU/RNU de votre commune (PDF), vous pouvez joindre un ou plusieurs fichiers
                                 pour enrichir l&apos;analyse réglementaire.
                             </p>
-                            {pluDocUploaded ? (
+                            {regDocsUploaded ? (
                                 <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                                    <span className="text-sm text-emerald-200">Document PLU téléversé</span>
+                                    <span className="text-sm text-emerald-200">{regulatoryFiles.length} document(s) téléversé(s)</span>
                                     <button
-                                        onClick={() => { setPluDocUploaded(false); setPluDocumentFile(null); }}
+                                        onClick={() => { setRegDocsUploaded(false); setRegulatoryFiles([]); }}
                                         className="ml-auto p-1 rounded hover:bg-white/10"
                                     >
                                         <X className="w-4 h-4 text-slate-400" />
@@ -493,43 +493,53 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                                 <div className="flex flex-col gap-3">
                                     <label className="w-full flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed border-white/10 bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:border-blue-500/30 transition-colors cursor-pointer">
                                         <Upload className="w-6 h-6" />
-                                        <span className="text-sm">{pluDocumentFile ? pluDocumentFile.name : "Cliquez pour sélectionner un fichier PDF"}</span>
+                                        <span className="text-sm">{regulatoryFiles.length > 0 ? `${regulatoryFiles.length} fichier(s) sélectionné(s)` : "Cliquez pour sélectionner un ou plusieurs PDF"}</span>
                                         <input
                                             type="file"
                                             accept=".pdf"
+                                            multiple
                                             className="hidden"
-                                            onChange={(e) => setPluDocumentFile(e.target.files?.[0] || null)}
+                                            onChange={(e) => setRegulatoryFiles(Array.from(e.target.files || []))}
                                         />
                                     </label>
-                                    {pluDocumentFile && (
+                                    {regulatoryFiles.length > 0 && (
+                                        <div className="space-y-1">
+                                            {regulatoryFiles.map((f, i) => (
+                                                <div key={i} className="flex items-center gap-2 text-xs text-slate-300 px-2 py-1">
+                                                    <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                                    <span className="truncate">{f.name}</span>
+                                                    <span className="text-slate-500 shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {regulatoryFiles.length > 0 && (
                                         <button
                                             onClick={async () => {
-                                                setUploadingPluDoc(true);
+                                                setUploadingRegDocs(true);
                                                 try {
-                                                    const formData = new FormData();
-                                                    formData.append("file", pluDocumentFile);
-                                                    formData.append("projectId", projectId);
-                                                    formData.append("type", "plu_regulation");
-                                                    const res = await fetch(`/api/projects/${projectId}/upload`, {
-                                                        method: "POST",
-                                                        body: formData,
-                                                        credentials: "include",
-                                                    });
-                                                    if (res.ok) {
-                                                        setPluDocUploaded(true);
-                                                    } else {
-                                                        alert("Erreur lors du téléversement");
+                                                    for (const file of regulatoryFiles) {
+                                                        const formData = new FormData();
+                                                        formData.append("file", file);
+                                                        formData.append("projectId", projectId);
+                                                        formData.append("type", "plu_regulation");
+                                                        await fetch(`/api/projects/${projectId}/upload`, {
+                                                            method: "POST",
+                                                            body: formData,
+                                                            credentials: "include",
+                                                        });
                                                     }
+                                                    setRegDocsUploaded(true);
                                                 } catch {
                                                     alert("Erreur lors du téléversement");
                                                 }
-                                                setUploadingPluDoc(false);
+                                                setUploadingRegDocs(false);
                                             }}
-                                            disabled={uploadingPluDoc}
+                                            disabled={uploadingRegDocs}
                                             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30 disabled:opacity-50"
                                         >
-                                            {uploadingPluDoc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                                            Téléverser
+                                            {uploadingRegDocs ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                            Téléverser {regulatoryFiles.length > 1 ? `${regulatoryFiles.length} fichiers` : ""}
                                         </button>
                                     )}
                                 </div>
@@ -538,15 +548,15 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                     )}
                 </div>
 
-                {/* PLU Analysis launch section */}
+                {/* Regulation Analysis launch section */}
                 <div className="p-6 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/20">
                     <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
                         <FileCheck className="w-5 h-5 text-blue-400" />
-                        Lancer l&apos;analyse PLU
+                        Lancer l&apos;analyse réglementaire
                     </h2>
                     <p className="text-sm text-slate-400 mb-4">
-                        Une fois toutes les informations complétées, lancez l&apos;analyse PLU pour obtenir les contraintes
-                        réglementaires applicables à votre projet. La première analyse est incluse dans votre forfait.
+                        Une fois toutes les informations complétées, lancez l&apos;analyse réglementaire pour obtenir les contraintes
+                        PLU/RNU applicables à votre projet. La première analyse est incluse dans votre forfait.
                     </p>
 
                     {!canLaunchPlu && (
@@ -563,7 +573,7 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                     {project.regulatoryAnalysis ? (
                         <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                            <span className="text-emerald-200 font-medium">Analyse PLU déjà effectuée</span>
+                            <span className="text-emerald-200 font-medium">Analyse réglementaire effectuée</span>
                             <Link
                                 href={`/projects/${projectId}`}
                                 className="ml-auto inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300"
@@ -585,7 +595,7 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                             ) : (
                                 <>
                                     <Zap className="w-5 h-5" />
-                                    Lancer l&apos;analyse PLU
+                                    Lancer l&apos;analyse réglementaire
                                 </>
                             )}
                         </button>
@@ -613,10 +623,10 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
                             onClick={(e) => e.stopPropagation()}
                         >
                             <h3 className="text-lg font-semibold text-white mb-2">
-                                Lancer l&apos;analyse PLU ?
+                                Lancer l&apos;analyse réglementaire ?
                             </h3>
                             <p className="text-sm text-slate-400 mb-6">
-                                Êtes-vous sûr de vouloir lancer l&apos;analyse PLU ?
+                                Êtes-vous sûr de vouloir lancer l&apos;analyse réglementaire (PLU/RNU) ?
                                 Une fois validée, toute analyse supplémentaire sera facturée{" "}
                                 <span className="text-white font-medium">{pluCreditsCost} crédits</span>.
                             </p>

@@ -106,7 +106,7 @@ export default function NewProjectPage() {
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
-            .then(async (r) => { const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); if (list.length > 0) setSelectedParcelIds([]); })
+            .then(async (r) => { const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); if (list.length > 0) setSelectedParcelIds([list[0].id]); })
             .catch(() => setCadastreError("Données cadastrales indisponibles."))
             .finally(() => setLoadingCadastre(false));
 
@@ -378,14 +378,21 @@ export default function NewProjectPage() {
                                                     <p className="text-[11px] text-amber-200">Contraintes détectées — des autorisations supplémentaires peuvent s&apos;appliquer.</p>
                                                 </div>
                                             )}
-                                            {visibleProtected.map((area: { type: string; name: string; severity?: string; sourceUrl?: string | null }, idx: number) => {
+                                            {visibleProtected.map((area: { type: string; name: string; severity?: string; sourceUrl?: string | null; description?: string }, idx: number) => {
                                                 const sevDot = area.severity === "high" ? "bg-red-400" : area.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
+                                                const typeLabel = area.type === "ABF" ? "ABF – Monuments historiques"
+                                                    : area.type === "SUP" ? "Servitude d'utilité publique"
+                                                        : area.type === "PRESCRIPTION" ? "Prescription PLU"
+                                                            : area.type === "FLOOD_ZONE" ? "Zone inondable"
+                                                                : area.type === "HERITAGE" ? "Site patrimonial"
+                                                                    : area.type === "SEISMIC" ? "Zone sismique"
+                                                                        : area.type;
                                                 return (
                                                     <div key={idx} className="flex items-start gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-700/30 transition-colors">
                                                         <span className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${sevDot}`} />
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-xs font-medium text-slate-300 truncate">{area.name}</p>
-                                                            <p className="text-[10px] text-slate-500 uppercase tracking-wide">{area.type}</p>
+                                                            <p className="text-[10px] text-slate-500 uppercase tracking-wide">{typeLabel}</p>
                                                         </div>
                                                         {area.sourceUrl && <a href={area.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:text-blue-300 shrink-0">↗</a>}
                                                     </div>

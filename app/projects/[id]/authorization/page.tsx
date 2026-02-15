@@ -1,804 +1,1065 @@
 "use client";
 
-import React, { use, useEffect, useState } from "react";
-import Link from "next/link";
+import React, { useState, use, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
+import { NextStepButton } from "@/components/NextStepButton";
 import {
-  FileCheck,
-  Loader2,
-  ArrowRight,
-  ArrowLeft,
-  MapPin,
-  Building2,
-  ClipboardList,
-  Info,
-  HelpCircle,
-  CheckCircle2,
-  AlertTriangle,
   FileText,
-  Waves,
-  Home,
-  PaintBucket,
+  ClipboardCheck,
+  HelpCircle,
+  Building2,
+  Hammer,
+  TreePine,
+  ChevronRight,
+  ChevronLeft,
+  Calculator,
+  Loader2,
+  AlertTriangle,
+  Check,
+  Droplets,
+  Fence,
+  PenTool,
   User,
   Briefcase,
+  Info,
+  Shield,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { cn } from "@/lib/utils";
 import {
   calculateDpPc,
+  estimateFloorAreaCreated,
+  type DpPcInput,
   type ProjectTypeChoice,
-  type DeterminationType,
   type SubmitterType,
+  type DeterminationType,
 } from "@/lib/dp-pc-calculator";
 import {
-  DP_DOCUMENTS,
-  PC_DOCUMENTS,
-  PC_ADDITIONAL_NOTES,
   getDocumentsForType,
 } from "@/lib/authorization-documents";
 
-type WizardStep = "choice" | "check-project" | "check-area" | "check-shelter" | "check-submitter" | "result";
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-type CheckProjectType = "new_construction" | "existing_extension" | "swimming_pool";
+type WizardStep =
+  | "choice"           // DP / PC / Check for me
+  | "check-category"   // Independent / Extension / Outdoor
+  | "outdoor-detail"   // Swimming pool / Fence / Other
+  | "check-area"       // Surface area input
+  | "pool-shelter"     // Swimming pool shelter height
+  | "check-submitter"  // Individual vs Company (only for PC)
+  | "result";          // Final result + documents + options
 
-export default function AuthorizationPage({ params }: { params: Promise<{ id: string }> }) {
+type ProjectCategory = "new_construction" | "existing_extension" | "outdoor";
+type OutdoorSubType = "swimming_pool" | "fence_gate" | "free_text";
+
+interface AreaRange {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+}
+
+const NEW_CONSTRUCTION_RANGES: AreaRange[] = [
+  { label: "< 5 m²", min: 0, max: 4.99, value: 3 },
+  { label: "5 – 20 m²", min: 5, max: 20, value: 12 },
+  { label: "> 20 m²", min: 20.01, max: 999, value: 30 },
+];
+
+const EXTENSION_RANGES_URBAN: AreaRange[] = [
+  { label: "< 20 m²", min: 0, max: 19.99, value: 10 },
+  { label: "20 – 40 m²", min: 20, max: 40, value: 30 },
+  { label: "> 40 m²", min: 40.01, max: 999, value: 50 },
+];
+
+const EXTENSION_RANGES_NON_URBAN: AreaRange[] = [
+  { label: "< 20 m²", min: 0, max: 19.99, value: 10 },
+  { label: "> 20 m²", min: 20.01, max: 999, value: 30 },
+];
+
+const POOL_RANGES: AreaRange[] = [
+  { label: "< 10 m²", min: 0, max: 9.99, value: 6 },
+  { label: "10 – 100 m²", min: 10, max: 100, value: 40 },
+  { label: "> 100 m²", min: 100.01, max: 999, value: 120 },
+];
+
+// ─── Main Component ─────────────────────────────────────────────────────────
+
+export default function AuthorizationPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id: projectId } = use(params);
+  const { user } = useAuth();
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
-  const [project, setProject] = useState<{
-    id: string;
-    name: string;
-    address: string | null;
-    parcelArea?: number | null;
-    projectType?: string | null;
-    regulatoryAnalysis?: { zoneType?: string | null } | null;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   // Wizard state
-  const [wizardStep, setWizardStep] = useState<WizardStep>("choice");
-  const [determination, setDetermination] = useState<DeterminationType | null>(null);
-  const [explanation, setExplanation] = useState("");
-  const [architectRequired, setArchitectRequired] = useState(false);
-  const [cannotOffer, setCannotOffer] = useState(false);
+  const [step, setStep] = useState<WizardStep>("choice");
+  const [saving, setSaving] = useState(false);
 
-  // "Check for me" state
-  const [checkProjectType, setCheckProjectType] = useState<CheckProjectType | null>(null);
-  const [checkArea, setCheckArea] = useState(20);
-  const [checkExistingArea, setCheckExistingArea] = useState(0);
-  const [checkShelterHeight, setCheckShelterHeight] = useState(1.5);
-  const [checkSubmitterType, setCheckSubmitterType] = useState<SubmitterType | null>(null);
+  // Choice: direct DP/PC or "check for me"
+  const [directChoice, setDirectChoice] = useState<"DP" | "PC" | null>(null);
+
+  // Check for me state
+  const [category, setCategory] = useState<ProjectCategory | null>(null);
+  const [outdoorSubType, setOutdoorSubType] = useState<OutdoorSubType | null>(null);
+  const [freeTextDescription, setFreeTextDescription] = useState("");
+
+  // Area inputs
+  const [floorArea, setFloorArea] = useState<number>(0);
+  const [existingArea, setExistingArea] = useState<number>(0);
+  const [selectedRange, setSelectedRange] = useState<AreaRange | null>(null);
+  const [useEstimator, setUseEstimator] = useState(false);
+  const [footprint, setFootprint] = useState<number>(0);
+  const [levels, setLevels] = useState<number>(1);
+  const [isUrbanZone, setIsUrbanZone] = useState(true);
+
+  // Pool
+  const [shelterHeight, setShelterHeight] = useState<number>(0);
+  const [hasShelter, setHasShelter] = useState<boolean | null>(null);
+
+  // Submitter
+  const [submitterType, setSubmitterType] = useState<SubmitterType | null>(null);
+
+  // Result
+  const [result, setResult] = useState<{
+    determination: DeterminationType;
+    explanation: string;
+    architectRequired?: boolean;
+    cannotOffer?: boolean;
+  } | null>(null);
 
   // Options
-  const [wantPluAnalysis, setWantPluAnalysis] = useState(false);
-  const [wantCerfaFill, setWantCerfaFill] = useState(false);
+  const [wantPluAnalysis, setWantPluAnalysis] = useState(true);
+  const [wantCerfa, setWantCerfa] = useState(true);
 
+  // Project data for context
+  const [projectData, setProjectData] = useState<{
+    name?: string;
+    zoneType?: string;
+    address?: string;
+  } | null>(null);
+
+  // Load project data
   useEffect(() => {
-    if (!projectId || !user) {
-      if (!authLoading) setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    let willRetry = false;
-    setLoading(true);
-    fetch(`/api/projects/${projectId}`, { credentials: "include" })
+    fetch(`/api/projects/${projectId}`)
       .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data.project) {
-          setProject(data.project);
-          return;
+      .then((d) => {
+        if (d.project) {
+          setProjectData({
+            name: d.project.name,
+            zoneType: d.project.zoneType,
+            address: d.project.address,
+          });
+          // Auto-detect urban zone from PLU zone
+          const zone = (d.project.zoneType || "").toUpperCase();
+          if (zone.startsWith("U") || zone.startsWith("AU")) {
+            setIsUrbanZone(true);
+          } else if (zone === "RNU" || zone.startsWith("A") || zone.startsWith("N")) {
+            setIsUrbanZone(false);
+          }
         }
-        if (data.error === "Unauthorized") return;
-        willRetry = true;
-        setTimeout(() => {
-          if (cancelled) return;
-          fetch(`/api/projects/${projectId}`, { credentials: "include" })
-            .then((r2) => r2.json())
-            .then((data2) => {
-              if (!cancelled && data2.project) setProject(data2.project);
-            })
-            .catch(() => { })
-            .finally(() => {
-              if (!cancelled) setLoading(false);
-            });
-        }, 600);
       })
-      .catch(() => { })
-      .finally(() => {
-        if (!cancelled && !willRetry) setLoading(false);
+      .catch(() => { });
+  }, [projectId]);
+
+  // Estimator effect
+  useEffect(() => {
+    if (useEstimator && footprint > 0 && levels >= 1) {
+      setFloorArea(estimateFloorAreaCreated(footprint, levels));
+    }
+  }, [useEstimator, footprint, levels]);
+
+  // ─── Compute result ─────────────────────────────────────────────────
+
+  function computeResult() {
+    let projectType: ProjectTypeChoice;
+    let area = floorArea;
+
+    if (directChoice) {
+      // Direct choice path
+      setResult({
+        determination: directChoice,
+        explanation: directChoice === "DP"
+          ? "Vous avez choisi une Déclaration Préalable. Voici les documents nécessaires à votre dossier."
+          : "Vous avez choisi un Permis de Construire. Voici les documents nécessaires à votre dossier.",
       });
-    return () => {
-      cancelled = true;
+      return;
+    }
+
+    // Check for me path
+    if (category === "outdoor") {
+      if (outdoorSubType === "fence_gate") {
+        projectType = "outdoor_fence";
+        area = 0;
+      } else if (outdoorSubType === "swimming_pool") {
+        projectType = "swimming_pool";
+      } else if (outdoorSubType === "free_text") {
+        projectType = "outdoor_other";
+        area = 0;
+      } else {
+        projectType = "outdoor";
+        area = 0;
+      }
+    } else if (category === "new_construction") {
+      projectType = "new_construction";
+    } else {
+      projectType = "existing_extension";
+    }
+
+    // Use range value if selected and no custom area
+    if (selectedRange && area === 0) {
+      area = selectedRange.value;
+    }
+
+    const input: DpPcInput = {
+      projectType,
+      floorAreaCreated: area,
+      existingFloorArea: category === "existing_extension" ? existingArea : undefined,
+      inUrbanZone: isUrbanZone,
+      submitterType: submitterType || undefined,
+      shelterHeight: outdoorSubType === "swimming_pool" ? shelterHeight : undefined,
     };
-  }, [projectId, user, authLoading]);
 
-  const zoneType = project?.regulatoryAnalysis?.zoneType ?? "";
-  const inUrbanZone = /^(U|AU|AUD|UD|UA|UB|UC|UE|UF|UG|UH|UI|UJ|UK|UL|UM|UN|UP|UQ|UR|US|UT|UU|UV|UW|UX|UY|UZ)/i.test(
-    String(zoneType)
-  );
+    const dpPcResult = calculateDpPc(input);
+    setResult(dpPcResult);
+  }
 
-  // ── Direct shortcut (DP or PC) ──
+  // ─── Navigation helpers ─────────────────────────────────────────────
 
-  const handleDirectChoice = (type: "DP" | "PC") => {
-    setDetermination(type);
-    setExplanation(
-      type === "DP"
-        ? "Vous avez indiqué qu'une déclaration préalable suffit pour votre projet."
-        : "Vous avez indiqué qu'un permis de construire est requis pour votre projet."
-    );
-    setArchitectRequired(false);
-    setCannotOffer(false);
-    setWizardStep("result");
-  };
+  function handleDirectChoice(choice: "DP" | "PC") {
+    setDirectChoice(choice);
+    computeDirectResult(choice);
+    setStep("result");
+  }
 
-  // ── "Check for me" wizard navigation ──
-
-  const handleCheckStart = () => {
-    setWizardStep("check-project");
-    setCheckProjectType(null);
-    setDetermination(null);
-    setExplanation("");
-  };
-
-  const handleCheckProjectNext = () => {
-    if (!checkProjectType) return;
-    setWizardStep("check-area");
-  };
-
-  const handleCheckAreaNext = () => {
-    if (checkProjectType === "swimming_pool" && checkArea >= 10 && checkArea <= 100) {
-      // Ask about shelter height
-      setWizardStep("check-shelter");
-      return;
-    }
-    // Calculate and see if we need to ask submitter type
-    performCalculation();
-  };
-
-  const handleCheckShelterNext = () => {
-    performCalculation();
-  };
-
-  const performCalculation = (overrideSubmitter?: SubmitterType) => {
-    if (!checkProjectType) return;
-
-    const submitter = overrideSubmitter ?? checkSubmitterType ?? undefined;
-    const result = calculateDpPc({
-      projectType: checkProjectType,
-      floorAreaCreated: checkArea,
-      existingFloorArea: checkProjectType === "existing_extension" ? checkExistingArea : undefined,
-      inUrbanZone,
-      submitterType: submitter,
-      shelterHeight: checkProjectType === "swimming_pool" ? checkShelterHeight : undefined,
+  function computeDirectResult(choice: "DP" | "PC") {
+    setResult({
+      determination: choice,
+      explanation: choice === "DP"
+        ? "Vous avez choisi une Déclaration Préalable. Voici les documents nécessaires à votre dossier."
+        : "Vous avez choisi un Permis de Construire. Voici les documents nécessaires à votre dossier.",
     });
+  }
 
-    // If PC is determined and we haven't asked submitter type yet, ask now
-    if (
-      (result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED") &&
-      !overrideSubmitter &&
-      !checkSubmitterType
-    ) {
-      setDetermination(result.determination);
-      setExplanation(result.explanation);
-      setArchitectRequired(result.architectRequired ?? false);
-      setCannotOffer(result.cannotOffer ?? false);
-      setWizardStep("check-submitter");
-      return;
+  function handleCheckForMe() {
+    setStep("check-category");
+  }
+
+  function handleCategorySelect(cat: ProjectCategory) {
+    setCategory(cat);
+    if (cat === "outdoor") {
+      setStep("outdoor-detail");
+    } else {
+      setStep("check-area");
+    }
+  }
+
+  function handleOutdoorSubType(sub: OutdoorSubType) {
+    setOutdoorSubType(sub);
+    if (sub === "fence_gate") {
+      // Fence always DP, go to result directly
+      const fenceResult = calculateDpPc({ projectType: "outdoor_fence", floorAreaCreated: 0 });
+      setResult(fenceResult);
+      setStep("result");
+    } else if (sub === "swimming_pool") {
+      setStep("check-area");
+    } else {
+      // free text → result with REVIEW
+      setResult({
+        determination: "REVIEW",
+        explanation: "Pour cet aménagement extérieur, le type d'autorisation dépend de la nature exacte des travaux. Nous vous recommandons de vérifier auprès de votre mairie.",
+      });
+      setStep("result");
+    }
+  }
+
+  function handleAreaNext() {
+    if (outdoorSubType === "swimming_pool" && floorArea >= 10 && floorArea <= 100) {
+      setStep("pool-shelter");
+    } else {
+      // Compute and check if submitter question is needed
+      computeAndCheckSubmitter();
+    }
+  }
+
+  function handlePoolShelterNext() {
+    computeAndCheckSubmitter();
+  }
+
+  function computeAndCheckSubmitter() {
+    // Temporarily compute to check if we need submitter question
+    let projectType: ProjectTypeChoice;
+    let area = floorArea;
+
+    if (category === "outdoor" && outdoorSubType === "swimming_pool") {
+      projectType = "swimming_pool";
+    } else if (category === "new_construction") {
+      projectType = "new_construction";
+    } else {
+      projectType = "existing_extension";
     }
 
-    setDetermination(result.determination);
-    setExplanation(result.explanation);
-    setArchitectRequired(result.architectRequired ?? false);
-    setCannotOffer(result.cannotOffer ?? false);
-    setWizardStep("result");
-  };
+    if (selectedRange && area === 0) {
+      area = selectedRange.value;
+    }
 
-  const handleSubmitterChoice = (type: SubmitterType) => {
-    setCheckSubmitterType(type);
-    performCalculation(type);
-  };
+    const input: DpPcInput = {
+      projectType,
+      floorAreaCreated: area,
+      existingFloorArea: category === "existing_extension" ? existingArea : undefined,
+      inUrbanZone: isUrbanZone,
+      shelterHeight: outdoorSubType === "swimming_pool" ? shelterHeight : undefined,
+    };
 
-  // ── Continue to payment ──
+    const tempResult = calculateDpPc(input);
 
-  const handleContinue = async () => {
-    if (!determination || !projectId || determination === "REVIEW" || determination === "NONE") return;
+    // Only ask for submitter if result is PC (not DP or NONE)
+    if (tempResult.determination === "PC") {
+      setStep("check-submitter");
+    } else {
+      setResult(tempResult);
+      setStep("result");
+    }
+  }
+
+  function handleSubmitterNext() {
+    computeResult();
+    setStep("result");
+  }
+
+  function goBack() {
+    switch (step) {
+      case "check-category":
+        setStep("choice");
+        break;
+      case "outdoor-detail":
+        setStep("check-category");
+        break;
+      case "check-area":
+        if (category === "outdoor") {
+          setStep("outdoor-detail");
+        } else {
+          setStep("check-category");
+        }
+        break;
+      case "pool-shelter":
+        setStep("check-area");
+        break;
+      case "check-submitter":
+        if (outdoorSubType === "swimming_pool") {
+          if (floorArea >= 10 && floorArea <= 100) {
+            setStep("pool-shelter");
+          } else {
+            setStep("check-area");
+          }
+        } else {
+          setStep("check-area");
+        }
+        break;
+      case "result":
+        if (directChoice) {
+          setDirectChoice(null);
+          setResult(null);
+          setStep("choice");
+        } else {
+          setResult(null);
+          // Go back to the step before result
+          if (category === "outdoor" && outdoorSubType === "fence_gate") {
+            setStep("outdoor-detail");
+          } else if (category === "outdoor" && outdoorSubType === "free_text") {
+            setStep("outdoor-detail");
+          } else if (submitterType) {
+            setStep("check-submitter");
+          } else {
+            setStep("check-area");
+          }
+        }
+        break;
+    }
+  }
+
+  // ─── Save & Continue ────────────────────────────────────────────────
+
+  async function saveAndContinue() {
+    if (!result) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      const determination = result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination;
+      await fetch(`/api/projects/${projectId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          authorizationType: determination === "ARCHITECT_REQUIRED" ? "PC" : determination,
-          authorizationExplanation: explanation,
-          wantPluAnalysis,
-          wantCerfaFill,
-          architectRequired,
+          authorizationType: determination,
+          authorizationExplanation: result.explanation,
+          projectType: category === "new_construction" ? "construction"
+            : category === "existing_extension" ? "extension"
+              : category === "outdoor" ? "outdoor"
+                : undefined,
+          projectDescription: {
+            category,
+            outdoorSubType,
+            freeTextDescription: freeTextDescription || undefined,
+            floorAreaCreated: floorArea || undefined,
+            existingFloorArea: existingArea || undefined,
+            submitterType,
+            architectRequired: result.architectRequired || false,
+            wantPluAnalysis,
+            wantCerfa,
+            isUrbanZone,
+            shelterHeight: shelterHeight || undefined,
+          },
         }),
-        credentials: "include",
       });
-      if (res.ok) {
-        router.push(`/projects/${projectId}/payment`);
-      }
-    } catch {
-      router.push(`/projects/${projectId}/payment?auth=${determination}`);
+      router.push(`/projects/${projectId}/payment`);
+    } catch (err) {
+      console.error("Save failed:", err);
     }
     setSaving(false);
-  };
-
-  // ── Render ──
-
-  const showLoading = authLoading || (!!user && !!projectId && loading);
-  if (showLoading) {
-    return (
-      <Navigation>
-        <div className="p-6 flex flex-col items-center justify-center min-h-[40vh] gap-3">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-          <p className="text-slate-400 text-sm">Loading project…</p>
-        </div>
-      </Navigation>
-    );
   }
 
-  if (!project) {
-    return (
-      <Navigation>
-        <div className="p-6 max-w-2xl mx-auto">
-          <p className="text-slate-400">Project not found.</p>
-          <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block">
-            ← Back to projects
-          </Link>
-        </div>
-      </Navigation>
-    );
-  }
+  // ─── Step Progress ──────────────────────────────────────────────────
 
-  const documents = getDocumentsForType(determination);
-  const isPC = determination === "PC" || determination === "ARCHITECT_REQUIRED";
-  const canContinue = determination && determination !== "REVIEW" && determination !== "NONE" && !cannotOffer;
+  const stepLabels = ["Type", "Détails", "Résultat"];
+  const stepIndex = step === "choice" ? 0
+    : step === "result" ? 2
+      : 1;
 
-  const displayLabel =
-    determination === "DP"
-      ? "Déclaration Préalable"
-      : determination === "PC"
-        ? "Permis de Construire"
-        : determination === "ARCHITECT_REQUIRED"
-          ? "Permis de Construire + Architecte obligatoire"
-          : determination === "NONE"
-            ? "Aucune autorisation nécessaire"
-            : null;
+  // ─── Render ─────────────────────────────────────────────────────────
 
   return (
     <Navigation>
-      <div className="p-6 lg:p-8 max-w-2xl mx-auto">
-        <Link
-          href={`/projects/${projectId}`}
-          className="text-sm text-slate-400 hover:text-white inline-flex items-center gap-1 mb-6"
-        >
-          ← Project overview
-        </Link>
-        <h1 className="text-2xl lg:text-3xl font-bold text-white mb-2 flex items-center gap-3">
-          <FileCheck className="w-8 h-8 text-blue-400" />
-          De quoi avez-vous besoin ?
-        </h1>
-        <p className="text-slate-400 mb-8">
-          Déterminez le type d&apos;autorisation requis pour votre projet et découvrez les documents qui seront produits.
-        </p>
+      <div className="min-h-screen p-4 lg:p-8">
+        <div className="max-w-3xl mx-auto space-y-6">
 
-        {/* Project info bar */}
-        {project.address && (
-          <div className="mb-6 p-4 rounded-xl bg-slate-800/50 border border-white/10 flex items-center gap-3">
-            <MapPin className="w-5 h-5 text-slate-400 shrink-0" />
-            <div>
-              <p className="font-medium text-white">{project.name}</p>
-              <p className="text-sm text-slate-400">{project.address}</p>
-              {zoneType ? (
-                <p className="text-xs text-slate-500 mt-1">Zone: {zoneType}</p>
-              ) : (
-                <p className="text-xs text-slate-500 mt-1 italic">
-                  Zone PLU/RNU non détectée automatiquement.
-                </p>
-              )}
-            </div>
+          {/* Header */}
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold text-white">
+              Autorisation d&apos;urbanisme
+            </h1>
+            {projectData?.name && (
+              <p className="text-sm text-slate-400">{projectData.name}</p>
+            )}
+            {projectData?.zoneType && (
+              <span className="inline-block px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-400 text-xs font-semibold">
+                Zone {projectData.zoneType}
+              </span>
+            )}
           </div>
-        )}
 
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: choice — Three main options */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "choice" && (
-          <div className="space-y-4">
-            <button
-              type="button"
-              onClick={() => handleDirectChoice("DP")}
-              className="w-full flex items-start gap-4 p-5 rounded-2xl bg-slate-800/50 border border-white/10 text-left hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all group"
-            >
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0 group-hover:bg-emerald-500/30">
-                <ClipboardList className="w-6 h-6 text-emerald-400" />
-              </div>
-              <div>
-                <p className="font-semibold text-white text-lg">Déclaration Préalable</p>
-                <p className="text-sm text-slate-400 mt-1">
-                  Je sais que j&apos;ai besoin d&apos;une déclaration préalable de travaux.
-                </p>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleDirectChoice("PC")}
-              className="w-full flex items-start gap-4 p-5 rounded-2xl bg-slate-800/50 border border-white/10 text-left hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group"
-            >
-              <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0 group-hover:bg-amber-500/30">
-                <Building2 className="w-6 h-6 text-amber-400" />
-              </div>
-              <div>
-                <p className="font-semibold text-white text-lg">Permis de Construire</p>
-                <p className="text-sm text-slate-400 mt-1">
-                  Je sais que j&apos;ai besoin d&apos;un permis de construire.
-                </p>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCheckStart}
-              className="w-full flex items-start gap-4 p-5 rounded-2xl bg-slate-800/50 border border-white/10 text-left hover:border-blue-500/40 hover:bg-blue-500/5 transition-all group"
-            >
-              <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center shrink-0 group-hover:bg-blue-500/30">
-                <HelpCircle className="w-6 h-6 text-blue-400" />
-              </div>
-              <div>
-                <p className="font-semibold text-white text-lg">Vérifiez pour moi</p>
-                <p className="text-sm text-slate-400 mt-1">
-                  Je ne sais pas, aidez-moi à déterminer le type d&apos;autorisation nécessaire.
-                </p>
-              </div>
-            </button>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: check-project — "What is your project?" */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "check-project" && (
-          <div className="space-y-5">
-            <div className="mb-2 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-start gap-3">
-              <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-              <p className="text-sm text-slate-300">
-                Répondez à quelques questions pour déterminer automatiquement le type d&apos;autorisation requis.
-              </p>
-            </div>
-
-            <h2 className="text-lg font-semibold text-white">Quel est votre projet ?</h2>
-            <div className="space-y-3">
-              {([
-                { value: "new_construction" as CheckProjectType, label: "Construction neuve (indépendante)", icon: Home, desc: "Maison, garage, abri de jardin, annexe…" },
-                { value: "existing_extension" as CheckProjectType, label: "Travaux sur bâtiment existant", icon: PaintBucket, desc: "Extension, surélévation, modification de façade, changement d'usage…" },
-                { value: "swimming_pool" as CheckProjectType, label: "Piscine", icon: Waves, desc: "Construction d'une piscine avec ou sans abri" },
-              ]).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setCheckProjectType(opt.value)}
-                  className={`w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all ${checkProjectType === opt.value
-                      ? "bg-blue-500/20 border-2 border-blue-500 ring-1 ring-blue-500/30"
-                      : "bg-slate-800/50 border border-white/10 hover:bg-slate-800 hover:border-white/20"
-                    }`}
-                >
-                  <opt.icon className={`w-5 h-5 shrink-0 mt-0.5 ${checkProjectType === opt.value ? "text-blue-400" : "text-slate-500"}`} />
-                  <div>
-                    <p className={`font-medium ${checkProjectType === opt.value ? "text-blue-200" : "text-white"}`}>
-                      {opt.label}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-0.5">{opt.desc}</p>
+          {/* Step progress */}
+          <div className="flex items-center justify-center gap-2">
+            {stepLabels.map((label, i) => (
+              <React.Fragment key={label}>
+                {i > 0 && <div className={cn("w-12 h-0.5", i <= stepIndex ? "bg-blue-500" : "bg-slate-700")} />}
+                <div className="flex items-center gap-1.5">
+                  <div className={cn(
+                    "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all",
+                    i < stepIndex ? "bg-blue-500 text-white" :
+                      i === stepIndex ? "bg-blue-500/20 text-blue-400 ring-2 ring-blue-500/50" :
+                        "bg-slate-800 text-slate-500"
+                  )}>
+                    {i < stepIndex ? <Check className="w-3.5 h-3.5" /> : i + 1}
                   </div>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setWizardStep("choice")}
-                className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" /> Retour
-              </button>
-              <button
-                type="button"
-                onClick={handleCheckProjectNext}
-                disabled={!checkProjectType}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg disabled:opacity-50"
-              >
-                Suivant <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+                  <span className={cn("text-xs font-medium hidden sm:inline", i === stepIndex ? "text-blue-400" : "text-slate-500")}>
+                    {label}
+                  </span>
+                </div>
+              </React.Fragment>
+            ))}
           </div>
-        )}
 
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: check-area — "What surface area?" */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "check-area" && (
-          <div className="space-y-5">
-            <h2 className="text-lg font-semibold text-white">
-              {checkProjectType === "swimming_pool"
-                ? "Quelle est la surface du bassin ?"
-                : "Quelle surface sera créée ?"}
-            </h2>
-
+          {/* ═══ STEP: Initial Choice ═══ */}
+          {step === "choice" && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">
-                  {checkProjectType === "swimming_pool"
-                    ? "Surface du bassin (m²)"
-                    : "Surface de plancher créée (m²)"}
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={checkArea}
-                  onChange={(e) => setCheckArea(Number(e.target.value) || 0)}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white text-lg font-medium"
+              <p className="text-center text-slate-300 text-sm">
+                De quelle autorisation avez-vous besoin ?
+              </p>
+              <div className="grid gap-3">
+                <ChoiceCard
+                  icon={<FileText className="w-6 h-6" />}
+                  title="Déclaration Préalable (DP)"
+                  description="Travaux légers : petites extensions, clôtures, piscines, modifications extérieures"
+                  color="emerald"
+                  onClick={() => handleDirectChoice("DP")}
+                />
+                <ChoiceCard
+                  icon={<ClipboardCheck className="w-6 h-6" />}
+                  title="Permis de Construire (PC)"
+                  description="Constructions importantes, extensions > 40 m², changement de destination"
+                  color="purple"
+                  onClick={() => handleDirectChoice("PC")}
+                />
+                <ChoiceCard
+                  icon={<HelpCircle className="w-6 h-6" />}
+                  title="Je ne sais pas, vérifiez pour moi"
+                  description="Répondez à quelques questions pour déterminer l'autorisation requise"
+                  color="blue"
+                  onClick={handleCheckForMe}
+                  highlight
                 />
               </div>
+            </div>
+          )}
 
-              {checkProjectType === "existing_extension" && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">
-                    Surface existante avant travaux (m²)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={checkExistingArea}
-                    onChange={(e) => setCheckExistingArea(Number(e.target.value) || 0)}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+          {/* ═══ STEP: Category Selection ═══ */}
+          {step === "check-category" && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+              <p className="text-center text-slate-300 text-sm">
+                Quel type de projet réalisez-vous ?
+              </p>
+              <p className="text-center text-slate-500 text-xs">
+                Vous pouvez sélectionner une seule catégorie
+              </p>
+              <div className="grid gap-3">
+                <ChoiceCard
+                  icon={<Building2 className="w-6 h-6" />}
+                  title="Construction indépendante"
+                  description="Maison, garage, abri de jardin, annexe, carport, serre"
+                  color="blue"
+                  onClick={() => handleCategorySelect("new_construction")}
+                />
+                <ChoiceCard
+                  icon={<Hammer className="w-6 h-6" />}
+                  title="Travaux sur bâtiment existant"
+                  description="Extension, surélévation, modification de façade, changement d'usage"
+                  color="amber"
+                  onClick={() => handleCategorySelect("existing_extension")}
+                />
+                <ChoiceCard
+                  icon={<TreePine className="w-6 h-6" />}
+                  title="Aménagement extérieur"
+                  description="Piscine, clôture, portail, terrasse, mur"
+                  color="emerald"
+                  onClick={() => handleCategorySelect("outdoor")}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ═══ STEP: Outdoor Detail ═══ */}
+          {step === "outdoor-detail" && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+              <p className="text-center text-slate-300 text-sm">
+                Quel type d&apos;aménagement extérieur ?
+              </p>
+              <div className="grid gap-3">
+                <ChoiceCard
+                  icon={<Droplets className="w-6 h-6" />}
+                  title="Piscine"
+                  description="Bassin, abri de piscine, couverture"
+                  color="blue"
+                  onClick={() => handleOutdoorSubType("swimming_pool")}
+                />
+                <ChoiceCard
+                  icon={<Fence className="w-6 h-6" />}
+                  title="Clôture et/ou portail"
+                  description="Soumis à déclaration préalable"
+                  color="emerald"
+                  onClick={() => handleOutdoorSubType("fence_gate")}
+                  badge="→ DP"
+                />
+                <ChoiceCard
+                  icon={<PenTool className="w-6 h-6" />}
+                  title="Autre aménagement"
+                  description="Terrasse, mur, abri de jardin fixe, etc."
+                  color="slate"
+                  onClick={() => handleOutdoorSubType("free_text")}
+                />
+              </div>
+              {outdoorSubType === "free_text" && (
+                <div className="rounded-xl bg-slate-800/60 border border-white/10 p-4">
+                  <label className="text-sm text-slate-300 mb-2 block">Décrivez votre projet :</label>
+                  <textarea
+                    value={freeTextDescription}
+                    onChange={(e) => setFreeTextDescription(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg bg-slate-700/60 border border-white/10 text-white placeholder-slate-500 text-sm resize-none"
+                    rows={3}
+                    placeholder="Ex: Terrasse en bois de 25 m², muret de soutènement..."
                   />
                 </div>
               )}
-
-              {/* Quick reference */}
-              <div className="p-3 rounded-xl bg-slate-800/50 border border-white/10">
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Rappel des seuils</p>
-                {checkProjectType === "new_construction" && (
-                  <ul className="text-xs text-slate-500 space-y-1">
-                    <li>• Moins de 5 m² → Aucune autorisation</li>
-                    <li>• 5 à 20 m² → Déclaration préalable</li>
-                    <li>• Plus de 20 m² → Permis de construire</li>
-                    <li>• Surface totale {">"} 150 m² → Architecte obligatoire</li>
-                  </ul>
-                )}
-                {checkProjectType === "existing_extension" && (
-                  <ul className="text-xs text-slate-500 space-y-1">
-                    <li>• Moins de 20 m² → Déclaration préalable</li>
-                    <li>• 20 à 40 m² en zone urbaine → Vérification surface totale</li>
-                    <li>• Plus de 40 m² → Permis de construire</li>
-                    <li>• Surface totale {">"} 150 m² → Architecte obligatoire</li>
-                  </ul>
-                )}
-                {checkProjectType === "swimming_pool" && (
-                  <ul className="text-xs text-slate-500 space-y-1">
-                    <li>• Moins de 10 m² → Aucune autorisation</li>
-                    <li>• 10 à 100 m² → Déclaration préalable</li>
-                    <li>• Abri {">"} 1,80 m → Permis de construire</li>
-                    <li>• Plus de 100 m² → Permis de construire</li>
-                  </ul>
-                )}
-              </div>
             </div>
+          )}
 
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setWizardStep("check-project")}
-                className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" /> Retour
-              </button>
-              <button
-                type="button"
-                onClick={handleCheckAreaNext}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg"
-              >
-                Suivant <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
+          {/* ═══ STEP: Area Input ═══ */}
+          {step === "check-area" && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+              <p className="text-center text-slate-300 text-sm">
+                {outdoorSubType === "swimming_pool"
+                  ? "Quelle est la surface du bassin ?"
+                  : category === "new_construction"
+                    ? "Quelle surface de plancher allez-vous créer ?"
+                    : "Quelle surface de plancher l'extension va-t-elle créer ?"}
+              </p>
 
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: check-shelter — Swimming pool shelter height */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "check-shelter" && (
-          <div className="space-y-5">
-            <h2 className="text-lg font-semibold text-white">Votre piscine a-t-elle un abri ?</h2>
-            <p className="text-sm text-slate-400">
-              Si l&apos;abri dépasse 1,80 m de hauteur, un permis de construire est nécessaire au lieu d&apos;une déclaration préalable.
-            </p>
-
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => { setCheckShelterHeight(0); handleCheckShelterNext(); }}
-                className="w-full p-4 rounded-xl bg-slate-800/50 border border-white/10 text-left hover:bg-slate-800 hover:border-white/20 transition-all"
-              >
-                <p className="font-medium text-white">Pas d&apos;abri</p>
-                <p className="text-xs text-slate-500 mt-0.5">Piscine à ciel ouvert</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCheckShelterHeight(1.5); handleCheckShelterNext(); }}
-                className="w-full p-4 rounded-xl bg-slate-800/50 border border-white/10 text-left hover:bg-slate-800 hover:border-white/20 transition-all"
-              >
-                <p className="font-medium text-white">Abri ≤ 1,80 m</p>
-                <p className="text-xs text-slate-500 mt-0.5">Couverture basse ou volet roulant</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setCheckShelterHeight(2.0); handleCheckShelterNext(); }}
-                className="w-full p-4 rounded-xl bg-slate-800/50 border border-white/10 text-left hover:bg-slate-800 hover:border-white/20 transition-all"
-              >
-                <p className="font-medium text-white">Abri {">"} 1,80 m</p>
-                <p className="text-xs text-slate-500 mt-0.5">Abri haut permettant de se tenir debout</p>
-              </button>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setWizardStep("check-area")}
-                className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" /> Retour
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: check-submitter — Individual or company? */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "check-submitter" && (
-          <div className="space-y-5">
-            <h2 className="text-lg font-semibold text-white">
-              Déposez-vous en tant que particulier ou entreprise ?
-            </h2>
-            <p className="text-sm text-slate-400">
-              Si vous déposez en tant qu&apos;entreprise (personne morale), le recours à un architecte est obligatoire pour un permis de construire.
-            </p>
-
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => handleSubmitterChoice("individual")}
-                className="w-full flex items-center gap-4 p-5 rounded-xl bg-slate-800/50 border border-white/10 text-left hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all"
-              >
-                <User className="w-6 h-6 text-emerald-400" />
-                <div>
-                  <p className="font-medium text-white">Particulier</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Personne physique</p>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSubmitterChoice("company")}
-                className="w-full flex items-center gap-4 p-5 rounded-xl bg-slate-800/50 border border-white/10 text-left hover:border-amber-500/40 hover:bg-amber-500/5 transition-all"
-              >
-                <Briefcase className="w-6 h-6 text-amber-400" />
-                <div>
-                  <p className="font-medium text-white">Entreprise</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Personne morale (SCI, SARL, etc.)</p>
-                </div>
-              </button>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setWizardStep("check-area")}
-                className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" /> Retour
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* STEP: result — Determination + Document list + Options */}
-        {/* ═══════════════════════════════════════════════════════════════════ */}
-        {wizardStep === "result" && (
-          <div className="space-y-6">
-            {/* Determination result */}
-            {explanation && (
-              <div className={`p-5 rounded-xl border ${determination === "NONE"
-                  ? "bg-slate-800/50 border-slate-500/30"
-                  : determination === "DP"
-                    ? "bg-emerald-500/10 border-emerald-500/30"
-                    : determination === "ARCHITECT_REQUIRED"
-                      ? "bg-red-500/10 border-red-500/30"
-                      : "bg-amber-500/10 border-amber-500/30"
-                }`}>
-                <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
-                  {determination === "NONE" ? (
-                    <CheckCircle2 className="w-5 h-5 text-slate-400" />
-                  ) : determination === "DP" ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  ) : determination === "ARCHITECT_REQUIRED" ? (
-                    <AlertTriangle className="w-5 h-5 text-red-400" />
-                  ) : (
-                    <Building2 className="w-5 h-5 text-amber-400" />
-                  )}
-                  {displayLabel ?? determination}
-                </h3>
-                <p className="text-slate-300 text-sm">{explanation}</p>
-                {cannotOffer && (
-                  <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                    <p className="text-xs text-red-300">
-                      <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
-                      Ce type de projet nécessite le recours à un architecte. Notre plateforme ne peut pas prendre en charge ce dossier.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Document list — show for DP and PC */}
-            {determination && determination !== "NONE" && determination !== "REVIEW" && (
-              <div className="p-5 rounded-xl bg-slate-800/50 border border-white/10">
-                <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-blue-400" />
-                  Documents qui seront produits
-                </h3>
-                <ul className="space-y-2">
-                  {documents.map((doc) => (
-                    <li
-                      key={doc.code}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-slate-700/50 border border-white/5"
-                    >
-                      <span className="text-xs font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded shrink-0">
-                        {doc.code}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white">{doc.label}</p>
-                        {doc.description && (
-                          <p className="text-xs text-slate-500 mt-0.5">{doc.description}</p>
-                        )}
-                      </div>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500/50 shrink-0" />
-                    </li>
-                  ))}
-                </ul>
-                {isPC && (
-                  <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                    <p className="text-xs font-medium text-amber-300 mb-1.5">
-                      <Info className="w-3.5 h-3.5 inline mr-1" />
-                      Notes pour les maisons individuelles
-                    </p>
-                    <ul className="text-xs text-slate-400 space-y-1">
-                      {PC_ADDITIONAL_NOTES.map((note, i) => (
-                        <li key={i}>• {note}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Optional features */}
-            {determination && determination !== "NONE" && determination !== "REVIEW" && !cannotOffer && (
-              <div className="p-5 rounded-xl bg-slate-800/50 border border-white/10">
-                <h3 className="font-semibold text-white mb-4">Options complémentaires</h3>
-                <div className="space-y-3">
-                  <label
-                    className={`flex items-start gap-3 p-4 rounded-xl cursor-pointer transition-all ${wantPluAnalysis
-                        ? "bg-blue-500/15 border-2 border-blue-500 ring-1 ring-blue-500/20"
-                        : "bg-slate-700/50 border border-white/10 hover:bg-slate-700"
-                      }`}
+              {/* Quick range buttons */}
+              <div className="flex flex-wrap gap-2 justify-center">
+                {(outdoorSubType === "swimming_pool"
+                  ? POOL_RANGES
+                  : category === "new_construction"
+                    ? NEW_CONSTRUCTION_RANGES
+                    : isUrbanZone
+                      ? EXTENSION_RANGES_URBAN
+                      : EXTENSION_RANGES_NON_URBAN
+                ).map((range) => (
+                  <button
+                    key={range.label}
+                    type="button"
+                    onClick={() => {
+                      setSelectedRange(range);
+                      setFloorArea(range.value);
+                      setUseEstimator(false);
+                    }}
+                    className={cn(
+                      "px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+                      selectedRange?.label === range.label
+                        ? "bg-blue-500/20 text-blue-400 border-blue-500/40 ring-2 ring-blue-500/20"
+                        : "bg-slate-800/60 text-slate-300 border-white/10 hover:bg-slate-700/60 hover:border-white/20"
+                    )}
                   >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Or precise input */}
+              <div className="rounded-xl bg-slate-800/40 border border-white/10 p-4 space-y-3">
+                <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">
+                  Ou saisissez une valeur précise
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    value={floorArea || ""}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setFloorArea(v);
+                      setSelectedRange(null);
+                      setUseEstimator(false);
+                    }}
+                    className="flex-1 px-4 py-2.5 rounded-lg bg-slate-700/60 border border-white/10 text-white text-sm"
+                    placeholder={outdoorSubType === "swimming_pool" ? "Surface du bassin (m²)" : "Surface de plancher (m²)"}
+                    min={0}
+                  />
+                  <span className="text-slate-400 text-sm font-medium">m²</span>
+                </div>
+
+                {/* Floor area estimator (not for pools) */}
+                {outdoorSubType !== "swimming_pool" && (
+                  <div className="border-t border-white/5 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setUseEstimator(!useEstimator)}
+                      className="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      <Calculator className="w-3.5 h-3.5" />
+                      {useEstimator ? "Masquer l'estimateur" : "Estimer à partir de l'emprise au sol"}
+                    </button>
+                    {useEstimator && (
+                      <div className="mt-3 space-y-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] text-slate-500 mb-1 block">Emprise au sol (m²)</label>
+                            <input
+                              type="number"
+                              value={footprint || ""}
+                              onChange={(e) => setFootprint(Number(e.target.value))}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-700/60 border border-white/10 text-white text-sm"
+                              min={0}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500 mb-1 block">Nombre de niveaux</label>
+                            <input
+                              type="number"
+                              value={levels}
+                              onChange={(e) => setLevels(Math.max(1, Number(e.target.value)))}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-700/60 border border-white/10 text-white text-sm"
+                              min={1}
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Estimation : {footprint} × {levels} × 0,79 = <span className="text-blue-400 font-semibold">{estimateFloorAreaCreated(footprint, levels)} m²</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Existing area for extensions */}
+              {category === "existing_extension" && (
+                <div className="rounded-xl bg-slate-800/40 border border-white/10 p-4 space-y-2">
+                  <label className="text-sm text-slate-300">
+                    Surface de plancher existante du bâtiment (m²)
+                  </label>
+                  <input
+                    type="number"
+                    value={existingArea || ""}
+                    onChange={(e) => setExistingArea(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 rounded-lg bg-slate-700/60 border border-white/10 text-white text-sm"
+                    placeholder="Ex: 120"
+                    min={0}
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Utilisé pour vérifier le seuil des 150 m² (architecte obligatoire)
+                  </p>
+                </div>
+              )}
+
+              {/* Urban zone toggle for extensions */}
+              {category === "existing_extension" && (
+                <div className="rounded-xl bg-slate-800/40 border border-white/10 p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-300">Zone urbaine (PLU)</p>
+                    <p className="text-[11px] text-slate-500">
+                      {isUrbanZone ? "Seuil DP : 40 m²" : "Seuil DP : 20 m²"}
+                      {projectData?.zoneType && <span className="ml-1 text-blue-400">• Zone {projectData.zoneType} détectée</span>}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsUrbanZone(!isUrbanZone)}
+                    className={cn(
+                      "w-12 h-6 rounded-full transition-colors relative",
+                      isUrbanZone ? "bg-blue-500" : "bg-slate-600"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform",
+                      isUrbanZone ? "translate-x-6" : "translate-x-0.5"
+                    )} />
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAreaNext}
+                disabled={floorArea <= 0 && !selectedRange}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                Continuer <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ═══ STEP: Pool Shelter ═══ */}
+          {step === "pool-shelter" && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+              <p className="text-center text-slate-300 text-sm">
+                La piscine a-t-elle un abri ou une couverture ?
+              </p>
+              <div className="grid gap-3">
+                <ChoiceCard
+                  icon={<Check className="w-6 h-6" />}
+                  title="Oui, avec abri"
+                  description="Abri haut, couverture fixe ou télescopique"
+                  color="amber"
+                  selected={hasShelter === true}
+                  onClick={() => setHasShelter(true)}
+                />
+                <ChoiceCard
+                  icon={<Droplets className="w-6 h-6" />}
+                  title="Non, piscine ouverte"
+                  description="Sans couverture fixe"
+                  color="blue"
+                  selected={hasShelter === false}
+                  onClick={() => { setHasShelter(false); setShelterHeight(0); }}
+                />
+              </div>
+              {hasShelter && (
+                <div className="rounded-xl bg-slate-800/40 border border-white/10 p-4 space-y-2">
+                  <label className="text-sm text-slate-300">Hauteur de l&apos;abri (m)</label>
+                  <input
+                    type="number"
+                    value={shelterHeight || ""}
+                    onChange={(e) => setShelterHeight(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 rounded-lg bg-slate-700/60 border border-white/10 text-white text-sm"
+                    placeholder="Ex: 1.80"
+                    step={0.1}
+                    min={0}
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Abri &gt; 1,80 m de haut → Permis de Construire requis
+                  </p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handlePoolShelterNext}
+                disabled={hasShelter === null || (hasShelter && shelterHeight <= 0)}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                Continuer <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ═══ STEP: Submitter Type ═══ */}
+          {step === "check-submitter" && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+              <p className="text-center text-slate-300 text-sm">
+                Qui dépose le dossier ?
+              </p>
+              <p className="text-center text-slate-500 text-xs">
+                Les personnes morales (sociétés) doivent obligatoirement recourir à un architecte
+              </p>
+              <div className="grid gap-3">
+                <ChoiceCard
+                  icon={<User className="w-6 h-6" />}
+                  title="Particulier"
+                  description="Personne physique (individu)"
+                  color="blue"
+                  selected={submitterType === "individual"}
+                  onClick={() => setSubmitterType("individual")}
+                />
+                <ChoiceCard
+                  icon={<Briefcase className="w-6 h-6" />}
+                  title="Entreprise / Société"
+                  description="Personne morale (SCI, SARL, SAS…)"
+                  color="amber"
+                  selected={submitterType === "company"}
+                  onClick={() => setSubmitterType("company")}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSubmitterNext}
+                disabled={!submitterType}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                Voir le résultat <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ═══ STEP: Result ═══ */}
+          {step === "result" && result && (
+            <div className="space-y-4">
+              <BackButton onClick={goBack} />
+
+              {/* Determination badge */}
+              <div className={cn(
+                "rounded-2xl border p-6 text-center space-y-3",
+                result.determination === "DP" ? "bg-emerald-500/10 border-emerald-500/30" :
+                  result.determination === "PC" ? "bg-purple-500/10 border-purple-500/30" :
+                    result.determination === "ARCHITECT_REQUIRED" ? "bg-amber-500/10 border-amber-500/30" :
+                      result.determination === "NONE" ? "bg-slate-800/40 border-white/10" :
+                        "bg-blue-500/10 border-blue-500/30"
+              )}>
+                <div className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-lg font-bold",
+                  result.determination === "DP" ? "bg-emerald-500/20 text-emerald-400" :
+                    result.determination === "PC" ? "bg-purple-500/20 text-purple-400" :
+                      result.determination === "ARCHITECT_REQUIRED" ? "bg-amber-500/20 text-amber-400" :
+                        result.determination === "NONE" ? "bg-slate-700/50 text-slate-300" :
+                          "bg-blue-500/20 text-blue-400"
+                )}>
+                  {result.determination === "DP" && <FileText className="w-5 h-5" />}
+                  {result.determination === "PC" && <ClipboardCheck className="w-5 h-5" />}
+                  {result.determination === "ARCHITECT_REQUIRED" && <AlertTriangle className="w-5 h-5" />}
+                  {result.determination === "NONE" && <Check className="w-5 h-5" />}
+                  {result.determination === "REVIEW" && <Info className="w-5 h-5" />}
+                  {result.determination === "DP" ? "Déclaration Préalable"
+                    : result.determination === "PC" ? "Permis de Construire"
+                      : result.determination === "ARCHITECT_REQUIRED" ? "Architecte Obligatoire"
+                        : result.determination === "NONE" ? "Aucune autorisation requise"
+                          : "Vérification requise"}
+                </div>
+                <p className="text-sm text-slate-300 leading-relaxed max-w-lg mx-auto">
+                  {result.explanation}
+                </p>
+              </div>
+
+              {/* Architect warning */}
+              {result.architectRequired && (
+                <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-4 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-300">Architecte obligatoire</p>
+                    <p className="text-xs text-amber-200/70 mt-1">
+                      La surface totale après travaux dépasse 150 m². Le recours à un architecte est obligatoire.
+                      UrbAssist peut préparer votre dossier, mais vous devrez faire valider les plans par un architecte DPLG.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Document list */}
+              {(result.determination === "DP" || result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED") && (
+                <div className="rounded-xl bg-slate-800/40 border border-white/10 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-semibold text-white">
+                      Documents requis
+                    </span>
+                    <span className="ml-auto text-xs text-slate-500">
+                      {getDocumentsForType(result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination).length} documents
+                    </span>
+                  </div>
+                  <div className="p-3 space-y-1 max-h-[240px] overflow-y-auto">
+                    {getDocumentsForType(result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination).map((doc, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-700/30 text-xs text-slate-300">
+                        <span className="w-5 h-5 rounded-md bg-slate-700/60 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
+                          {i + 1}
+                        </span>
+                        <span className="flex-1">{doc.label}</span>
+                        <Check className="w-3.5 h-3.5 text-emerald-500/40" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Optional features */}
+              {(result.determination === "DP" || result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED") && (
+                <div className="rounded-xl bg-slate-800/40 border border-white/10 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-white">Options</p>
+                  <label className="flex items-center gap-3 cursor-pointer group">
                     <input
                       type="checkbox"
                       checked={wantPluAnalysis}
                       onChange={(e) => setWantPluAnalysis(e.target.checked)}
-                      className="mt-1 rounded border-white/20 bg-slate-800 text-blue-500 focus:ring-blue-500 w-4 h-4"
+                      className="sr-only"
                     />
-                    <div>
-                      <p className={`font-medium text-sm ${wantPluAnalysis ? "text-blue-200" : "text-white"}`}>
-                        Analyse PLU / RNU
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Vérification automatique de la conformité de votre projet avec le règlement d&apos;urbanisme applicable.
-                        Cette analyse sera intégrée dans votre plan de masse et votre notice descriptive.
-                      </p>
+                    <div className={cn(
+                      "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
+                      wantPluAnalysis ? "bg-blue-500/20 border-blue-500 text-blue-400" : "border-slate-600 group-hover:border-slate-500"
+                    )}>
+                      {wantPluAnalysis && <Check className="w-3 h-3" />}
                     </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-200">Analyse réglementaire</p>
+                      <p className="text-[11px] text-slate-500">Analyse automatique du PLU/RNU applicable à votre parcelle</p>
+                    </div>
+                    <Shield className="w-4 h-4 text-blue-400/40" />
                   </label>
-
-                  <label
-                    className={`flex items-start gap-3 p-4 rounded-xl cursor-pointer transition-all ${wantCerfaFill
-                        ? "bg-blue-500/15 border-2 border-blue-500 ring-1 ring-blue-500/20"
-                        : "bg-slate-700/50 border border-white/10 hover:bg-slate-700"
-                      }`}
-                  >
+                  <label className="flex items-center gap-3 cursor-pointer group">
                     <input
                       type="checkbox"
-                      checked={wantCerfaFill}
-                      onChange={(e) => setWantCerfaFill(e.target.checked)}
-                      className="mt-1 rounded border-white/20 bg-slate-800 text-blue-500 focus:ring-blue-500 w-4 h-4"
+                      checked={wantCerfa}
+                      onChange={(e) => setWantCerfa(e.target.checked)}
+                      className="sr-only"
                     />
-                    <div>
-                      <p className={`font-medium text-sm ${wantCerfaFill ? "text-blue-200" : "text-white"}`}>
-                        Pré-remplissage CERFA automatique
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Remplissage automatique du formulaire CERFA de votre autorisation d&apos;urbanisme à partir des informations du projet.
-                      </p>
+                    <div className={cn(
+                      "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
+                      wantCerfa ? "bg-blue-500/20 border-blue-500 text-blue-400" : "border-slate-600 group-hover:border-slate-500"
+                    )}>
+                      {wantCerfa && <Check className="w-3 h-3" />}
                     </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-200">Remplissage CERFA</p>
+                      <p className="text-[11px] text-slate-500">Pré-remplissage automatique du formulaire officiel</p>
+                    </div>
+                    <FileText className="w-4 h-4 text-blue-400/40" />
                   </label>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* PLU analysis suggestion when not selected */}
-            {determination && determination !== "NONE" && determination !== "REVIEW" && !cannotOffer && !wantPluAnalysis && (
-              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20 flex items-start gap-3">
-                <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm text-slate-300">
-                    <span className="font-medium text-blue-300">Conseil :</span> L&apos;analyse PLU/RNU est recommandée
-                    pour vérifier la conformité réglementaire de votre projet et générer une notice descriptive complète.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setWizardStep("choice");
-                  setDetermination(null);
-                  setExplanation("");
-                  setArchitectRequired(false);
-                  setCannotOffer(false);
-                  setCheckProjectType(null);
-                  setCheckSubmitterType(null);
-                }}
-                className="px-5 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-4 h-4" /> Recommencer
-              </button>
-              {canContinue && (
+              {/* Continue to payment */}
+              {result.determination !== "NONE" && (
                 <button
-                  onClick={handleContinue}
+                  type="button"
+                  onClick={saveAndContinue}
                   disabled={saving}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg disabled:opacity-50"
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2 text-base"
                 >
                   {saving ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Enregistrement…</>
                   ) : (
-                    <>
-                      Continuer vers le paiement
-                      <ArrowRight className="w-5 h-5" />
-                    </>
+                    <>Continuer vers le paiement <ChevronRight className="w-5 h-5" /></>
                   )}
                 </button>
               )}
-              {determination === "NONE" && (
-                <Link
-                  href={`/projects/${projectId}`}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-700 text-white font-semibold hover:bg-slate-600"
-                >
-                  Retour au projet <ArrowRight className="w-5 h-5" />
-                </Link>
+
+              {result.determination === "NONE" && (
+                <NextStepButton canProceed={true} nextHref={`/projects/${projectId}`} nextLabel="Continuer" />
               )}
             </div>
-          </div>
-        )}
+          )}
+
+        </div>
       </div>
     </Navigation>
+  );
+}
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors"
+    >
+      <ChevronLeft className="w-4 h-4" />
+      Retour
+    </button>
+  );
+}
+
+function ChoiceCard({
+  icon,
+  title,
+  description,
+  color,
+  onClick,
+  highlight,
+  selected,
+  badge,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  color: string;
+  onClick: () => void;
+  highlight?: boolean;
+  selected?: boolean;
+  badge?: string;
+}) {
+  const colorMap: Record<string, { bg: string; border: string; icon: string; ring: string }> = {
+    blue: { bg: "bg-blue-500/10", border: "border-blue-500/30", icon: "text-blue-400", ring: "ring-blue-500/30" },
+    emerald: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", icon: "text-emerald-400", ring: "ring-emerald-500/30" },
+    purple: { bg: "bg-purple-500/10", border: "border-purple-500/30", icon: "text-purple-400", ring: "ring-purple-500/30" },
+    amber: { bg: "bg-amber-500/10", border: "border-amber-500/30", icon: "text-amber-400", ring: "ring-amber-500/30" },
+    slate: { bg: "bg-slate-700/30", border: "border-white/10", icon: "text-slate-400", ring: "ring-white/10" },
+  };
+  const c = colorMap[color] || colorMap.blue;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-4 p-4 rounded-xl border transition-all text-left group",
+        selected ? `${c.bg} ${c.border} ring-2 ${c.ring}` :
+          highlight ? `${c.bg} ${c.border} hover:ring-2 hover:${c.ring}` :
+            `bg-slate-800/40 border-white/10 hover:${c.bg} hover:${c.border}`
+      )}
+    >
+      <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0", c.bg, c.icon)}>
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-white">{title}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+      </div>
+      {badge && (
+        <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-500/20 text-emerald-400 shrink-0">
+          {badge}
+        </span>
+      )}
+      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 shrink-0" />
+    </button>
   );
 }

@@ -1,269 +1,258 @@
 "use client";
 
-import React, { use, useEffect, useState } from "react";
-import Link from "next/link";
+import React, { useEffect, useState, use } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
-  MapPin,
-  Loader2,
   CreditCard,
   FileText,
-  CheckCircle2,
-  Info,
+  ClipboardCheck,
   AlertTriangle,
+  Loader2,
+  Check,
+  Shield,
+  Sparkles,
+  Lock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import {
-  getDocumentsForType,
-  PC_ADDITIONAL_NOTES,
-} from "@/lib/authorization-documents";
+import { cn } from "@/lib/utils";
 
-export default function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
+export default function PaymentPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id: projectId } = use(params);
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [project, setProject] = useState<{
-    id: string;
-    name: string;
-    address: string | null;
-    authorizationType?: string | null;
-    wantPluAnalysis?: boolean;
-    wantCerfaFill?: boolean;
-    architectRequired?: boolean;
+    name?: string;
+    address?: string;
+    authorizationType?: string;
+    authorizationExplanation?: string;
+    projectDescription?: {
+      architectRequired?: boolean;
+      wantPluAnalysis?: boolean;
+      wantCerfa?: boolean;
+      category?: string;
+    };
+    paidAt?: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [credits, setCredits] = useState(0);
+
+  // Check for successful payment return
+  const success = searchParams.get("success");
 
   useEffect(() => {
-    if (!projectId || !user) {
-      if (!authLoading) setLoading(false);
-      return;
-    }
-    setLoading(true);
-    fetch(`/api/projects/${projectId}`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.project) setProject(data.project);
-      })
-      .catch(() => { })
-      .finally(() => setLoading(false));
-  }, [projectId, user, authLoading]);
+    Promise.all([
+      fetch(`/api/projects/${projectId}`).then((r) => r.json()),
+      fetch("/api/credits").then((r) => r.json()).catch(() => ({ credits: 0 })),
+    ]).then(([projectData, creditsData]) => {
+      if (projectData.project) setProject(projectData.project);
+      setCredits(creditsData.credits ?? 0);
+      setLoading(false);
+    });
+  }, [projectId]);
 
-  const handlePayment = async () => {
-    setCheckoutLoading(true);
+  // Handle successful Stripe return
+  useEffect(() => {
+    if (success === "true" && project && !project.paidAt) {
+      fetch(`/api/projects/${projectId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paidAt: new Date().toISOString() }),
+      }).then(() => {
+        router.push(`/projects/${projectId}/description`);
+      });
+    }
+  }, [success, project, projectId, router]);
+
+  async function handlePayment() {
+    setPaying(true);
     try {
-      const res = await fetch("/api/stripe/checkout", {
+      const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          projectId,
           type: "credits",
-          packageId: "credits-25",
-          projectId: projectId || undefined,
+          amount: 1,
+          successUrl: `${window.location.origin}/projects/${projectId}/description`,
+          cancelUrl: window.location.href,
         }),
-        credentials: "include",
       });
       const data = await res.json();
       if (data.url) {
-        // Mark project as paid before redirect
-        await fetch(`/api/projects/${projectId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paidAt: new Date().toISOString() }),
-          credentials: "include",
-        }).catch(() => { });
         window.location.href = data.url;
-      } else if (data.success && data.credits) {
-        // Mark project as paid
+      } else if (data.success) {
+        // Direct credit usage (demo mode)
         await fetch(`/api/projects/${projectId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paidAt: new Date().toISOString() }),
-          credentials: "include",
-        }).catch(() => { });
-        window.location.href = `/projects/${projectId}/description`;
-      } else {
-        alert(data.error || "Erreur lors du paiement");
+        });
+        router.push(`/projects/${projectId}/description`);
       }
-    } catch {
-      alert("Erreur lors du paiement");
+    } catch (err) {
+      console.error("Payment failed:", err);
     }
-    setCheckoutLoading(false);
-  };
+    setPaying(false);
+  }
 
-  const showLoading = authLoading || (!!user && !!projectId && loading);
-  if (showLoading) {
+  if (loading) {
     return (
       <Navigation>
-        <div className="p-6 flex flex-col items-center justify-center min-h-[40vh] gap-3">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-          <p className="text-slate-400 text-sm">Loading project…</p>
+        <div className="min-h-screen flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
         </div>
       </Navigation>
     );
   }
 
-  if (!project) {
-    return (
-      <Navigation>
-        <div className="p-6 max-w-2xl mx-auto">
-          <p className="text-slate-400">Project not found.</p>
-          <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block">
-            ← Back to projects
-          </Link>
-        </div>
-      </Navigation>
-    );
-  }
-
-  const authType = project.authorizationType?.toUpperCase();
+  const authType = project?.authorizationType;
+  const isDP = authType === "DP";
   const isPC = authType === "PC" || authType === "ARCHITECT_REQUIRED";
-  const documents = getDocumentsForType(project.authorizationType);
-  const displayAuthType =
-    authType === "DP"
-      ? "Déclaration Préalable"
-      : authType === "PC" || authType === "ARCHITECT_REQUIRED"
-        ? "Permis de Construire"
-        : null;
+  const architectRequired = project?.projectDescription?.architectRequired;
+  const wantPluAnalysis = project?.projectDescription?.wantPluAnalysis ?? true;
+  const wantCerfa = project?.projectDescription?.wantCerfa ?? true;
+  const alreadyPaid = !!project?.paidAt;
+
+  if (alreadyPaid) {
+    return (
+      <Navigation>
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="max-w-md w-full text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto">
+              <Check className="w-8 h-8 text-emerald-400" />
+            </div>
+            <h2 className="text-xl font-bold text-white">Paiement confirmé</h2>
+            <p className="text-sm text-slate-400">Votre dossier est actif. Vous pouvez continuer.</p>
+            <button
+              onClick={() => router.push(`/projects/${projectId}/description`)}
+              className="px-8 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/20 transition-all"
+            >
+              Continuer vers la description
+            </button>
+          </div>
+        </div>
+      </Navigation>
+    );
+  }
 
   return (
     <Navigation>
-      <div className="p-6 lg:p-8 max-w-2xl mx-auto">
-        <Link
-          href={`/projects/${projectId}/authorization`}
-          className="text-sm text-slate-400 hover:text-white inline-flex items-center gap-1 mb-6"
-        >
-          ← Retour au type d&apos;autorisation
-        </Link>
-        <h1 className="text-2xl lg:text-3xl font-bold text-white mb-2 flex items-center gap-3">
-          <CreditCard className="w-8 h-8 text-emerald-400" />
-          Récapitulatif & Paiement
-        </h1>
-        <p className="text-slate-400 mb-8">
-          Vérifiez votre commande puis procédez au paiement pour débloquer la production des documents.
-        </p>
+      <div className="min-h-screen p-4 lg:p-8 flex items-start justify-center">
+        <div className="max-w-lg w-full space-y-5">
 
-        {/* Project info */}
-        {project.address && (
-          <div className="mb-6 p-4 rounded-xl bg-slate-800/50 border border-white/10 flex items-center gap-3">
-            <MapPin className="w-5 h-5 text-slate-400 shrink-0" />
-            <div>
-              <p className="font-medium text-white">{project.name}</p>
-              <p className="text-sm text-slate-400">{project.address}</p>
-              {displayAuthType && (
-                <p className="text-xs text-slate-500 mt-1">
-                  Autorisation : {displayAuthType}
+          {/* Header */}
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold text-white">Activer votre dossier</h1>
+            <p className="text-sm text-slate-400">{project?.name}</p>
+          </div>
+
+          {/* Summary card — concise */}
+          <div className="rounded-2xl bg-slate-800/60 border border-white/10 overflow-hidden">
+            {/* Auth type badge */}
+            <div className={cn(
+              "px-5 py-4 flex items-center gap-3",
+              isDP ? "bg-emerald-500/10" : "bg-purple-500/10"
+            )}>
+              <div className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center",
+                isDP ? "bg-emerald-500/20 text-emerald-400" : "bg-purple-500/20 text-purple-400"
+              )}>
+                {isDP ? <FileText className="w-5 h-5" /> : <ClipboardCheck className="w-5 h-5" />}
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-bold text-white">
+                  {isDP ? "Déclaration Préalable" : "Permis de Construire"}
                 </p>
+                <p className="text-xs text-slate-400">
+                  {isDP ? "Dossier DP complet" : "Dossier PC complet"}
+                </p>
+              </div>
+              <span className={cn(
+                "text-lg font-bold",
+                isDP ? "text-emerald-400" : "text-purple-400"
+              )}>
+                {isDP ? "DP" : "PC"}
+              </span>
+            </div>
+
+            {/* Included items */}
+            <div className="px-5 py-4 space-y-2.5 border-t border-white/5">
+              <IncludedItem icon={<FileText className="w-4 h-4" />} label={`${isDP ? "9" : "12"} documents réglementaires`} />
+              {wantPluAnalysis && (
+                <IncludedItem icon={<Shield className="w-4 h-4" />} label="Analyse réglementaire automatique" />
               )}
+              {wantCerfa && (
+                <IncludedItem icon={<Sparkles className="w-4 h-4" />} label="Remplissage CERFA automatique" />
+              )}
+              <IncludedItem icon={<Check className="w-4 h-4" />} label="Plan de situation + plan de masse" />
             </div>
           </div>
-        )}
 
-        {/* Architect warning */}
-        {project.architectRequired && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-red-300">Architecte obligatoire</p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Ce projet nécessite le recours à un architecte. Les documents produits devront être validés par un architecte DPLG/HMONP.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Document list */}
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-blue-400" />
-            Documents qui seront produits
-          </h2>
-          <ul className="space-y-2">
-            {documents.map((doc) => (
-              <li
-                key={doc.code}
-                className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50 border border-white/10"
-              >
-                <span className="text-xs font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded shrink-0">
-                  {doc.code}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white">{doc.label}</p>
-                  {doc.description && (
-                    <p className="text-xs text-slate-500 mt-0.5">{doc.description}</p>
-                  )}
-                </div>
-                <CheckCircle2 className="w-4 h-4 text-emerald-500/50 shrink-0" />
-              </li>
-            ))}
-          </ul>
-          {isPC && (
-            <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-              <p className="text-xs font-medium text-amber-300 mb-1">
-                <Info className="w-3.5 h-3.5 inline mr-1" />
-                Notes complémentaires
-              </p>
-              <ul className="text-xs text-slate-400 space-y-1">
-                {PC_ADDITIONAL_NOTES.map((note, i) => (
-                  <li key={i}>• {note}</li>
-                ))}
-              </ul>
+          {/* Architect warning */}
+          {architectRequired && (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-300">Architecte obligatoire</p>
+                <p className="text-xs text-amber-200/70 mt-1">
+                  Votre projet nécessite un architecte DPLG. UrbAssist prépare le dossier, mais les plans devront être validés par un architecte.
+                </p>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Selected options */}
-        {(project.wantPluAnalysis || project.wantCerfaFill) && (
-          <div className="mb-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
-            <h3 className="text-sm font-medium text-blue-300 mb-2">Options sélectionnées</h3>
-            <ul className="space-y-1 text-sm text-slate-300">
-              {project.wantPluAnalysis && (
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  Analyse PLU / RNU
-                </li>
+          {/* Payment CTA */}
+          <div className="rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/20 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-lg font-bold text-white">1 crédit</p>
+                <p className="text-xs text-slate-400">Solde actuel : {credits} crédits</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-white">9,90 €</p>
+                <p className="text-[11px] text-slate-500">par dossier</p>
+              </div>
+            </div>
+
+            <button
+              onClick={handlePayment}
+              disabled={paying}
+              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50 hover:shadow-lg hover:shadow-purple-500/25 transition-all flex items-center justify-center gap-2 text-base"
+            >
+              {paying ? (
+                <><Loader2 className="w-5 h-5 animate-spin" /> Chargement…</>
+              ) : credits > 0 ? (
+                <><CreditCard className="w-5 h-5" /> Payer avec un crédit</>
+              ) : (
+                <><CreditCard className="w-5 h-5" /> Acheter et activer</>
               )}
-              {project.wantCerfaFill && (
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  Pré-remplissage CERFA automatique
-                </li>
-              )}
-            </ul>
+            </button>
+
+            <div className="flex items-center justify-center gap-4 text-[11px] text-slate-500">
+              <span className="flex items-center gap-1"><Lock className="w-3 h-3" /> Paiement sécurisé</span>
+              <span>Stripe</span>
+            </div>
           </div>
-        )}
 
-        {/* Next steps */}
-        <div className="mb-8 p-4 rounded-xl bg-slate-800/30 border border-white/5">
-          <h3 className="font-medium text-white mb-2">Prochaines étapes</h3>
-          <ol className="list-decimal list-inside space-y-1 text-sm text-slate-400">
-            <li>Après le paiement, complétez la description détaillée de votre projet</li>
-            {project.wantPluAnalysis && (
-              <li>L&apos;analyse PLU/RNU vérifiera la conformité réglementaire</li>
-            )}
-            <li>Éditez et exportez vos plans au format PDF</li>
-          </ol>
-        </div>
-
-        {/* Payment button */}
-        <div className="border-t border-white/10 pt-8">
-          <button
-            onClick={handlePayment}
-            disabled={checkoutLoading}
-            className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:shadow-lg disabled:opacity-50"
-          >
-            {checkoutLoading ? (
-              <Loader2 className="w-6 h-6 animate-spin" />
-            ) : (
-              <>
-                <CreditCard className="w-6 h-6" />
-                Payer avec des crédits
-              </>
-            )}
-          </button>
-          <p className="text-center text-xs text-slate-500 mt-3">
-            Ou paiement en euros — format à définir
-          </p>
         </div>
       </div>
     </Navigation>
+  );
+}
+
+function IncludedItem({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-slate-300">
+      <span className="text-blue-400/60">{icon}</span>
+      <span>{label}</span>
+    </div>
   );
 }

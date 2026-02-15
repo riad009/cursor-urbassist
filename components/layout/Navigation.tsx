@@ -26,6 +26,8 @@ import {
   Plus,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useLanguage } from "@/lib/language-context";
+import LanguageToggle from "@/components/ui/LanguageToggle";
 import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute } from "@/lib/step-flow";
 
 const stepIcons = [
@@ -52,6 +54,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
   const isNewProjectPage = pathname === "/projects/new";
   const showStepBar = !!projectId || isNewProjectPage;
@@ -89,7 +92,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               <p className="text-[10px] text-slate-400 -mt-1 flex items-center gap-1.5">
                 UrbAssist
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-700/80 text-slate-300 border border-white/10">
-                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "7"}
+                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "8"}
                 </span>
               </p>
             </div>
@@ -125,6 +128,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
 
           {/* Right Side */}
           <div className="flex items-center gap-3">
+            <LanguageToggle />
             <button className="relative p-2 rounded-full hover:bg-white/5 transition-colors">
               <Bell className="w-5 h-5 text-slate-400" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full" />
@@ -196,7 +200,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               {!projectId && isNewProjectPage && (
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-300 shrink-0">
                   <FolderKanban className="w-4 h-4 text-sky-400" />
-                  <span className="hidden sm:inline">Nouveau projet</span>
+                  <span className="hidden sm:inline">{t("nav.newProject")}</span>
                 </span>
               )}
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">

@@ -65,6 +65,8 @@ export async function POST(request: NextRequest) {
         let documentType: string | null = null;
         let documentStatus: string | null = null;
         let communeName: string | null = null;
+        let pluType: string | null = null;
+        let hasPlu = false;
 
         if (features.length > 0) {
             const props = (features[0] as { properties?: Record<string, unknown> })
@@ -83,7 +85,24 @@ export async function POST(request: NextRequest) {
                     null;
                 documentStatus = (props.etat as string) ?? null;
                 communeName = (props.nom as string) ?? null;
+
+                // Determine PLU type from document type
+                if (documentType) {
+                    const dt = documentType.toUpperCase();
+                    if (dt.includes("PLUI")) pluType = "PLUi";
+                    else if (dt.includes("PLU")) pluType = "PLU";
+                    else if (dt === "CC") pluType = "CC";
+                    else if (dt === "POS") pluType = "POS";
+                    else pluType = documentType;
+                }
+
+                hasPlu = !isRnu && !!documentType;
             }
+        }
+
+        // If no features found, default to RNU
+        if (features.length === 0) {
+            isRnu = true;
         }
 
         return NextResponse.json({
@@ -91,6 +110,8 @@ export async function POST(request: NextRequest) {
             insee: communeCode,
             communeName,
             isRnu,
+            hasPlu,
+            pluType,
             documentType,
             documentStatus,
             features,

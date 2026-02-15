@@ -9,7 +9,9 @@ export type ProjectTypeChoice =
   | "existing_extension"
   | "outdoor"
   | "swimming_pool"
-  | "facade_change";
+  | "facade_change"
+  | "outdoor_fence"
+  | "outdoor_other";
 
 export type SubmitterType = "individual" | "company";
 
@@ -43,6 +45,8 @@ export interface DpPcInput {
   submitterType?: SubmitterType;
   /** Swimming pool: height of shelter/cover in meters (> 1.80m triggers PC) */
   shelterHeight?: number;
+  /** Is the construction a garage (excluded from taxable floor area) */
+  isGarage?: boolean;
 }
 
 export interface DpPcResult {
@@ -172,16 +176,32 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     return applyCompanyArchitect(result, submitterType);
   }
 
-  // < 20 m² → DP
-  if (area < 20) {
+  // ── Threshold depends on zone type ──
+  // Urban zone (PLU/PLUi U-zones): up to 40m² floor area → DP
+  // Non-urban zone: up to 20m² floor area → DP
+  const dpThreshold = inUrbanZone ? 40 : 20;
+
+  if (area < dpThreshold) {
+    if (totalAfterWork <= 150) {
+      return {
+        determination: "DP",
+        explanation: inUrbanZone
+          ? `La surface créée est de ${area} m² en zone urbaine (moins de ${dpThreshold} m²), et la surface totale après travaux est de ${totalAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`
+          : `La surface créée est de ${area} m² hors zone urbaine (moins de ${dpThreshold} m²). Une déclaration préalable suffit.`,
+        detail: `ext<${dpThreshold}`,
+      };
+    }
+    // Total > 150 but extension < threshold → still DP for extension, but architect for total
     return {
-      determination: "DP",
-      explanation: `La surface créée est de ${area} m² (moins de 20 m²). Une déclaration préalable suffit.`,
-      detail: "ext<20",
+      determination: "ARCHITECT_REQUIRED",
+      explanation: `La surface créée est de ${area} m², mais la surface totale après travaux est de ${totalAfterWork} m² (supérieure à 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
+      detail: "ext_total>150_architect",
+      architectRequired: true,
+      cannotOffer: true,
     };
   }
 
-  // 20-40 m² in urban zone → check total
+  // 20-40 m² in urban zone → DP if total ≤ 150
   if (area <= 40 && inUrbanZone) {
     if (totalAfterWork <= 150) {
       return {
@@ -190,7 +210,6 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
         detail: "ext_20-40_urban_dp",
       };
     }
-    // > 150 m² total
     return {
       determination: "ARCHITECT_REQUIRED",
       explanation: `La surface créée est de ${area} m² en zone urbaine, mais la surface totale après travaux est de ${totalAfterWork} m² (supérieure à 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
@@ -200,15 +219,14 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     };
   }
 
-  // > 40 m² or > 20 m² outside urban zone
-  const extensionOver40 =
-    (typeof groundAreaExtension === "number" && groundAreaExtension > 40) ||
-    area > 40 ||
-    (!inUrbanZone && area >= 20);
+  // > 40 m² (urban) or > 20 m² (non-urban) → PC
+  const extensionOverThreshold =
+    (typeof groundAreaExtension === "number" && groundAreaExtension > dpThreshold) ||
+    area > dpThreshold;
 
-  if (extensionOver40 || totalAfterWork > 150) {
+  if (extensionOverThreshold || totalAfterWork > 150) {
     const reasons: string[] = [];
-    if (extensionOver40) reasons.push("surface créée > 40 m²");
+    if (extensionOverThreshold) reasons.push(`surface créée > ${dpThreshold} m²`);
     if (totalAfterWork > 150) reasons.push("surface totale après travaux > 150 m²");
     const needsArchitect = totalAfterWork > 150;
 
@@ -225,7 +243,7 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     const result: DpPcResult = {
       determination: "PC",
       explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire est nécessaire.`,
-      detail: "ext>40",
+      detail: `ext>${dpThreshold}`,
     };
     return applyCompanyArchitect(result, submitterType);
   }
@@ -234,6 +252,16 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     determination: "DP",
     explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, surface existante ${existingFloorArea} m²` : ""}, surface totale après travaux ${totalAfterWork} m². Une déclaration préalable suffit.`,
     detail: "ext_dp",
+  };
+}
+
+// ─── Fence / Gate Rules ─────────────────────────────────────────────────────
+
+function calculateFenceGate(): DpPcResult {
+  return {
+    determination: "DP",
+    explanation: "L'édification d'une clôture ou d'un portail est soumise à une déclaration préalable (article R.421-12 du Code de l'urbanisme).",
+    detail: "fence_gate",
   };
 }
 
@@ -328,6 +356,17 @@ export function calculateDpPc(input: DpPcInput): DpPcResult {
         explanation:
           "Pour un aménagement extérieur (clôture, terrasse, etc.), le type d'autorisation dépend des règles locales. Vérification recommandée auprès de votre mairie.",
         detail: "outdoor",
+      };
+
+    case "outdoor_fence":
+      return calculateFenceGate();
+
+    case "outdoor_other":
+      return {
+        determination: "REVIEW",
+        explanation:
+          "Pour cet aménagement extérieur, le type d'autorisation dépend de la nature exacte des travaux et des règles locales. Contactez votre mairie pour vérification.",
+        detail: "outdoor_other",
       };
 
     default:

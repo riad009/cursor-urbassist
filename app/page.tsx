@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import Navigation from "@/components/layout/Navigation";
+import { useLanguage } from "@/lib/language-context";
 import {
   Building2,
   FolderKanban,
@@ -24,145 +25,147 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-const stats = [
-  {
-    label: "Total Projects",
-    value: "12",
-    change: "+3 this month",
-    trend: "up",
-    icon: FolderKanban,
-    gradient: "from-blue-500 to-cyan-500",
-    bgGradient: "from-blue-500/20 to-cyan-500/20",
-  },
-  {
-    label: "Active Designs",
-    value: "5",
-    change: "2 pending review",
-    trend: "neutral",
-    icon: Layers,
-    gradient: "from-violet-500 to-purple-500",
-    bgGradient: "from-violet-500/20 to-purple-500/20",
-  },
-  {
-    label: "Completed",
-    value: "7",
-    change: "100% on time",
-    trend: "up",
-    icon: CheckCircle2,
-    gradient: "from-emerald-500 to-teal-500",
-    bgGradient: "from-emerald-500/20 to-teal-500/20",
-  },
-  {
-    label: "Time Saved",
-    value: "48h",
-    change: "with AI assistance",
-    trend: "up",
-    icon: Clock,
-    gradient: "from-amber-500 to-orange-500",
-    bgGradient: "from-amber-500/20 to-orange-500/20",
-  },
-];
-
-const quickActions = [
-  {
-    title: "New Project",
-    description: "Start from scratch or template",
-    icon: Plus,
-    href: "/projects/new",
-    gradient: "from-blue-600 to-blue-400",
-    featured: true,
-  },
-  {
-    title: "Design Studio",
-    description: "Open the visual editor",
-    icon: PenTool,
-    href: "/editor",
-    gradient: "from-pink-600 to-pink-400",
-  },
-  {
-    title: "AI Analysis",
-    description: "Upload PLU documents",
-    icon: Sparkles,
-    href: "/regulations",
-    gradient: "from-violet-600 to-violet-400",
-  },
-  {
-    title: "Feasibility",
-    description: "Study and feasibility tools",
-    icon: FileCheck,
-    href: "/feasibility",
-    gradient: "from-amber-600 to-amber-400",
-  },
-  {
-    title: "Developer",
-    description: "Visual and AI tools",
-    icon: Zap,
-    href: "/developer",
-    gradient: "from-purple-600 to-purple-400",
-  },
-  {
-    title: "Export Plans",
-    description: "Generate A3 PDF files",
-    icon: Download,
-    href: "/export",
-    gradient: "from-emerald-600 to-emerald-400",
-  },
-];
-
-const recentProjects = [
-  {
-    id: 1,
-    name: "Villa Méditerranée",
-    status: "in-progress",
-    progress: 75,
-    lastUpdated: "2 hours ago",
-    type: "Residential",
-    thumbnail: "🏠",
-  },
-  {
-    id: 2,
-    name: "Commercial Center",
-    status: "review",
-    progress: 90,
-    lastUpdated: "Yesterday",
-    type: "Commercial",
-    thumbnail: "🏢",
-  },
-  {
-    id: 3,
-    name: "Garden Extension",
-    status: "completed",
-    progress: 100,
-    lastUpdated: "3 days ago",
-    type: "Extension",
-    thumbnail: "🌳",
-  },
-];
-
-const features = [
-  {
-    title: "Smart Drawing Tools",
-    description: "AI-powered snap and alignment features",
-    icon: Target,
-  },
-  {
-    title: "Real-time Calculations",
-    description: "Instant surface and distance metrics",
-    icon: Calculator,
-  },
-  {
-    title: "Regulatory Compliance",
-    description: "Automatic PLU verification",
-    icon: FileText,
-  },
-  {
-    title: "Quick Export",
-    description: "One-click A3 PDF generation",
-    icon: Zap,
-  },
-];
-
 export default function Dashboard() {
+  const { t } = useLanguage();
+
+  const stats = [
+    {
+      labelKey: "dash.totalProjects",
+      value: "12",
+      changeKey: "dash.thisMonth",
+      trend: "up",
+      icon: FolderKanban,
+      gradient: "from-blue-500 to-cyan-500",
+      bgGradient: "from-blue-500/20 to-cyan-500/20",
+    },
+    {
+      labelKey: "dash.activeDesigns",
+      value: "5",
+      changeKey: "dash.pendingReview",
+      trend: "neutral",
+      icon: Layers,
+      gradient: "from-violet-500 to-purple-500",
+      bgGradient: "from-violet-500/20 to-purple-500/20",
+    },
+    {
+      labelKey: "dash.completed",
+      value: "7",
+      changeKey: "dash.onTime",
+      trend: "up",
+      icon: CheckCircle2,
+      gradient: "from-emerald-500 to-teal-500",
+      bgGradient: "from-emerald-500/20 to-teal-500/20",
+    },
+    {
+      labelKey: "dash.timeSaved",
+      value: "48h",
+      changeKey: "dash.aiAssist",
+      trend: "up",
+      icon: Clock,
+      gradient: "from-amber-500 to-orange-500",
+      bgGradient: "from-amber-500/20 to-orange-500/20",
+    },
+  ];
+
+  const quickActions = [
+    {
+      titleKey: "qa.newProject",
+      descKey: "qa.newProjectDesc",
+      icon: Plus,
+      href: "/projects/new",
+      gradient: "from-blue-600 to-blue-400",
+      featured: true,
+    },
+    {
+      titleKey: "qa.designStudio",
+      descKey: "qa.designStudioDesc",
+      icon: PenTool,
+      href: "/editor",
+      gradient: "from-pink-600 to-pink-400",
+    },
+    {
+      titleKey: "qa.aiAnalysis",
+      descKey: "qa.aiAnalysisDesc",
+      icon: Sparkles,
+      href: "/regulations",
+      gradient: "from-violet-600 to-violet-400",
+    },
+    {
+      titleKey: "qa.feasibility",
+      descKey: "qa.feasibilityDesc",
+      icon: FileCheck,
+      href: "/feasibility",
+      gradient: "from-amber-600 to-amber-400",
+    },
+    {
+      titleKey: "qa.developer",
+      descKey: "qa.developerDesc",
+      icon: Zap,
+      href: "/developer",
+      gradient: "from-purple-600 to-purple-400",
+    },
+    {
+      titleKey: "qa.exportPlans",
+      descKey: "qa.exportPlansDesc",
+      icon: Download,
+      href: "/export",
+      gradient: "from-emerald-600 to-emerald-400",
+    },
+  ];
+
+  const recentProjects = [
+    {
+      id: 1,
+      name: "Villa Méditerranée",
+      statusKey: "proj.inProgress",
+      progress: 75,
+      lastUpdatedKey: "proj.hoursAgo",
+      typeKey: "proj.residential",
+      thumbnail: "🏠",
+    },
+    {
+      id: 2,
+      name: "Commercial Center",
+      statusKey: "proj.review",
+      progress: 90,
+      lastUpdatedKey: "proj.yesterday",
+      typeKey: "proj.commercial",
+      thumbnail: "🏢",
+    },
+    {
+      id: 3,
+      name: "Garden Extension",
+      statusKey: "proj.completed",
+      progress: 100,
+      lastUpdatedKey: "proj.threeDaysAgo",
+      typeKey: "proj.extension",
+      thumbnail: "🌳",
+    },
+  ];
+
+  const features = [
+    {
+      titleKey: "feat.smartDrawing",
+      descKey: "feat.smartDrawingDesc",
+      icon: Target,
+    },
+    {
+      titleKey: "feat.realTimeCalc",
+      descKey: "feat.realTimeCalcDesc",
+      icon: Calculator,
+    },
+    {
+      titleKey: "feat.regulatory",
+      descKey: "feat.regulatoryDesc",
+      icon: FileText,
+    },
+    {
+      titleKey: "feat.quickExport",
+      descKey: "feat.quickExportDesc",
+      icon: Zap,
+    },
+  ];
+
   return (
     <Navigation>
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
@@ -174,17 +177,17 @@ export default function Dashboard() {
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4">
               <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium border border-blue-500/30">
-                Demo Project
+                {t("dash.demoProject")}
               </span>
               <span className="px-3 py-1 rounded-full bg-purple-500/20 text-purple-400 text-xs font-medium border border-purple-500/30">
                 roms09
               </span>
             </div>
             <h1 className="text-3xl lg:text-4xl font-bold mb-3">
-              Welcome to <span className="gradient-text">UrbAssist</span>
+              {t("dash.welcome")} <span className="gradient-text">UrbAssist</span>
             </h1>
             <p className="text-slate-400 text-lg max-w-xl mb-6">
-              Platform for your planning applications. Building permit or prior declaration — free simulation before payment.
+              {t("dash.subtitle")}
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
@@ -192,18 +195,18 @@ export default function Dashboard() {
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all group"
               >
                 <Play className="w-4 h-4" />
-                Start my urban planning application
+                {t("dash.startApp")}
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
               <p className="w-full text-xs text-slate-500 mt-1">
-                Building permit or prior declaration · Free simulation before payment
+                {t("dash.startSub")}
               </p>
               <Link
                 href="/projects"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-medium hover:bg-white/10 transition-all"
               >
                 <FolderKanban className="w-4 h-4" />
-                View my projects
+                {t("dash.viewProjects")}
               </Link>
             </div>
           </div>
@@ -213,7 +216,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((stat, index) => (
             <div
-              key={stat.label}
+              key={stat.labelKey}
               className="group relative overflow-hidden rounded-2xl bg-slate-800/50 border border-white/10 p-5 hover:border-white/20 transition-all hover:-translate-y-1"
               style={{ animationDelay: `${index * 100}ms` }}
             >
@@ -223,10 +226,10 @@ export default function Dashboard() {
                   <stat.icon className="w-5 h-5 text-white" />
                 </div>
                 <p className="text-2xl font-bold text-white mb-1">{stat.value}</p>
-                <p className="text-sm text-slate-400">{stat.label}</p>
+                <p className="text-sm text-slate-400">{t(stat.labelKey)}</p>
                 <div className="flex items-center gap-1 mt-2">
                   {stat.trend === "up" && <TrendingUp className="w-3 h-3 text-emerald-400" />}
-                  <span className="text-xs text-slate-500">{stat.change}</span>
+                  <span className="text-xs text-slate-500">{t(stat.changeKey)}</span>
                 </div>
               </div>
             </div>
@@ -239,12 +242,12 @@ export default function Dashboard() {
           <div className="lg:col-span-1 space-y-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Zap className="w-5 h-5 text-amber-400" />
-              Quick Actions
+              {t("dash.quickActions")}
             </h2>
             <div className="space-y-3">
               {quickActions.map((action) => (
                 <Link
-                  key={action.title}
+                  key={action.titleKey}
                   href={action.href}
                   className={`group flex items-center gap-4 p-4 rounded-xl border transition-all hover:-translate-y-0.5 ${action.featured
                     ? "bg-gradient-to-r from-blue-500/10 to-purple-500/10 border-blue-500/30 hover:border-blue-500/50"
@@ -255,8 +258,8 @@ export default function Dashboard() {
                     <action.icon className="w-5 h-5 text-white" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-white">{action.title}</p>
-                    <p className="text-sm text-slate-400 truncate">{action.description}</p>
+                    <p className="font-semibold text-white">{t(action.titleKey)}</p>
+                    <p className="text-sm text-slate-400 truncate">{t(action.descKey)}</p>
                   </div>
                   <ArrowUpRight className="w-5 h-5 text-slate-500 group-hover:text-white group-hover:translate-x-1 group-hover:-translate-y-1 transition-all" />
                 </Link>
@@ -269,10 +272,10 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Clock className="w-5 h-5 text-blue-400" />
-                Recent Projects
+                {t("dash.recentProjects")}
               </h2>
               <Link href="/projects" className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                View all <ArrowRight className="w-4 h-4" />
+                {t("dash.viewAll")} <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -287,20 +290,20 @@ export default function Dashboard() {
                       {project.thumbnail}
                     </div>
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${project.status === "completed"
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${project.statusKey === "proj.completed"
                         ? "bg-emerald-500/20 text-emerald-400"
-                        : project.status === "review"
+                        : project.statusKey === "proj.review"
                           ? "bg-amber-500/20 text-amber-400"
                           : "bg-blue-500/20 text-blue-400"
                         }`}
                     >
-                      {project.status}
+                      {t(project.statusKey)}
                     </span>
                   </div>
                   <h3 className="font-semibold text-white mb-1 group-hover:text-blue-400 transition-colors">
                     {project.name}
                   </h3>
-                  <p className="text-xs text-slate-500 mb-3">{project.type} • {project.lastUpdated}</p>
+                  <p className="text-xs text-slate-500 mb-3">{t(project.typeKey)} • {t(project.lastUpdatedKey)}</p>
                   <div className="relative h-1.5 bg-slate-700 rounded-full overflow-hidden">
                     <div
                       className={`absolute inset-y-0 left-0 rounded-full ${project.progress === 100
@@ -320,19 +323,19 @@ export default function Dashboard() {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-purple-400" />
-            Platform Features
+            {t("dash.platformFeatures")}
           </h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {features.map((feature, index) => (
+            {features.map((feature) => (
               <div
-                key={feature.title}
+                key={feature.titleKey}
                 className="group p-5 rounded-xl bg-slate-800/30 border border-white/5 hover:border-white/10 hover:bg-slate-800/50 transition-all"
               >
                 <div className="w-10 h-10 rounded-lg bg-slate-700/50 flex items-center justify-center mb-3 group-hover:bg-gradient-to-br group-hover:from-blue-500/20 group-hover:to-purple-500/20 transition-colors">
                   <feature.icon className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" />
                 </div>
-                <h3 className="font-medium text-white mb-1">{feature.title}</h3>
-                <p className="text-sm text-slate-500">{feature.description}</p>
+                <h3 className="font-medium text-white mb-1">{t(feature.titleKey)}</h3>
+                <p className="text-sm text-slate-500">{t(feature.descKey)}</p>
               </div>
             ))}
           </div>
@@ -341,11 +344,11 @@ export default function Dashboard() {
         {/* Footer */}
         <footer className="pt-8 border-t border-white/5">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500">
-            <p>© 2026 UrbAssist. Construction Project Assistance</p>
+            <p>{t("dash.footer")}</p>
             <div className="flex items-center gap-4">
-              <a href="#" className="hover:text-white transition-colors">Documentation</a>
-              <a href="#" className="hover:text-white transition-colors">Support</a>
-              <a href="#" className="hover:text-white transition-colors">Privacy</a>
+              <a href="#" className="hover:text-white transition-colors">{t("dash.documentation")}</a>
+              <a href="#" className="hover:text-white transition-colors">{t("dash.support")}</a>
+              <a href="#" className="hover:text-white transition-colors">{t("dash.privacy")}</a>
             </div>
           </div>
         </footer>
