@@ -43,6 +43,7 @@ export default function PaymentPage({
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [credits, setCredits] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   // Check for successful payment return
   const success = searchParams.get("success");
@@ -73,19 +74,23 @@ export default function PaymentPage({
 
   async function handlePayment() {
     setPaying(true);
+    setError(null);
     try {
-      const res = await fetch("/api/checkout", {
+      const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
           type: "credits",
-          amount: 1,
-          successUrl: `${window.location.origin}/projects/${projectId}/description`,
-          cancelUrl: window.location.href,
+          packageId: "credits-10",
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Payment failed");
+        setPaying(false);
+        return;
+      }
       if (data.url) {
         window.location.href = data.url;
       } else if (data.success) {
@@ -99,6 +104,7 @@ export default function PaymentPage({
       }
     } catch (err) {
       console.error("Payment failed:", err);
+      setError("Une erreur est survenue lors du paiement");
     }
     setPaying(false);
   }
@@ -221,6 +227,12 @@ export default function PaymentPage({
                 <p className="text-[11px] text-slate-500">par dossier</p>
               </div>
             </div>
+
+            {error && (
+              <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-2 text-sm text-red-400">
+                {error}
+              </div>
+            )}
 
             <button
               onClick={handlePayment}

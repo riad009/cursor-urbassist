@@ -31,33 +31,64 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // ── Demo / hardcoded user: always add credits directly ──
-      // This user has no DB row, so we can't use Stripe checkout (no customer).
-      // Credits are granted instantly and the frontend redirects to the next step.
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json({
-          success: true,
-          credits: user.credits + pkg.credits,
-          message: `${pkg.credits} credits added (demo account - register to persist credits)`,
-        });
-      }
+      // ── Real Stripe checkout session (when key is configured) ──
+      if (STRIPE_SECRET) {
+        const Stripe = (await import("stripe")).default;
+        const stripe = new Stripe(STRIPE_SECRET);
 
-      // ── No Stripe key → demo mode for registered users too ──
-      if (!STRIPE_SECRET) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { credits: { increment: pkg.credits } },
-        });
+        // After payment, redirect back into the project flow
+        const successPath = projectId
+          ? `/projects/${encodeURIComponent(projectId)}/payment?success=true`
+          : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
+        const cancelPath = projectId
+          ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
+          : `/projects?cancelled=true`;
 
-        await prisma.creditTransaction.create({
-          data: {
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: pkg.label,
+                  description: `${pkg.credits} credits for UrbAssist platform`,
+                },
+                unit_amount: pkg.price,
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${SITE_URL}${successPath}`,
+          cancel_url: `${SITE_URL}${cancelPath}`,
+          metadata: {
             userId: user.id,
-            amount: pkg.credits,
-            type: "PURCHASE",
-            description: `Purchased ${pkg.credits} credits (demo mode)`,
+            type: "credits",
+            credits: String(pkg.credits),
+            ...(projectId ? { projectId: String(projectId) } : {}),
           },
         });
 
+        // Record payment intent in DB (skip for hardcoded demo user who has no DB row)
+        if (user.id !== HARDCODED_USER_ID) {
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: pkg.price / 100,
+              type: "credits",
+              creditsAmount: pkg.credits,
+              status: "pending",
+            },
+          });
+        }
+
+        return NextResponse.json({ url: session.url });
+      }
+
+      // ── No Stripe key → demo mode: add credits directly ──
+      if (user.id === HARDCODED_USER_ID) {
         return NextResponse.json({
           success: true,
           credits: user.credits + pkg.credits,
@@ -65,57 +96,25 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // ── Real Stripe checkout session ──
-      const Stripe = (await import("stripe")).default;
-      const stripe = new Stripe(STRIPE_SECRET);
-
-      // After payment, redirect back into the project flow
-      const successPath = projectId
-        ? `/projects/${encodeURIComponent(projectId)}/description?from=payment&success=true`
-        : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
-      const cancelPath = projectId
-        ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
-        : `/projects?cancelled=true`;
-
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: "eur",
-              product_data: {
-                name: pkg.label,
-                description: `${pkg.credits} credits for UrbAssist platform`,
-              },
-              unit_amount: pkg.price,
-            },
-            quantity: 1,
-          },
-        ],
-        mode: "payment",
-        success_url: `${SITE_URL}${successPath}`,
-        cancel_url: `${SITE_URL}${cancelPath}`,
-        metadata: {
-          userId: user.id,
-          type: "credits",
-          credits: String(pkg.credits),
-          ...(projectId ? { projectId: String(projectId) } : {}),
-        },
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { credits: { increment: pkg.credits } },
       });
 
-      // Record payment intent in DB
-      await prisma.payment.create({
+      await prisma.creditTransaction.create({
         data: {
           userId: user.id,
-          stripeSessionId: session.id,
-          amount: pkg.price / 100,
-          type: "credits",
-          creditsAmount: pkg.credits,
-          status: "pending",
+          amount: pkg.credits,
+          type: "PURCHASE",
+          description: `Purchased ${pkg.credits} credits (demo mode)`,
         },
       });
 
-      return NextResponse.json({ url: session.url });
+      return NextResponse.json({
+        success: true,
+        credits: user.credits + pkg.credits,
+        message: `${pkg.credits} credits added (demo mode - set STRIPE_SECRET_KEY to enable real payments)`,
+      });
     }
 
     if (type === "subscription") {
