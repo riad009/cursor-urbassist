@@ -143,10 +143,10 @@ function LocationPlanPageContent() {
       <div className="flex flex-col h-[calc(100vh-4rem)]">
         <div className="flex flex-1 min-h-0">
           {/* Left sidebar - like reference */}
-          <div className="w-80 shrink-0 p-4 flex flex-col gap-6 bg-slate-900/50 border-r border-white/5 overflow-y-auto">
+          <div className="w-80 shrink-0 p-4 flex flex-col gap-6 bg-slate-50 border-r border-slate-100 overflow-y-auto">
             <div>
-              <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-blue-400" />
+              <h1 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-blue-600" />
                 Location Plan (Plan de situation)
               </h1>
               <p className="text-slate-400 text-sm mt-1">
@@ -156,8 +156,8 @@ function LocationPlanPageContent() {
 
             {/* Format A4 / A3 */}
             <div>
-              <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
-                <Ruler className="w-4 h-4 text-blue-400" />
+              <h3 className="text-sm font-semibold text-slate-900 mb-2 flex items-center gap-2">
+                <Ruler className="w-4 h-4 text-blue-600" />
                 Format
               </h3>
               <div className="flex gap-2">
@@ -166,7 +166,7 @@ function LocationPlanPageContent() {
                   onClick={() => setPaperFormat("A4")}
                   className={cn(
                     "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    paperFormat === "A4" ? "bg-blue-500/30 text-blue-300 border border-blue-500/50" : "bg-slate-800/50 text-slate-400 border border-white/10 hover:border-white/20"
+                    paperFormat === "A4" ? "bg-blue-500/30 text-blue-700 border border-blue-500/50" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
                   )}
                 >
                   A4
@@ -176,7 +176,7 @@ function LocationPlanPageContent() {
                   onClick={() => setPaperFormat("A3")}
                   className={cn(
                     "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    paperFormat === "A3" ? "bg-blue-500/30 text-blue-300 border border-blue-500/50" : "bg-slate-800/50 text-slate-400 border border-white/10 hover:border-white/20"
+                    paperFormat === "A3" ? "bg-blue-500/30 text-blue-700 border border-blue-500/50" : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
                   )}
                 >
                   A3
@@ -186,7 +186,7 @@ function LocationPlanPageContent() {
 
             {/* Search Address */}
             <div>
-              <h3 className="text-sm font-semibold text-white mb-2">Search Address</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-2">Search Address</h3>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
@@ -194,20 +194,20 @@ function LocationPlanPageContent() {
                   value={addressQuery}
                   onChange={(e) => setAddressQuery(e.target.value)}
                   placeholder="Enter an address in France..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
                 {loadingAddress && (
                   <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
                 )}
               </div>
               {addressSuggestions.length > 0 && (
-                <div className="mt-1 rounded-lg bg-slate-800 border border-white/10 overflow-hidden">
+                <div className="mt-1 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden">
                   {addressSuggestions.slice(0, 5).map((a, i) => (
                     <button
                       key={i}
                       type="button"
                       onClick={() => a.coordinates && selectAddress(a.coordinates)}
-                      className="w-full px-3 py-2 text-left text-sm text-white hover:bg-slate-700"
+                      className="w-full px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100"
                     >
                       {a.label}
                     </button>
@@ -218,11 +218,11 @@ function LocationPlanPageContent() {
 
             {user && projects.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-white mb-2">From project</h3>
+                <h3 className="text-sm font-semibold text-slate-900 mb-2">From project</h3>
                 <select
                   value={selectedProjectId}
                   onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white text-sm"
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                 >
                   <option value="">Select project</option>
                   {projects.map((p) => (
@@ -246,7 +246,7 @@ function LocationPlanPageContent() {
 
             {/* Base Layer */}
             <div>
-              <h3 className="text-sm font-semibold text-white mb-2">Base Layer</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-2">Base Layer</h3>
               <div className="space-y-1">
                 <button
                   type="button"
@@ -254,8 +254,8 @@ function LocationPlanPageContent() {
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                     baseLayer === "street"
-                      ? "bg-blue-500/30 text-blue-400 border border-blue-500/50"
-                      : "bg-slate-800/50 text-slate-400 border border-transparent hover:bg-slate-700/50"
+                      ? "bg-blue-500/30 text-blue-600 border border-blue-500/50"
+                      : "bg-white text-slate-400 border border-transparent hover:bg-slate-100"
                   )}
                 >
                   <Map className="w-4 h-4" />
@@ -267,8 +267,8 @@ function LocationPlanPageContent() {
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                     baseLayer === "satellite"
-                      ? "bg-blue-500/30 text-blue-400 border border-blue-500/50"
-                      : "bg-slate-800/50 text-slate-400 border border-transparent hover:bg-slate-700/50"
+                      ? "bg-blue-500/30 text-blue-600 border border-blue-500/50"
+                      : "bg-white text-slate-400 border border-transparent hover:bg-slate-100"
                   )}
                 >
                   <Satellite className="w-4 h-4" />
@@ -280,8 +280,8 @@ function LocationPlanPageContent() {
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                     baseLayer === "ign"
-                      ? "bg-blue-500/30 text-blue-400 border border-blue-500/50"
-                      : "bg-slate-800/50 text-slate-400 border border-transparent hover:bg-slate-700/50"
+                      ? "bg-blue-500/30 text-blue-600 border border-blue-500/50"
+                      : "bg-white text-slate-400 border border-transparent hover:bg-slate-100"
                   )}
                 >
                   <Layers className="w-4 h-4" />
@@ -292,9 +292,9 @@ function LocationPlanPageContent() {
 
             {/* Overlays */}
             <div>
-              <h3 className="text-sm font-semibold text-white mb-2">Overlays</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-2">Overlays</h3>
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-slate-300 flex items-center gap-2">
+                <span className="text-sm text-slate-600 flex items-center gap-2">
                   <Layers className="w-4 h-4" />
                   Cadastral Parcels
                 </span>
@@ -303,7 +303,7 @@ function LocationPlanPageContent() {
                   onClick={() => setCadastralOverlay(!cadastralOverlay)}
                   className={cn(
                     "relative w-11 h-6 rounded-full transition-colors",
-                    cadastralOverlay ? "bg-blue-500" : "bg-slate-600"
+                    cadastralOverlay ? "bg-blue-500" : "bg-slate-200"
                   )}
                 >
                   <span
@@ -323,8 +323,8 @@ function LocationPlanPageContent() {
 
             {/* Selected parcels */}
             {cadastralOverlay && selectedParcelIds.length > 0 && (
-              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                <h3 className="text-sm font-semibold text-white mb-2">Selected parcels</h3>
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2">Selected parcels</h3>
                 <p className="text-xs text-slate-400 mb-2">
                   {selectedParcelIds.length} parcel{selectedParcelIds.length !== 1 ? "s" : ""} selected. Click on the map to add or remove.
                 </p>
@@ -332,7 +332,7 @@ function LocationPlanPageContent() {
                   {selectedParcelIds.map((id) => (
                     <span
                       key={id}
-                      className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-700/80 text-slate-200 text-xs font-mono"
+                      className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-xs font-mono"
                     >
                       {id}
                     </span>
@@ -341,7 +341,7 @@ function LocationPlanPageContent() {
                 <button
                   type="button"
                   onClick={() => setSelectedParcelIds([])}
-                  className="text-xs font-medium text-blue-400 hover:text-blue-300"
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
                 >
                   Clear selection
                 </button>
@@ -350,9 +350,9 @@ function LocationPlanPageContent() {
 
             {/* Project info (all previously requested information) */}
             {selectedProjectId && projectDetails && (
-              <div className="p-3 rounded-xl bg-slate-800/80 border border-white/10">
-                <h3 className="text-sm font-semibold text-white mb-2">Project information</h3>
-                <ul className="text-xs text-slate-300 space-y-1">
+              <div className="p-3 rounded-xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2">Project information</h3>
+                <ul className="text-xs text-slate-600 space-y-1">
                   {projectDetails.address && (
                     <li><span className="text-slate-500">Address:</span> {projectDetails.address}</li>
                   )}
@@ -368,9 +368,9 @@ function LocationPlanPageContent() {
 
             {/* Map Info */}
             <div>
-              <h3 className="text-sm font-semibold text-white mb-2">Map Info</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-2">Map Info</h3>
               <div className="text-sm text-slate-400">
-                Zoom Level: <span className="text-white font-medium">{zoomLevel}</span>
+                Zoom Level: <span className="text-slate-900 font-medium">{zoomLevel}</span>
               </div>
               <p className="text-xs text-slate-500 mt-1">Graphical scale is shown on the map (bottom-left).</p>
             </div>
@@ -382,7 +382,7 @@ function LocationPlanPageContent() {
               {selectedProjectId && (
                 <Link
                   href={`/export?project=${selectedProjectId}&doc=LOCATION_PLAN&paper=${paperFormat.toLowerCase()}`}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium shadow-lg"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-slate-900 text-sm font-medium shadow-lg"
                 >
                   <FileDown className="w-4 h-4" />
                   Export PDF ({paperFormat})
@@ -391,7 +391,7 @@ function LocationPlanPageContent() {
               <button
                 type="button"
                 onClick={exportMap}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 text-sm font-medium"
               >
                 <Download className="w-4 h-4" />
                 Open in OSM

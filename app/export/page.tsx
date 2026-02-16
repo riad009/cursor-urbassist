@@ -117,30 +117,30 @@ function CreditUsageTrigger() {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="text-blue-400 hover:text-blue-300 text-sm font-medium"
+        className="text-blue-600 hover:text-blue-700 text-sm font-medium"
       >
         View usage
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" aria-hidden onClick={() => setOpen(false)} />
-          <div className="fixed right-4 top-24 z-50 p-4 rounded-xl bg-slate-800 border border-white/10 shadow-xl max-w-sm w-full">
-            <h4 className="text-sm font-semibold text-white mb-2">Credit usage by feature</h4>
+          <div className="fixed right-4 top-24 z-50 p-4 rounded-xl bg-slate-100 border border-slate-200 shadow-xl max-w-sm w-full">
+            <h4 className="text-sm font-semibold text-slate-900 mb-2">Credit usage by feature</h4>
             {loading ? (
               <p className="text-slate-400 text-sm">Loading...</p>
             ) : data ? (
               <div className="space-y-2 text-sm">
                 {data.byFeature?.map((f) => (
-                  <div key={f.feature} className="flex justify-between text-slate-300">
+                  <div key={f.feature} className="flex justify-between text-slate-600">
                     <span>{f.feature.replace(/_/g, " ")}</span>
                     <span>{f.totalCredits} cr ({f.count})</span>
                   </div>
                 ))}
                 {data.byDocumentType?.length > 0 && (
                   <>
-                    <div className="border-t border-white/10 my-2 pt-2 text-slate-400">By document type</div>
+                    <div className="border-t border-slate-200 my-2 pt-2 text-slate-400">By document type</div>
                     {data.byDocumentType.map((d) => (
-                      <div key={d.type} className="flex justify-between text-slate-300">
+                      <div key={d.type} className="flex justify-between text-slate-600">
                         <span>{d.type.replace(/_/g, " ")}</span>
                         <span>{d.credits} cr</span>
                       </div>
@@ -151,7 +151,7 @@ function CreditUsageTrigger() {
             ) : (
               <p className="text-slate-400 text-sm">No usage data</p>
             )}
-            <button type="button" onClick={() => setOpen(false)} className="mt-2 text-slate-400 hover:text-white text-xs">Close</button>
+            <button type="button" onClick={() => setOpen(false)} className="mt-2 text-slate-400 hover:text-slate-900 text-xs">Close</button>
           </div>
         </>
       )}
@@ -392,9 +392,9 @@ function ExportPageContent() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
-                <Download className="w-5 h-5 text-white" />
+                <Download className="w-5 h-5 text-slate-900" />
               </div>
-              <h1 className="text-2xl font-bold text-white">Export Center</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Export Center</h1>
             </div>
             <p className="text-slate-400">
               Generate professional documents and deliverables {user && `• ${user.credits} credits`}
@@ -406,8 +406,8 @@ function ExportPageContent() {
         </div>
 
         {user && projects.length > 0 && (
-          <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-            <h2 className="text-lg font-semibold text-white">Export Project Documents (Credit-based)</h2>
+          <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4">
+            <h2 className="text-lg font-semibold text-slate-900">Export Project Documents (Credit-based)</h2>
             <p className="text-slate-400 text-sm">
               All documents will be generated automatically from your project. Choose the type and format then export.
             </p>
@@ -417,7 +417,7 @@ function ExportPageContent() {
                 <select
                   value={selectedProjectId}
                   onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900"
                 >
                   <option value="">Select project</option>
                   {projects.map((p) => (
@@ -430,7 +430,7 @@ function ExportPageContent() {
                 <select
                   value={selectedDocumentType}
                   onChange={(e) => setSelectedDocumentType(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900"
                 >
                   {DOCUMENT_TYPES.map((d) => (
                     <option key={d.id} value={d.id}>{d.name} ({d.credits} credits)</option>
@@ -441,7 +441,7 @@ function ExportPageContent() {
                 <button
                   onClick={handleApiExport}
                   disabled={!selectedProjectId || apiExporting}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold disabled:opacity-50"
                 >
                   {apiExporting ? (
                     <>
@@ -458,7 +458,7 @@ function ExportPageContent() {
               </div>
             </div>
             {apiError && (
-              <p className="text-sm text-red-400">{apiError}</p>
+              <p className="text-sm text-red-600">{apiError}</p>
             )}
           </div>
         )}
@@ -468,7 +468,7 @@ function ExportPageContent() {
           <div className="lg:col-span-2 space-y-6">
             {/* Export Type Selection */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-white">Export Type</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Export Type</h2>
               <div className="grid sm:grid-cols-2 gap-4">
                 {exportFormats.map((format) => (
                   <button
@@ -480,8 +480,8 @@ function ExportPageContent() {
                     className={cn(
                       "p-4 rounded-xl border text-left transition-all",
                       selectedFormat === format.id
-                        ? "border-blue-500/50 bg-blue-500/10"
-                        : "border-white/10 bg-slate-800/50 hover:border-white/20"
+                        ? "border-blue-500/50 bg-blue-50"
+                        : "border-slate-200 bg-white hover:border-slate-300"
                     )}
                   >
                     <div className="flex items-start gap-4">
@@ -489,21 +489,21 @@ function ExportPageContent() {
                         "w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br",
                         format.color
                       )}>
-                        <format.icon className="w-6 h-6 text-white" />
+                        <format.icon className="w-6 h-6 text-slate-900" />
                       </div>
                       <div className="flex-1">
-                        <p className="font-semibold text-white">{format.name}</p>
+                        <p className="font-semibold text-slate-900">{format.name}</p>
                         <p className="text-sm text-slate-400 mt-0.5">{format.description}</p>
                         <div className="flex gap-2 mt-2">
                           {format.formats.map(f => (
-                            <span key={f} className="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300">
+                            <span key={f} className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">
                               {f}
                             </span>
                           ))}
                         </div>
                       </div>
                       {selectedFormat === format.id && (
-                        <Check className="w-5 h-5 text-blue-400" />
+                        <Check className="w-5 h-5 text-blue-600" />
                       )}
                     </div>
                   </button>
@@ -512,8 +512,8 @@ function ExportPageContent() {
             </div>
 
             {/* Output Format */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-              <h3 className="text-sm font-semibold text-white">Output Format</h3>
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-900">Output Format</h3>
               <div className="flex gap-2">
                 {activeFormat.formats.map((format) => (
                   <button
@@ -522,8 +522,8 @@ function ExportPageContent() {
                     className={cn(
                       "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
                       outputFormat === format
-                        ? "bg-blue-500 text-white"
-                        : "bg-slate-700 text-slate-400 hover:text-white"
+                        ? "bg-blue-500 text-slate-900"
+                        : "bg-slate-100 text-slate-400 hover:text-slate-900"
                     )}
                   >
                     {format}
@@ -536,9 +536,9 @@ function ExportPageContent() {
             {selectedFormat === "plans" && (
               <div className="grid sm:grid-cols-2 gap-4">
                 {/* Paper Size */}
-                <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Maximize className="w-4 h-4 text-blue-400" />
+                <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <Maximize className="w-4 h-4 text-blue-600" />
                     Paper Size
                   </h3>
                   <div className="space-y-2">
@@ -549,17 +549,17 @@ function ExportPageContent() {
                         className={cn(
                           "w-full flex items-center justify-between p-3 rounded-xl transition-colors",
                           selectedPaper === size.id
-                            ? "bg-blue-500/20 border border-blue-500/50"
-                            : "bg-slate-700/50 border border-transparent hover:border-white/10"
+                            ? "bg-blue-100 border border-blue-500/50"
+                            : "bg-slate-100 border border-transparent hover:border-slate-200"
                         )}
                       >
                         <div className="flex items-center gap-3">
                           <span className={cn(
                             "font-semibold",
-                            selectedPaper === size.id ? "text-blue-400" : "text-white"
+                            selectedPaper === size.id ? "text-blue-600" : "text-slate-900"
                           )}>{size.name}</span>
                           {size.recommended && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-600">
                               Recommended
                             </span>
                           )}
@@ -571,9 +571,9 @@ function ExportPageContent() {
                 </div>
 
                 {/* Scale */}
-                <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Ruler className="w-4 h-4 text-purple-400" />
+                <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <Ruler className="w-4 h-4 text-purple-600" />
                     Drawing Scale
                   </h3>
                   <div className="space-y-2">
@@ -584,17 +584,17 @@ function ExportPageContent() {
                         className={cn(
                           "w-full flex items-center justify-between p-3 rounded-xl transition-colors",
                           selectedScale === scale.id
-                            ? "bg-purple-500/20 border border-purple-500/50"
-                            : "bg-slate-700/50 border border-transparent hover:border-white/10"
+                            ? "bg-purple-100 border border-purple-500/50"
+                            : "bg-slate-100 border border-transparent hover:border-slate-200"
                         )}
                       >
                         <div className="flex items-center gap-3">
                           <span className={cn(
                             "font-semibold",
-                            selectedScale === scale.id ? "text-purple-400" : "text-white"
+                            selectedScale === scale.id ? "text-purple-600" : "text-slate-900"
                           )}>{scale.name}</span>
                           {scale.recommended && (
-                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-600">
                               Recommended
                             </span>
                           )}
@@ -608,8 +608,8 @@ function ExportPageContent() {
             )}
 
             {/* Include Options */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <Settings className="w-4 h-4 text-slate-400" />
                 Include in Export
               </h3>
@@ -621,19 +621,19 @@ function ExportPageContent() {
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-xl transition-colors text-left",
                       option.checked
-                        ? "bg-blue-500/10 border border-blue-500/30"
-                        : "bg-slate-700/30 border border-transparent hover:border-white/10"
+                        ? "bg-blue-50 border border-blue-200"
+                        : "bg-slate-50 border border-transparent hover:border-slate-200"
                     )}
                   >
                     <div className={cn(
                       "w-5 h-5 rounded flex items-center justify-center",
-                      option.checked ? "bg-blue-500" : "bg-slate-600"
+                      option.checked ? "bg-blue-500" : "bg-slate-200"
                     )}>
-                      {option.checked && <Check className="w-3 h-3 text-white" />}
+                      {option.checked && <Check className="w-3 h-3 text-slate-900" />}
                     </div>
                     <span className={cn(
                       "text-sm",
-                      option.checked ? "text-white" : "text-slate-400"
+                      option.checked ? "text-slate-900" : "text-slate-400"
                     )}>{option.label}</span>
                   </button>
                 ))}
@@ -644,9 +644,9 @@ function ExportPageContent() {
           {/* Right Column - Preview & Actions */}
           <div className="space-y-4">
             {/* Project Info (Auto-populate) */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Info className="w-4 h-4 text-amber-400" />
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-600" />
                 Document Info
               </h3>
               <div className="space-y-3">
@@ -656,7 +656,7 @@ function ExportPageContent() {
                     type="text"
                     value={projectInfo.projectName}
                     onChange={(e) => setProjectInfo({ ...projectInfo, projectName: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                   />
                 </div>
                 <div>
@@ -665,7 +665,7 @@ function ExportPageContent() {
                     type="text"
                     value={projectInfo.clientName}
                     onChange={(e) => setProjectInfo({ ...projectInfo, clientName: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -675,7 +675,7 @@ function ExportPageContent() {
                       type="text"
                       value={projectInfo.location}
                       onChange={(e) => setProjectInfo({ ...projectInfo, location: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                   <div>
@@ -684,7 +684,7 @@ function ExportPageContent() {
                       type="text"
                       value={projectInfo.date}
                       onChange={(e) => setProjectInfo({ ...projectInfo, date: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                 </div>
@@ -694,15 +694,15 @@ function ExportPageContent() {
                     type="text"
                     value={projectInfo.architect}
                     onChange={(e) => setProjectInfo({ ...projectInfo, architect: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                   />
                 </div>
               </div>
             </div>
 
             {/* Preview */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-4">Preview</h3>
+            <div className="p-5 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-4">Preview</h3>
               <div className="aspect-[3/4] bg-white rounded-lg p-3 relative">
                 <div className="absolute inset-3 border border-slate-200 rounded">
                   {/* Title Block Preview */}
@@ -720,7 +720,7 @@ function ExportPageContent() {
                   {/* Content Area */}
                   <div className="absolute top-4 left-4 right-4 bottom-12">
                     <div className="w-full h-full border border-dashed border-slate-300 rounded flex items-center justify-center">
-                      <Building2 className="w-8 h-8 text-slate-300" />
+                      <Building2 className="w-8 h-8 text-slate-600" />
                     </div>
                   </div>
                   {/* Scale bar */}
@@ -743,8 +743,8 @@ function ExportPageContent() {
               className={cn(
                 "w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-semibold transition-all",
                 exportComplete
-                  ? "bg-emerald-500 text-white"
-                  : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/25"
+                  ? "bg-emerald-500 text-slate-900"
+                  : "bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 hover:shadow-lg hover:shadow-purple-500/25"
               )}
             >
               {isExporting ? (
@@ -767,11 +767,11 @@ function ExportPageContent() {
 
             {exportComplete && (
               <div className="flex gap-3">
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm font-medium hover:bg-slate-700 transition-colors">
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors">
                   <FolderDown className="w-4 h-4" />
                   Open Folder
                 </button>
-                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm font-medium hover:bg-slate-700 transition-colors">
+                <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors">
                   <Mail className="w-4 h-4" />
                   Share
                 </button>
@@ -780,14 +780,14 @@ function ExportPageContent() {
 
             {/* Quick Actions */}
             <div className="space-y-2">
-              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-800/30 border border-white/5 hover:border-white/10 transition-colors">
+              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-100/30 border border-slate-100 hover:border-slate-200 transition-colors">
                 <Printer className="w-5 h-5 text-slate-400" />
-                <span className="text-sm text-slate-300">Print Preview</span>
+                <span className="text-sm text-slate-600">Print Preview</span>
                 <ChevronRight className="w-4 h-4 text-slate-500 ml-auto" />
               </button>
-              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-800/30 border border-white/5 hover:border-white/10 transition-colors">
+              <button className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-100/30 border border-slate-100 hover:border-slate-200 transition-colors">
                 <Cloud className="w-5 h-5 text-slate-400" />
-                <span className="text-sm text-slate-300">Save to Cloud</span>
+                <span className="text-sm text-slate-600">Save to Cloud</span>
                 <ChevronRight className="w-4 h-4 text-slate-500 ml-auto" />
               </button>
             </div>

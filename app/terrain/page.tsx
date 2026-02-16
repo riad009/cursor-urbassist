@@ -361,9 +361,9 @@ export default function TerrainPage() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/25">
-                <Mountain className="w-5 h-5 text-white" />
+                <Mountain className="w-5 h-5 text-slate-900" />
               </div>
-              <h1 className="text-2xl font-bold text-white">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Terrain & Sections
               </h1>
             </div>
@@ -376,7 +376,7 @@ export default function TerrainPage() {
             <select
               value={selectedProject}
               onChange={(e) => setSelectedProject(e.target.value)}
-              className="px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm"
+              className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm"
             >
               <option value="">Select project...</option>
               {projects.map((p) => (
@@ -388,7 +388,7 @@ export default function TerrainPage() {
             <button
               onClick={saveTerrainData}
               disabled={!selectedProject || isLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-white font-medium disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-slate-900 font-medium disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
               Save
@@ -410,7 +410,7 @@ export default function TerrainPage() {
                 "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors",
                 activeTab === tab.id
                   ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
-                  : "bg-slate-800/50 text-slate-400 border border-white/10 hover:bg-slate-700/50"
+                  : "bg-white text-slate-400 border border-slate-200 hover:bg-slate-100"
               )}
             >
               <tab.icon className="w-4 h-4" />
@@ -422,7 +422,7 @@ export default function TerrainPage() {
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Canvas */}
           <div className="lg:col-span-2">
-            <div className="rounded-2xl bg-slate-800/50 border border-white/10 overflow-hidden">
+            <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
               <canvas
                 ref={canvasRef}
                 width={800}
@@ -434,15 +434,15 @@ export default function TerrainPage() {
             {/* Profiles */}
             {profiles.length > 0 && (
               <div className="mt-4 space-y-4">
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="text-lg font-semibold text-slate-900">
                   Terrain Profiles
                 </h3>
                 {profiles.map((p, i) => (
                   <div
                     key={i}
-                    className="rounded-2xl bg-slate-800/50 border border-white/10 p-4"
+                    className="rounded-2xl bg-white border border-slate-200 p-4"
                   >
-                    <h4 className="text-sm font-medium text-amber-400 mb-2">
+                    <h4 className="text-sm font-medium text-amber-600 mb-2">
                       {p.name}
                     </h4>
                     <canvas
@@ -463,8 +463,8 @@ export default function TerrainPage() {
           <div className="space-y-4">
             {activeTab === "points" && (
               <>
-                <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                  <h3 className="text-sm font-semibold text-white mb-3">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
                     Add Elevation Point
                   </h3>
                   <div className="grid grid-cols-3 gap-2 mb-3">
@@ -481,7 +481,7 @@ export default function TerrainPage() {
                             x: parseFloat(e.target.value) || 0,
                           })
                         }
-                        className="w-full px-2 py-1.5 rounded-lg bg-slate-700 border border-white/10 text-white text-sm"
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
                     <div>
@@ -497,7 +497,7 @@ export default function TerrainPage() {
                             y: parseFloat(e.target.value) || 0,
                           })
                         }
-                        className="w-full px-2 py-1.5 rounded-lg bg-slate-700 border border-white/10 text-white text-sm"
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
                     <div>
@@ -514,13 +514,13 @@ export default function TerrainPage() {
                             z: parseFloat(e.target.value) || 0,
                           })
                         }
-                        className="w-full px-2 py-1.5 rounded-lg bg-slate-700 border border-white/10 text-white text-sm"
+                        className="w-full px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
                   </div>
                   <button
                     onClick={addPoint}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-medium hover:bg-emerald-500/30 transition-colors"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-100 text-emerald-600 font-medium hover:bg-emerald-200 transition-colors"
                   >
                     <Plus className="w-4 h-4" />
                     Add Point
@@ -528,23 +528,23 @@ export default function TerrainPage() {
                 </div>
 
                 {/* Points List */}
-                <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                  <h3 className="text-sm font-semibold text-white mb-3">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
                     Points ({elevationPoints.length})
                   </h3>
                   <div className="space-y-1 max-h-[400px] overflow-y-auto">
                     {elevationPoints.map((point, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-700/50 text-sm"
+                        className="flex items-center justify-between p-2 rounded-lg bg-slate-100 text-sm"
                       >
-                        <span className="text-slate-300 font-mono">
+                        <span className="text-slate-600 font-mono">
                           {point.label}: ({point.x}, {point.y}) z=
                           {point.z.toFixed(1)}m
                         </span>
                         <button
                           onClick={() => removePoint(i)}
-                          className="text-red-400 hover:text-red-300"
+                          className="text-red-600 hover:text-red-600"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -557,14 +557,14 @@ export default function TerrainPage() {
 
             {activeTab === "sections" && (
               <>
-                <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                  <h3 className="text-sm font-semibold text-white mb-3">
+                <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
                     Section Lines
                   </h3>
                   <button
                     onClick={addSectionLine}
                     disabled={elevationPoints.length < 2}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-100 text-amber-600 font-medium hover:bg-amber-200 transition-colors disabled:opacity-50"
                   >
                     <ArrowRight className="w-4 h-4" />
                     Add Section Line
@@ -574,16 +574,16 @@ export default function TerrainPage() {
                 {sectionLines.map((section, i) => (
                   <div
                     key={i}
-                    className="p-4 rounded-2xl bg-slate-800/50 border border-white/10"
+                    className="p-4 rounded-2xl bg-white border border-slate-200"
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-amber-400">
+                      <span className="text-sm font-medium text-amber-600">
                         {section.name}
                       </span>
                       <button
                         onClick={() => generateProfile(section)}
                         disabled={isLoading}
-                        className="text-xs px-3 py-1 rounded-lg bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                        className="text-xs px-3 py-1 rounded-lg bg-amber-100 text-amber-600 hover:bg-amber-200"
                       >
                         {isLoading ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
@@ -602,8 +602,8 @@ export default function TerrainPage() {
             )}
 
             {activeTab === "3d" && (
-              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                <h3 className="text-sm font-semibold text-white mb-3">
+              <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">
                   3D Terrain View
                 </h3>
                 <p className="text-sm text-slate-400">
@@ -612,11 +612,11 @@ export default function TerrainPage() {
                     : "Add at least 3 elevation points to generate a 3D terrain model."}
                 </p>
                 {elevationPoints.length >= 3 && (
-                  <div className="mt-4 p-3 rounded-xl bg-slate-700/50">
+                  <div className="mt-4 p-3 rounded-xl bg-slate-100">
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-slate-500">Min elevation:</span>
-                        <span className="text-white ml-2">
+                        <span className="text-slate-900 ml-2">
                           {Math.min(
                             ...elevationPoints.map((p) => p.z)
                           ).toFixed(1)}
@@ -625,7 +625,7 @@ export default function TerrainPage() {
                       </div>
                       <div>
                         <span className="text-slate-500">Max elevation:</span>
-                        <span className="text-white ml-2">
+                        <span className="text-slate-900 ml-2">
                           {Math.max(
                             ...elevationPoints.map((p) => p.z)
                           ).toFixed(1)}
@@ -634,13 +634,13 @@ export default function TerrainPage() {
                       </div>
                       <div>
                         <span className="text-slate-500">Points:</span>
-                        <span className="text-white ml-2">
+                        <span className="text-slate-900 ml-2">
                           {elevationPoints.length}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-500">Slope:</span>
-                        <span className="text-white ml-2">
+                        <span className="text-slate-900 ml-2">
                           {(
                             ((Math.max(
                               ...elevationPoints.map((p) => p.z)

@@ -209,7 +209,7 @@ function PluAnalysisPageContent() {
       <Navigation>
         <div className="p-6 max-w-2xl mx-auto">
           <p className="text-slate-400">Please sign in to view PLU Analysis.</p>
-          <Link href="/login" className="text-blue-400 hover:underline mt-2 inline-block">Sign in</Link>
+          <Link href="/login" className="text-blue-600 hover:underline mt-2 inline-block">Sign in</Link>
         </div>
       </Navigation>
     );
@@ -220,7 +220,7 @@ function PluAnalysisPageContent() {
       <Navigation>
         <div className="p-6 max-w-2xl mx-auto">
           <p className="text-slate-400">Select a project to view PLU Analysis.</p>
-          <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block flex items-center gap-2">
+          <Link href="/projects" className="text-blue-600 hover:underline mt-2 inline-block flex items-center gap-2">
             <FolderKanban className="w-4 h-4" /> Projects
           </Link>
         </div>
@@ -232,7 +232,7 @@ function PluAnalysisPageContent() {
     return (
       <Navigation>
         <div className="p-6 flex justify-center min-h-[40vh]">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         </div>
       </Navigation>
     );
@@ -243,7 +243,7 @@ function PluAnalysisPageContent() {
       <Navigation>
         <div className="p-6 max-w-2xl mx-auto">
           <p className="text-slate-400">Project not found.</p>
-          <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block">← Back to projects</Link>
+          <Link href="/projects" className="text-blue-600 hover:underline mt-2 inline-block">← Back to projects</Link>
         </div>
       </Navigation>
     );
@@ -265,11 +265,11 @@ function PluAnalysisPageContent() {
         <div className="mb-8">
           <Link
             href={projectId ? `/projects/${projectId}` : "/projects"}
-            className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
+            className="text-sm text-slate-400 hover:text-slate-900 transition-colors inline-flex items-center gap-1"
           >
             ← {projectId ? "Back to project" : "Projects"}
           </Link>
-          <h1 className="text-2xl lg:text-3xl font-bold text-white mt-2 flex items-center gap-3">
+          <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 mt-2 flex items-center gap-3">
             <FileCheck className="w-8 h-8 text-sky-400" />
             PLU Analysis
           </h1>
@@ -283,11 +283,11 @@ function PluAnalysisPageContent() {
 
         {!project.regulatoryAnalysis && (
           <>
-            <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-medium text-white">PLU not yet analyzed</p>
+                  <p className="font-medium text-slate-900">PLU not yet analyzed</p>
                   <p className="text-sm text-slate-400 mt-1">
                     Launch the PLU analysis to load the building footprint rules, regulatory constraints, and compliance basis for this address.
                   </p>
@@ -296,7 +296,7 @@ function PluAnalysisPageContent() {
               <button
                 onClick={() => setShowLaunchConfirm(true)}
                 disabled={runningDetection || !project.coordinates}
-                className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 text-amber-200 font-medium hover:bg-amber-500/30 disabled:opacity-50"
+                className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-100 text-amber-700 font-medium hover:bg-amber-200 disabled:opacity-50"
               >
                 {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
                 {runningDetection ? "Running…" : "Launch PLU analysis"}
@@ -305,24 +305,24 @@ function PluAnalysisPageContent() {
             {showLaunchConfirm && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowLaunchConfirm(false)}>
                 <div
-                  className="rounded-2xl bg-slate-800 border border-white/10 p-6 max-w-md w-full mx-4 shadow-xl"
+                  className="rounded-2xl bg-slate-100 border border-slate-200 p-6 max-w-md w-full mx-4 shadow-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <h3 className="text-lg font-semibold text-white mb-2">Launch PLU analysis?</h3>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">Launch PLU analysis?</h3>
                   <p className="text-sm text-slate-400 mb-6">
                     Are you sure you want to launch the PLU analysis? Once validated, any additional analysis will be charged {pluCreditsCost} credits.
                   </p>
                   <div className="flex gap-3 justify-end">
                     <button
                       onClick={() => setShowLaunchConfirm(false)}
-                      className="px-4 py-2 rounded-xl bg-slate-700 text-white hover:bg-slate-600"
+                      className="px-4 py-2 rounded-xl bg-slate-100 text-slate-900 hover:bg-slate-200"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={runPluDetection}
                       disabled={runningDetection}
-                      className="px-4 py-2 rounded-xl bg-amber-500/80 text-white font-medium hover:bg-amber-500 disabled:opacity-50 inline-flex items-center gap-2"
+                      className="px-4 py-2 rounded-xl bg-amber-500/80 text-slate-900 font-medium hover:bg-amber-500 disabled:opacity-50 inline-flex items-center gap-2"
                     >
                       {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                       Launch
@@ -338,19 +338,19 @@ function PluAnalysisPageContent() {
           <>
             {/* Building footprint */}
             <section className="mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">Building footprint</h2>
-              <div className="rounded-xl bg-slate-800/50 border border-white/10 p-4">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Building footprint</h2>
+              <div className="rounded-xl bg-white border border-slate-200 p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wider">Projected footprint</p>
-                    <p className="text-xl font-semibold text-white">
+                    <p className="text-xl font-semibold text-slate-900">
                       {footprintProjected > 0 ? `${footprintProjected.toFixed(1)} m²` : "—"}
                     </p>
                     <p className="text-xs text-slate-400 mt-1">From site plan (or enter on Site Plan step)</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 uppercase tracking-wider">Max allowed (PLU CES)</p>
-                    <p className="text-xl font-semibold text-white">
+                    <p className="text-xl font-semibold text-slate-900">
                       {maxFootprintM2 > 0 ? `${maxFootprintM2.toFixed(0)} m²` : "—"}
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
@@ -361,11 +361,11 @@ function PluAnalysisPageContent() {
                 {maxFootprintM2 > 0 && footprintProjected > 0 && (
                   <div className="mt-4 flex items-center gap-2">
                     {footprintOk ? (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     ) : (
-                      <XCircle className="w-5 h-5 text-red-400 shrink-0" />
+                      <XCircle className="w-5 h-5 text-red-600 shrink-0" />
                     )}
-                    <span className={footprintOk ? "text-emerald-300" : "text-red-300"}>
+                    <span className={footprintOk ? "text-emerald-700" : "text-red-600"}>
                       {footprintOk
                         ? "Footprint within PLU limit."
                         : `Footprint exceeds limit by ${(footprintProjected - maxFootprintM2).toFixed(1)} m². Reduce on Site Plan or verify PLU rules.`}
@@ -377,8 +377,8 @@ function PluAnalysisPageContent() {
 
             {/* Special case: PLU defines footprint differently */}
             <section className="mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">Footprint definition (PLU)</h2>
-              <div className="rounded-xl bg-slate-800/50 border border-white/10 p-4">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Footprint definition (PLU)</h2>
+              <div className="rounded-xl bg-white border border-slate-200 p-4">
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
@@ -399,9 +399,9 @@ function PluAnalysisPageContent() {
                         setSavingFootprintPref(false);
                       }
                     }}
-                    className="mt-1 rounded border-white/20 bg-slate-800 text-sky-500 focus:ring-sky-500"
+                    className="mt-1 rounded border-slate-300 bg-slate-100 text-sky-500 focus:ring-sky-500"
                   />
-                  <span className="text-slate-300">
+                  <span className="text-slate-600">
                     My PLU defines the building footprint differently from the standard (e.g. roof overhangs or other elements are included in the footprint).
                   </span>
                 </label>
@@ -426,29 +426,29 @@ function PluAnalysisPageContent() {
 
             {/* Regulatory constraints */}
             <section className="mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">Regulatory constraints</h2>
-              <div className="rounded-xl bg-slate-800/50 border border-white/10 overflow-hidden">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Regulatory constraints</h2>
+              <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-slate-700/50 text-left">
-                      <th className="px-4 py-3 text-slate-300 font-medium">Constraint</th>
-                      <th className="px-4 py-3 text-slate-300 font-medium">Value</th>
+                    <tr className="bg-slate-100 text-left">
+                      <th className="px-4 py-3 text-slate-600 font-medium">Constraint</th>
+                      <th className="px-4 py-3 text-slate-600 font-medium">Value</th>
                     </tr>
                   </thead>
-                  <tbody className="text-slate-300">
-                    <tr className="border-t border-white/5">
+                  <tbody className="text-slate-600">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Zone</td>
-                      <td className="px-4 py-2 font-medium text-white">{zoneLabel ?? "—"}</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">{zoneLabel ?? "—"}</td>
                     </tr>
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Max height</td>
                       <td className="px-4 py-2">{(reg?.maxHeight as number) ?? "—"} m</td>
                     </tr>
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Max coverage (CES)</td>
                       <td className="px-4 py-2">{((reg?.maxCoverageRatio as number) ?? 0) * 100}%</td>
                     </tr>
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Setbacks (front / side / rear)</td>
                       <td className="px-4 py-2">
                         {reg?.setbacks && typeof reg.setbacks === "object"
@@ -456,11 +456,11 @@ function PluAnalysisPageContent() {
                           : "—"}
                       </td>
                     </tr>
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Green space</td>
                       <td className="px-4 py-2">{(reg?.greenSpaceRequirements as string) || "—"}</td>
                     </tr>
-                    <tr className="border-t border-white/5">
+                    <tr className="border-t border-slate-100">
                       <td className="px-4 py-2">Parking</td>
                       <td className="px-4 py-2">{(reg?.parkingRequirements as string) || "—"}</td>
                     </tr>
@@ -472,31 +472,31 @@ function PluAnalysisPageContent() {
             {/* Compliance summary (from site plan) */}
             {complianceSummary && (
               <section className="mb-8">
-                <h2 className="text-lg font-semibold text-white mb-4">Compliance with PLU</h2>
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Compliance with PLU</h2>
                 <p className="text-slate-400 text-sm mb-3">
                   Based on the current Site Plan. Update the site plan to refresh these results.
                 </p>
-                <div className="rounded-xl bg-slate-800/50 border border-white/10 overflow-hidden">
+                <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
                   {complianceSummary.summary && (
-                    <div className="px-4 py-3 bg-slate-700/50 flex flex-wrap gap-4 text-sm">
-                      <span className="text-emerald-400">{complianceSummary.summary.compliant} compliant</span>
-                      <span className="text-amber-400">{complianceSummary.summary.warnings} warning(s)</span>
-                      <span className="text-red-400">{complianceSummary.summary.violations} violation(s)</span>
+                    <div className="px-4 py-3 bg-slate-100 flex flex-wrap gap-4 text-sm">
+                      <span className="text-emerald-600">{complianceSummary.summary.compliant} compliant</span>
+                      <span className="text-amber-600">{complianceSummary.summary.warnings} warning(s)</span>
+                      <span className="text-red-600">{complianceSummary.summary.violations} violation(s)</span>
                       {complianceSummary.summary.isCompliant ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                       ) : (
-                        <AlertTriangle className="w-5 h-5 text-amber-400" />
+                        <AlertTriangle className="w-5 h-5 text-amber-600" />
                       )}
                     </div>
                   )}
-                  <ul className="divide-y divide-white/5 max-h-64 overflow-y-auto">
+                  <ul className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
                     {complianceSummary.checks?.map((c, i) => (
                       <li key={i} className="px-4 py-2 flex items-start gap-2">
-                        {c.status === "compliant" && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />}
-                        {c.status === "warning" && <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />}
-                        {c.status === "violation" && <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />}
+                        {c.status === "compliant" && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />}
+                        {c.status === "warning" && <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />}
+                        {c.status === "violation" && <XCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
                         <div>
-                          <p className="text-slate-200 font-medium">{c.rule}</p>
+                          <p className="text-slate-700 font-medium">{c.rule}</p>
                           <p className="text-slate-400 text-xs">{c.message}</p>
                           {c.suggestion && <p className="text-sky-300 text-xs mt-1">{c.suggestion}</p>}
                         </div>
@@ -515,7 +515,7 @@ function PluAnalysisPageContent() {
 
             {project.regulatoryAnalysis?.pdfUrl && (
               <section className="mb-8">
-                <h2 className="text-lg font-semibold text-white mb-2">Official PLU document</h2>
+                <h2 className="text-lg font-semibold text-slate-900 mb-2">Official PLU document</h2>
                 <a
                   href={project.regulatoryAnalysis.pdfUrl}
                   target="_blank"
@@ -529,7 +529,7 @@ function PluAnalysisPageContent() {
 
             {/* PDF Export */}
             <section className="mb-8">
-              <h2 className="text-lg font-semibold text-white mb-4">Export</h2>
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Export</h2>
               <p className="text-slate-400 text-sm mb-3">
                 Download a summary of the PLU constraints and recommendations for this project.
               </p>
@@ -546,12 +546,12 @@ function PluAnalysisPageContent() {
         )}
 
         {/* Step navigation */}
-        <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-slate-800/50 border border-white/10">
+        <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-white border border-slate-200">
           <div>
             {prevStep && (
               <Link
                 href={prevStep.href}
-                className="text-sm text-slate-400 hover:text-white inline-flex items-center gap-1"
+                className="text-sm text-slate-400 hover:text-slate-900 inline-flex items-center gap-1"
               >
                 ← {prevStep.label}
               </Link>
@@ -567,7 +567,7 @@ function PluAnalysisPageContent() {
             ) : (
               <Link
                 href={`/export?project=${project.id}`}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-medium hover:bg-emerald-500/30"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-100 text-emerald-700 font-medium hover:bg-emerald-200"
               >
                 <Download className="w-4 h-4" />
                 Go to export
@@ -585,7 +585,7 @@ export default function PluAnalysisPage() {
     <React.Suspense fallback={
       <Navigation>
         <div className="p-6 flex justify-center min-h-[40vh]">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         </div>
       </Navigation>
     }>

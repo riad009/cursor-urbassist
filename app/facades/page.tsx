@@ -855,24 +855,24 @@ export default function FacadesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-white text-slate-900">
       {/* Header */}
-      <header className="h-14 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-900/50">
+      <header className="h-14 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-50">
         <div className="flex items-center gap-4">
-          <Link href="/editor" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+          <Link href="/editor" className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
             <ArrowLeft className="w-4 h-4" />
             <span>Back to Plan</span>
           </Link>
-          <div className="h-6 w-px bg-slate-700" />
+          <div className="h-6 w-px bg-slate-100" />
           <div className="flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-blue-400" />
+            <Building2 className="w-5 h-5 text-blue-600" />
             <h1 className="font-semibold">Facade Editor</h1>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           {/* View selector */}
-          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
             {(["north", "south", "east", "west"] as FacadeView[]).map((view) => (
               <button
                 key={view}
@@ -880,8 +880,8 @@ export default function FacadesPage() {
                 className={cn(
                   "px-3 py-1 text-sm rounded-md transition-colors capitalize",
                   activeView === view
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-400 hover:text-white hover:bg-slate-700"
+                    ? "bg-blue-600 text-slate-900"
+                    : "text-slate-400 hover:text-slate-900 hover:bg-slate-100"
                 )}
               >
                 {view}
@@ -896,7 +896,7 @@ export default function FacadesPage() {
               const scale = FACADE_SCALES.find(s => s.label === e.target.value);
               if (scale) setCurrentScale(scale);
             }}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm"
+            className="bg-slate-100 border border-slate-700 rounded-lg px-3 py-1.5 text-sm"
           >
             {FACADE_SCALES.map((scale) => (
               <option key={scale.label} value={scale.label}>
@@ -917,7 +917,7 @@ export default function FacadesPage() {
 
       <div className="flex h-[calc(100vh-3.5rem)]">
         {/* Left sidebar - Element Library */}
-        <aside className="w-64 border-r border-slate-800 bg-slate-900/50 overflow-y-auto">
+        <aside className="w-64 border-r border-slate-800 bg-slate-50 overflow-y-auto">
           <div className="p-4">
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-4">
               Architectural Elements
@@ -933,7 +933,7 @@ export default function FacadesPage() {
                     <button
                       key={element.id}
                       onClick={() => addElement(element)}
-                      className="flex flex-col items-center gap-1 p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
+                      className="flex flex-col items-center gap-1 p-3 bg-slate-100 hover:bg-slate-100 rounded-lg transition-colors group"
                     >
                       <div
                         className="w-8 h-8 rounded flex items-center justify-center"
@@ -941,7 +941,7 @@ export default function FacadesPage() {
                       >
                         {element.icon}
                       </div>
-                      <span className="text-xs text-slate-400 group-hover:text-white text-center">
+                      <span className="text-xs text-slate-400 group-hover:text-slate-900 text-center">
                         {element.name}
                       </span>
                     </button>
@@ -959,7 +959,7 @@ export default function FacadesPage() {
                     <button
                       key={element.id}
                       onClick={() => addElement(element)}
-                      className="flex flex-col items-center gap-1 p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
+                      className="flex flex-col items-center gap-1 p-3 bg-slate-100 hover:bg-slate-100 rounded-lg transition-colors group"
                     >
                       <div
                         className="w-8 h-8 rounded flex items-center justify-center"
@@ -967,7 +967,7 @@ export default function FacadesPage() {
                       >
                         {element.icon}
                       </div>
-                      <span className="text-xs text-slate-400 group-hover:text-white text-center">
+                      <span className="text-xs text-slate-400 group-hover:text-slate-900 text-center">
                         {element.name}
                       </span>
                     </button>
@@ -985,7 +985,7 @@ export default function FacadesPage() {
                     <button
                       key={element.id}
                       onClick={() => addElement(element)}
-                      className="flex flex-col items-center gap-1 p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
+                      className="flex flex-col items-center gap-1 p-3 bg-slate-100 hover:bg-slate-100 rounded-lg transition-colors group"
                     >
                       <div
                         className="w-8 h-8 rounded flex items-center justify-center"
@@ -993,7 +993,7 @@ export default function FacadesPage() {
                       >
                         {element.icon}
                       </div>
-                      <span className="text-xs text-slate-400 group-hover:text-white text-center">
+                      <span className="text-xs text-slate-400 group-hover:text-slate-900 text-center">
                         {element.name}
                       </span>
                     </button>
@@ -1011,7 +1011,7 @@ export default function FacadesPage() {
                     <button
                       key={element.id}
                       onClick={() => addElement(element)}
-                      className="flex flex-col items-center gap-1 p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
+                      className="flex flex-col items-center gap-1 p-3 bg-slate-100 hover:bg-slate-100 rounded-lg transition-colors group"
                     >
                       <div
                         className="w-8 h-8 rounded flex items-center justify-center"
@@ -1019,7 +1019,7 @@ export default function FacadesPage() {
                       >
                         {element.icon}
                       </div>
-                      <span className="text-xs text-slate-400 group-hover:text-white text-center">
+                      <span className="text-xs text-slate-400 group-hover:text-slate-900 text-center">
                         {element.name}
                       </span>
                     </button>
@@ -1041,7 +1041,7 @@ export default function FacadesPage() {
                   type="number"
                   value={buildingWidth}
                   onChange={(e) => setBuildingWidth(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm"
+                  className="w-full bg-slate-100 border border-slate-700 rounded px-3 py-1.5 text-sm"
                   step="0.5"
                   min="1"
                 />
@@ -1053,7 +1053,7 @@ export default function FacadesPage() {
                   type="number"
                   value={buildingHeight}
                   onChange={(e) => setBuildingHeight(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm"
+                  className="w-full bg-slate-100 border border-slate-700 rounded px-3 py-1.5 text-sm"
                   step="0.5"
                   min="1"
                 />
@@ -1065,7 +1065,7 @@ export default function FacadesPage() {
                   type="number"
                   value={numFloors}
                   onChange={(e) => setNumFloors(parseInt(e.target.value) || 1)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm"
+                  className="w-full bg-slate-100 border border-slate-700 rounded px-3 py-1.5 text-sm"
                   min="1"
                   max="10"
                 />
@@ -1077,7 +1077,7 @@ export default function FacadesPage() {
                   type="number"
                   value={groundLevel}
                   onChange={(e) => setGroundLevel(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm"
+                  className="w-full bg-slate-100 border border-slate-700 rounded px-3 py-1.5 text-sm"
                   step="0.1"
                   min="0"
                 />
@@ -1095,7 +1095,7 @@ export default function FacadesPage() {
         </aside>
 
         {/* Main canvas area */}
-        <main className="flex-1 overflow-auto bg-slate-950 p-6">
+        <main className="flex-1 overflow-auto bg-white p-6">
           {/* Toolbar */}
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1103,7 +1103,7 @@ export default function FacadesPage() {
                 onClick={() => setActiveTool("select")}
                 className={cn(
                   "p-2 rounded-lg transition-colors",
-                  activeTool === "select" ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
+                  activeTool === "select" ? "bg-blue-600 text-slate-900" : "bg-slate-100 text-slate-400 hover:text-slate-900"
                 )}
               >
                 <MousePointer2 className="w-5 h-5" />
@@ -1112,39 +1112,39 @@ export default function FacadesPage() {
                 onClick={() => setActiveTool("pan")}
                 className={cn(
                   "p-2 rounded-lg transition-colors",
-                  activeTool === "pan" ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
+                  activeTool === "pan" ? "bg-blue-600 text-slate-900" : "bg-slate-100 text-slate-400 hover:text-slate-900"
                 )}
               >
                 <Move className="w-5 h-5" />
               </button>
-              <div className="w-px h-6 bg-slate-700 mx-2" />
+              <div className="w-px h-6 bg-slate-100 mx-2" />
               <button
                 onClick={handleDelete}
                 disabled={!selectedElement}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-red-400 disabled:opacity-50 transition-colors"
+                className="p-2 rounded-lg bg-slate-100 text-slate-400 hover:text-red-600 disabled:opacity-50 transition-colors"
               >
                 <Trash2 className="w-5 h-5" />
               </button>
               <button
                 onClick={handleDuplicate}
                 disabled={!selectedElement}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50 transition-colors"
+                className="p-2 rounded-lg bg-slate-100 text-slate-400 hover:text-slate-900 disabled:opacity-50 transition-colors"
               >
                 <Copy className="w-5 h-5" />
               </button>
               <button
                 onClick={handleFlipHorizontal}
                 disabled={!selectedElement}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50 transition-colors"
+                className="p-2 rounded-lg bg-slate-100 text-slate-400 hover:text-slate-900 disabled:opacity-50 transition-colors"
               >
                 <FlipHorizontal className="w-5 h-5" />
               </button>
-              <div className="w-px h-6 bg-slate-700 mx-2" />
+              <div className="w-px h-6 bg-slate-100 mx-2" />
               <button
                 onClick={() => setShowGrid(!showGrid)}
                 className={cn(
                   "p-2 rounded-lg transition-colors",
-                  showGrid ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400"
+                  showGrid ? "bg-slate-100 text-slate-900" : "bg-slate-100 text-slate-400"
                 )}
               >
                 <Grid3X3 className="w-5 h-5" />
@@ -1153,7 +1153,7 @@ export default function FacadesPage() {
                 onClick={() => setShowLevels(!showLevels)}
                 className={cn(
                   "p-2 rounded-lg transition-colors",
-                  showLevels ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400"
+                  showLevels ? "bg-slate-100 text-slate-900" : "bg-slate-100 text-slate-400"
                 )}
               >
                 <ArrowUpDown className="w-5 h-5" />
@@ -1163,14 +1163,14 @@ export default function FacadesPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handleZoom(-25)}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                className="p-2 rounded-lg bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors"
               >
                 <ZoomOut className="w-5 h-5" />
               </button>
               <span className="text-sm text-slate-400 w-16 text-center">{zoom}%</span>
               <button
                 onClick={() => handleZoom(25)}
-                className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                className="p-2 rounded-lg bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors"
               >
                 <ZoomIn className="w-5 h-5" />
               </button>
@@ -1178,13 +1178,13 @@ export default function FacadesPage() {
           </div>
 
           {/* Canvas container */}
-          <div className="flex items-center justify-center bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden">
+          <div className="flex items-center justify-center bg-slate-50 rounded-xl border border-slate-800 overflow-hidden">
             <canvas ref={canvasRef} className="shadow-2xl" />
           </div>
 
           {/* View title */}
           <div className="mt-4 text-center">
-            <span className="text-lg font-semibold text-slate-300 capitalize">
+            <span className="text-lg font-semibold text-slate-600 capitalize">
               {activeView} Facade
             </span>
             <span className="text-slate-500 ml-2">
@@ -1194,7 +1194,7 @@ export default function FacadesPage() {
         </main>
 
         {/* Right sidebar - Properties */}
-        <aside className="w-64 border-l border-slate-800 bg-slate-900/50 p-4">
+        <aside className="w-64 border-l border-slate-800 bg-slate-50 p-4">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-4">
             Properties
           </h2>
@@ -1203,7 +1203,7 @@ export default function FacadesPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Element</label>
-                <p className="text-sm text-white">
+                <p className="text-sm text-slate-900">
                   {(selectedElement as any).elementName || selectedElement.type || "Unknown"}
                 </p>
               </div>
@@ -1213,11 +1213,11 @@ export default function FacadesPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-xs text-slate-600">X:</span>
-                    <p className="text-sm text-white">{formatMeasurement(pixelsToMeters(selectedElement.left || 0))}</p>
+                    <p className="text-sm text-slate-900">{formatMeasurement(pixelsToMeters(selectedElement.left || 0))}</p>
                   </div>
                   <div>
                     <span className="text-xs text-slate-600">Y:</span>
-                    <p className="text-sm text-white">{formatMeasurement(pixelsToMeters(selectedElement.top || 0))}</p>
+                    <p className="text-sm text-slate-900">{formatMeasurement(pixelsToMeters(selectedElement.top || 0))}</p>
                   </div>
                 </div>
               </div>
@@ -1227,13 +1227,13 @@ export default function FacadesPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-xs text-slate-600">W:</span>
-                    <p className="text-sm text-white">
+                    <p className="text-sm text-slate-900">
                       {formatMeasurement(pixelsToMeters((selectedElement.width || 0) * (selectedElement.scaleX || 1)))}
                     </p>
                   </div>
                   <div>
                     <span className="text-xs text-slate-600">H:</span>
-                    <p className="text-sm text-white">
+                    <p className="text-sm text-slate-900">
                       {formatMeasurement(pixelsToMeters((selectedElement.height || 0) * (selectedElement.scaleY || 1)))}
                     </p>
                   </div>
@@ -1242,7 +1242,7 @@ export default function FacadesPage() {
 
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Rotation</label>
-                <p className="text-sm text-white">{(selectedElement.angle || 0).toFixed(1)}°</p>
+                <p className="text-sm text-slate-900">{(selectedElement.angle || 0).toFixed(1)}°</p>
               </div>
             </div>
           ) : (
@@ -1273,7 +1273,7 @@ export default function FacadesPage() {
           </div>
 
           {/* Tips */}
-          <div className="mt-8 p-3 bg-slate-800/50 rounded-lg">
+          <div className="mt-8 p-3 bg-white rounded-lg">
             <h3 className="text-xs font-medium text-slate-400 mb-2">Tips</h3>
             <ul className="text-xs text-slate-500 space-y-1">
               <li>• Click elements to add to canvas</li>

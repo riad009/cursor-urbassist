@@ -138,10 +138,10 @@ const mockAnalysis: AnalysisResult[] = [
 ];
 
 const statusConfig = {
-  compliant: { label: "Compliant", color: "text-emerald-400", bg: "bg-emerald-500/20", icon: CheckCircle2 },
-  warning: { label: "Warning", color: "text-amber-400", bg: "bg-amber-500/20", icon: AlertTriangle },
-  violation: { label: "Violation", color: "text-red-400", bg: "bg-red-500/20", icon: XCircle },
-  info: { label: "Info", color: "text-blue-400", bg: "bg-blue-500/20", icon: Info },
+  compliant: { label: "Compliant", color: "text-emerald-600", bg: "bg-emerald-100", icon: CheckCircle2 },
+  warning: { label: "Warning", color: "text-amber-600", bg: "bg-amber-100", icon: AlertTriangle },
+  violation: { label: "Violation", color: "text-red-600", bg: "bg-red-50", icon: XCircle },
+  info: { label: "Info", color: "text-blue-600", bg: "bg-blue-100", icon: Info },
 };
 
 const categoryIcons: Record<string, React.ElementType> = {
@@ -854,7 +854,7 @@ Context:
             {projectIdFromUrl && (
               <Link
                 href={`/projects/${projectIdFromUrl}`}
-                className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white mb-3 transition-colors"
+                className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-900 mb-3 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to project
@@ -862,16 +862,16 @@ Context:
             )}
             <div className="flex items-center gap-2 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
-                <Brain className="w-5 h-5 text-white" />
+                <Brain className="w-5 h-5 text-slate-900" />
               </div>
-              <h1 className="text-2xl font-bold text-white">AI Document Analysis</h1>
+              <h1 className="text-2xl font-bold text-slate-900">AI Document Analysis</h1>
             </div>
             <p className="text-slate-400">Upload PLU documents for intelligent regulatory analysis powered by AI</p>
           </div>
           {analysisComplete && (
             <button
               onClick={resetAnalysis}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 font-medium hover:bg-slate-100 transition-colors"
             >
               <RefreshCw className="w-5 h-5" />
               New Analysis
@@ -883,12 +883,12 @@ Context:
           /* Upload / Address Section */
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className="flex gap-2 p-1 rounded-xl bg-slate-800/50">
+              <div className="flex gap-2 p-1 rounded-xl bg-white">
                 <button
                   onClick={() => setAnalysisMode("document")}
                   className={cn(
                     "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
-                    analysisMode === "document" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                    analysisMode === "document" ? "bg-violet-500/30 text-slate-900" : "text-slate-400 hover:text-slate-900"
                   )}
                 >
                   Upload PLU Document
@@ -897,7 +897,7 @@ Context:
                   onClick={() => setAnalysisMode("address")}
                   className={cn(
                     "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
-                    analysisMode === "address" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                    analysisMode === "address" ? "bg-violet-500/30 text-slate-900" : "text-slate-400 hover:text-slate-900"
                   )}
                 >
                   Search by Address
@@ -906,7 +906,7 @@ Context:
                   onClick={() => setAnalysisMode("project")}
                   className={cn(
                     "flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
-                    analysisMode === "project" ? "bg-violet-500/30 text-white" : "text-slate-400 hover:text-white"
+                    analysisMode === "project" ? "bg-violet-500/30 text-slate-900" : "text-slate-400 hover:text-slate-900"
                   )}
                 >
                   From project
@@ -921,10 +921,10 @@ Context:
                 className={cn(
                   "relative border-2 border-dashed rounded-2xl p-8 text-center transition-all",
                   dragActive
-                    ? "border-blue-500 bg-blue-500/10"
+                    ? "border-blue-500 bg-blue-50"
                     : file
                     ? "border-emerald-500/50 bg-emerald-500/5"
-                    : "border-white/20 hover:border-white/40 bg-slate-800/30"
+                    : "border-slate-300 hover:border-white/40 bg-slate-100/30"
                 )}
               >
                 {!file && (
@@ -938,11 +938,11 @@ Context:
                 
                 {file ? (
                   <div className="space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto">
-                      <FileText className="w-8 h-8 text-emerald-400" />
+                    <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto">
+                      <FileText className="w-8 h-8 text-emerald-600" />
                     </div>
                     <div>
-                      <p className="text-lg font-semibold text-white">{file.name}</p>
+                      <p className="text-lg font-semibold text-slate-900">{file.name}</p>
                       <p className="text-sm text-slate-400 mt-1">
                         {(file.size / 1024 / 1024).toFixed(2)} MB • Ready to analyze
                       </p>
@@ -955,7 +955,7 @@ Context:
                           analyzeDocument();
                         }}
                         disabled={isAnalyzing}
-                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50"
                       >
                         {isAnalyzing ? (
                           <>
@@ -975,7 +975,7 @@ Context:
                           e.stopPropagation();
                           setFile(null);
                         }}
-                        className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-700 text-slate-300 font-medium hover:bg-slate-600 transition-all"
+                        className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-100 text-slate-600 font-medium hover:bg-slate-200 transition-all"
                       >
                         Change File
                       </button>
@@ -983,11 +983,11 @@ Context:
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-slate-700/50 flex items-center justify-center mx-auto">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
                       <Upload className="w-8 h-8 text-slate-400" />
                     </div>
                     <div>
-                      <p className="text-lg font-semibold text-white">Drop your PLU document here</p>
+                      <p className="text-lg font-semibold text-slate-900">Drop your PLU document here</p>
                       <p className="text-sm text-slate-400 mt-1">or click to browse files</p>
                     </div>
                     <p className="text-xs text-slate-500">Supports PDF, DOC, DOCX, TXT up to 50MB</p>
@@ -995,19 +995,19 @@ Context:
                 )}
               </div>
             ) : analysisMode === "project" ? (
-              <div className="border-2 border-dashed border-white/20 rounded-2xl p-8 bg-slate-800/30">
+              <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
                 <div className="space-y-4">
                   <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
                     <MapPin className="w-8 h-8 text-violet-400" />
                   </div>
                   <div>
-                    <p className="text-lg font-semibold text-white mb-2">Automatic regulatory from project</p>
+                    <p className="text-lg font-semibold text-slate-900 mb-2">Automatic regulatory from project</p>
                     <p className="text-sm text-slate-400">Run PLU detection and save zone + PDF URL to the project (project must have address and coordinates).</p>
                   </div>
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white"
+                    className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900"
                   >
                     <option value="">Select project</option>
                     {projects.map((p) => (
@@ -1017,7 +1017,7 @@ Context:
                   <button
                     onClick={() => runAutoRegulatory()}
                     disabled={!selectedProjectId || autoRunning}
-                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold hover:shadow-lg transition-all disabled:opacity-50"
+                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg transition-all disabled:opacity-50"
                   >
                     {autoRunning ? (
                       <>
@@ -1033,14 +1033,14 @@ Context:
                   </button>
                   <p className="text-xs text-slate-500">The analysis covers articles 1–16 (CNIG standard): occupations, setbacks, height, coverage, parking, green space, architecture, risks, etc.</p>
                   {autoMessage && (
-                    <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-400" : "text-red-400")}>
+                    <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-600" : "text-red-600")}>
                       {autoMessage.text}
                     </p>
                   )}
                   {/* Fallback: upload your own PLU if zone not detected */}
                   {showUploadFallback && (
-                    <div className="mt-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3">
-                      <p className="text-sm font-medium text-amber-200">
+                    <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-3">
+                      <p className="text-sm font-medium text-amber-700">
                         Zone not detected automatically. Upload your PLU document for analysis.
                       </p>
                       <p className="text-xs text-slate-400">
@@ -1050,14 +1050,14 @@ Context:
                         type="file"
                         accept=".pdf,.doc,.docx,.txt"
                         onChange={(e) => setFallbackFile(e.target.files?.[0] || null)}
-                        className="block text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600"
+                        className="block text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
                       />
                       {fallbackFile && (
                         <button
                           type="button"
                           onClick={handleFallbackUpload}
                           disabled={uploadingFallback || autoRunning}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/30 text-amber-200 text-sm font-medium hover:bg-amber-500/50 disabled:opacity-50"
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/30 text-amber-700 text-sm font-medium hover:bg-amber-500/50 disabled:opacity-50"
                         >
                           {uploadingFallback ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                           Analyze uploaded PLU (3 credits)
@@ -1068,13 +1068,13 @@ Context:
                 </div>
               </div>
             ) : (
-              <div className="border-2 border-dashed border-white/20 rounded-2xl p-8 bg-slate-800/30">
+              <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
                 <div className="space-y-4">
                   <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
                     <MapPin className="w-8 h-8 text-violet-400" />
                   </div>
                   <div>
-                    <p className="text-lg font-semibold text-white mb-2">Enter address for PLU zone detection</p>
+                    <p className="text-lg font-semibold text-slate-900 mb-2">Enter address for PLU zone detection</p>
                     <p className="text-sm text-slate-400">We'll detect the PLU zone and basic regulations from the address</p>
                   </div>
                   <div className="relative overflow-visible">
@@ -1084,7 +1084,7 @@ Context:
                       onChange={(e) => setAddressForPlu(e.target.value)}
                       onFocus={() => addressForPlu.trim().length >= 3 && searchAddressForPlu()}
                       placeholder="e.g. 5 rue de la République, 06000 Nice"
-                      className="w-full px-4 py-3 pr-10 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                      className="w-full px-4 py-3 pr-10 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                       autoComplete="off"
                     />
                     {loadingAddress && (
@@ -1094,7 +1094,7 @@ Context:
                       <p className="absolute top-full left-0 right-0 mt-2 text-xs text-slate-500">No addresses found. Try a different search.</p>
                     )}
                     {addressSuggestions.length > 0 && (
-                      <ul className="absolute top-full left-0 right-0 mt-1 rounded-xl bg-slate-800 border border-white/10 shadow-xl z-50 max-h-60 overflow-y-auto">
+                      <ul className="absolute top-full left-0 right-0 mt-1 rounded-xl bg-slate-100 border border-slate-200 shadow-xl z-50 max-h-60 overflow-y-auto">
                         {addressSuggestions.map((a, i) => (
                           <li key={i}>
                             <button
@@ -1106,7 +1106,7 @@ Context:
                                   analyzeByAddress(a.coordinates);
                                 }
                               }}
-                              className="w-full px-4 py-3 text-left text-sm text-white hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors"
+                              className="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-100 first:rounded-t-xl last:rounded-b-xl transition-colors"
                             >
                               {a.label}
                             </button>
@@ -1131,13 +1131,13 @@ Context:
             )}
 
               {isAnalyzing && (
-                <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10">
+                <div className="p-6 rounded-2xl bg-white border border-slate-200">
                   <div className="flex items-center gap-4 mb-4">
                     <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
                       <Brain className="w-5 h-5 text-violet-400 animate-pulse" />
                     </div>
                     <div>
-                      <p className="text-white font-medium">AI Analysis in Progress</p>
+                      <p className="text-slate-900 font-medium">AI Analysis in Progress</p>
                       <p className="text-sm text-slate-400">Extracting regulatory requirements...</p>
                     </div>
                   </div>
@@ -1146,17 +1146,17 @@ Context:
                       <div key={step} className="flex items-center gap-3">
                         <div className={cn(
                           "w-6 h-6 rounded-full flex items-center justify-center",
-                          i < 2 ? "bg-emerald-500/20" : "bg-slate-700"
+                          i < 2 ? "bg-emerald-100" : "bg-slate-100"
                         )}>
                           {i < 2 ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                           ) : (
                             <div className="w-2 h-2 rounded-full bg-slate-500" />
                           )}
                         </div>
                         <span className={cn(
                           "text-sm",
-                          i < 2 ? "text-slate-300" : "text-slate-500"
+                          i < 2 ? "text-slate-600" : "text-slate-500"
                         )}>{step}</span>
                       </div>
                     ))}
@@ -1167,12 +1167,12 @@ Context:
 
             {/* Info Panel */}
             <div className="space-y-4">
-              <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-500/20">
+              <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-500/10 to-purple-50 border border-violet-500/20">
                 <div className="flex items-center gap-3 mb-4">
                   <Sparkles className="w-6 h-6 text-violet-400" />
-                  <h3 className="text-lg font-semibold text-white">AI-Powered Analysis</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">AI-Powered Analysis</h3>
                 </div>
-                <p className="text-slate-300 mb-4">
+                <p className="text-slate-600 mb-4">
                   Our advanced AI analyzes your PLU documents to extract regulatory requirements and check your project's compliance automatically.
                 </p>
                 <ul className="space-y-3">
@@ -1192,13 +1192,13 @@ Context:
                 </ul>
               </div>
 
-              <div className="p-6 rounded-2xl bg-slate-800/30 border border-white/5">
-                <h4 className="text-sm font-medium text-white mb-3">Recent Analyses</h4>
+              <div className="p-6 rounded-2xl bg-slate-100/30 border border-slate-100">
+                <h4 className="text-sm font-medium text-slate-900 mb-3">Recent Analyses</h4>
                 <div className="space-y-2">
                   {["PLU_Nice_Zone_UA.pdf", "Reglement_Urbanisme_2025.pdf", "Zone_Construction_Guide.docx"].map((doc) => (
                     <div key={doc} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
                       <FileText className="w-4 h-4 text-slate-500" />
-                      <span className="text-sm text-slate-300 flex-1 truncate">{doc}</span>
+                      <span className="text-sm text-slate-600 flex-1 truncate">{doc}</span>
                       <Eye className="w-4 h-4 text-slate-500" />
                     </div>
                   ))}
@@ -1211,35 +1211,35 @@ Context:
           <div className="space-y-6">
             {/* Stats */}
             <div className="grid sm:grid-cols-3 gap-4">
-              <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+              <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                    <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                  <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-600" />
                   </div>
                   <div>
-                    <p className="text-3xl font-bold text-emerald-400">{complianceStats.compliant}</p>
+                    <p className="text-3xl font-bold text-emerald-600">{complianceStats.compliant}</p>
                     <p className="text-sm text-slate-400">Compliant</p>
                   </div>
                 </div>
               </div>
-              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+              <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
-                    <AlertTriangle className="w-6 h-6 text-amber-400" />
+                  <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center">
+                    <AlertTriangle className="w-6 h-6 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-3xl font-bold text-amber-400">{complianceStats.warning}</p>
+                    <p className="text-3xl font-bold text-amber-600">{complianceStats.warning}</p>
                     <p className="text-sm text-slate-400">Warnings</p>
                   </div>
                 </div>
               </div>
-              <div className="p-5 rounded-2xl bg-red-500/10 border border-red-500/20">
+              <div className="p-5 rounded-2xl bg-red-50 border border-red-500/20">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
-                    <XCircle className="w-6 h-6 text-red-400" />
+                  <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center">
+                    <XCircle className="w-6 h-6 text-red-600" />
                   </div>
                   <div>
-                    <p className="text-3xl font-bold text-red-400">{complianceStats.violation}</p>
+                    <p className="text-3xl font-bold text-red-600">{complianceStats.violation}</p>
                     <p className="text-sm text-slate-400">Violations</p>
                   </div>
                 </div>
@@ -1249,7 +1249,7 @@ Context:
             {/* Results Grid */}
             <div className="grid lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-4">
-                <h3 className="text-lg font-semibold text-white">Analysis Results</h3>
+                <h3 className="text-lg font-semibold text-slate-900">Analysis Results</h3>
                 <div className="space-y-3">
                   {results.map((result, index) => {
                     const status = statusConfig[result.status];
@@ -1261,8 +1261,8 @@ Context:
                         className={cn(
                           "w-full flex items-center gap-4 p-4 rounded-xl border transition-all text-left",
                           selectedResult === result
-                            ? "bg-slate-700/50 border-blue-500/50"
-                            : "bg-slate-800/50 border-white/10 hover:border-white/20"
+                            ? "bg-slate-100 border-blue-500/50"
+                            : "bg-white border-slate-200 hover:border-slate-300"
                         )}
                       >
                         <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", status.bg)}>
@@ -1270,7 +1270,7 @@ Context:
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <p className="font-medium text-white">{result.title}</p>
+                            <p className="font-medium text-slate-900">{result.title}</p>
                             <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", status.bg, status.color)}>
                               {status.label}
                             </span>
@@ -1278,7 +1278,7 @@ Context:
                           <p className="text-sm text-slate-400 line-clamp-2">{result.requirement}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-lg font-bold text-white">{result.value}</p>
+                          <p className="text-lg font-bold text-slate-900">{result.value}</p>
                           <p className="text-xs text-slate-500">{result.category}</p>
                         </div>
                         <ChevronRight className="w-5 h-5 text-slate-500" />
@@ -1290,9 +1290,9 @@ Context:
 
               {/* Detail Panel */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-white">Details</h3>
+                <h3 className="text-lg font-semibold text-slate-900">Details</h3>
                 {selectedResult ? (
-                  <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10 space-y-4">
+                  <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4">
                     <div className="flex items-center gap-3">
                       <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center", statusConfig[selectedResult.status].bg)}>
                         {(() => {
@@ -1301,23 +1301,23 @@ Context:
                         })()}
                       </div>
                       <div>
-                        <p className="font-semibold text-white">{selectedResult.title}</p>
+                        <p className="font-semibold text-slate-900">{selectedResult.title}</p>
                         <p className="text-sm text-slate-400">{selectedResult.category}</p>
                       </div>
                     </div>
 
                     {(selectedResult.regulationSource || selectedResult.zoneLabel) && (
-                      <div className="space-y-2 pt-2 border-t border-white/10">
+                      <div className="space-y-2 pt-2 border-t border-slate-200">
                         {selectedResult.regulationSource && (
                           <div>
                             <p className="text-xs text-slate-500 mb-1">Regulation source</p>
-                            <p className="text-sm text-slate-300">{selectedResult.regulationSource}</p>
+                            <p className="text-sm text-slate-600">{selectedResult.regulationSource}</p>
                           </div>
                         )}
                         {selectedResult.zoneLabel && (
                           <div>
                             <p className="text-xs text-slate-500 mb-1">Zone</p>
-                            <p className="text-sm text-slate-300">{selectedResult.zoneLabel}</p>
+                            <p className="text-sm text-slate-600">{selectedResult.zoneLabel}</p>
                           </div>
                         )}
                       </div>
@@ -1326,7 +1326,7 @@ Context:
                     <div className="space-y-3">
                       <div>
                         <p className="text-xs text-slate-500 mb-1">Current value</p>
-                        <p className="text-xl font-bold text-white">{selectedResult.value}</p>
+                        <p className="text-xl font-bold text-slate-900">{selectedResult.value}</p>
                         {(selectedResult.minValue != null || selectedResult.maxValue != null) && (
                           <p className="text-xs text-slate-500 mt-1">
                             Allowed range: {[selectedResult.minValue, selectedResult.maxValue].filter(Boolean).join(" – ")}
@@ -1335,30 +1335,30 @@ Context:
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 mb-1">Requirement</p>
-                        <p className="text-sm text-slate-300">{selectedResult.requirement}</p>
+                        <p className="text-sm text-slate-600">{selectedResult.requirement}</p>
                       </div>
                       {selectedResult.fullRequirementText && (
                         <div>
                           <p className="text-xs text-slate-500 mb-1">Full regulatory text</p>
-                          <p className="text-sm text-slate-300 leading-relaxed">{selectedResult.fullRequirementText}</p>
+                          <p className="text-sm text-slate-600 leading-relaxed">{selectedResult.fullRequirementText}</p>
                         </div>
                       )}
                       {selectedResult.context && (
-                        <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                          <p className="text-xs text-blue-400/90 mb-1">How this applies to your project</p>
-                          <p className="text-sm text-slate-300">{selectedResult.context}</p>
+                        <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
+                          <p className="text-xs text-blue-600/90 mb-1">How this applies to your project</p>
+                          <p className="text-sm text-slate-600">{selectedResult.context}</p>
                         </div>
                       )}
                       {selectedResult.articleReference && (
                         <div>
                           <p className="text-xs text-slate-500 mb-1">Article / reference</p>
-                          <p className="text-sm text-slate-300">{selectedResult.articleReference}</p>
+                          <p className="text-sm text-slate-600">{selectedResult.articleReference}</p>
                         </div>
                       )}
                       {selectedResult.recommendation && (
-                        <div className="p-3 rounded-xl bg-slate-700/50">
+                        <div className="p-3 rounded-xl bg-slate-100">
                           <p className="text-xs text-slate-500 mb-1">AI recommendation</p>
-                          <p className="text-sm text-slate-300">{selectedResult.recommendation}</p>
+                          <p className="text-sm text-slate-600">{selectedResult.recommendation}</p>
                         </div>
                       )}
                     </div>
@@ -1368,7 +1368,7 @@ Context:
                         setAiQuestion('');
                         setAiResponse('');
                       }}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 font-medium hover:bg-blue-500/30 transition-colors"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-100 text-blue-600 font-medium hover:bg-blue-200 transition-colors"
                     >
                       <MessageSquare className="w-4 h-4" />
                       Ask AI for Details
@@ -1377,15 +1377,15 @@ Context:
                     {/* AI Dialog */}
                     {showAiDialog && (
                       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg p-6 space-y-4">
+                        <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg p-6 space-y-4">
                           <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-semibold text-white">Ask AI about {selectedResult?.title}</h3>
-                            <button onClick={() => setShowAiDialog(false)} className="text-slate-400 hover:text-white">
+                            <h3 className="text-lg font-semibold text-slate-900">Ask AI about {selectedResult?.title}</h3>
+                            <button onClick={() => setShowAiDialog(false)} className="text-slate-400 hover:text-slate-900">
                               ✕
                             </button>
                           </div>
                           
-                          <div className="p-3 rounded-xl bg-slate-800/50 text-sm text-slate-300">
+                          <div className="p-3 rounded-xl bg-white text-sm text-slate-600">
                             <p><strong>Current:</strong> {selectedResult?.value}</p>
                             <p><strong>Requirement:</strong> {selectedResult?.requirement}</p>
                           </div>
@@ -1396,7 +1396,7 @@ Context:
                               value={aiQuestion}
                               onChange={(e) => setAiQuestion(e.target.value)}
                               placeholder="e.g., What are my options to comply with this requirement?"
-                              className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                              className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
                               rows={3}
                             />
                           </div>
@@ -1404,7 +1404,7 @@ Context:
                           <button
                             onClick={askAIForDetails}
                             disabled={isAskingAI || !aiQuestion.trim()}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-50"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold disabled:opacity-50"
                           >
                             {isAskingAI ? (
                               <><Loader2 className="w-5 h-5 animate-spin" /> Analyzing...</>
@@ -1414,9 +1414,9 @@ Context:
                           </button>
                           
                           {aiResponse && (
-                            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                              <p className="text-sm font-medium text-emerald-400 mb-2">AI Response:</p>
-                              <p className="text-sm text-slate-300 whitespace-pre-line">{aiResponse}</p>
+                            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                              <p className="text-sm font-medium text-emerald-600 mb-2">AI Response:</p>
+                              <p className="text-sm text-slate-600 whitespace-pre-line">{aiResponse}</p>
                             </div>
                           )}
                         </div>
@@ -1424,7 +1424,7 @@ Context:
                     )}
                   </div>
                 ) : (
-                  <div className="p-6 rounded-2xl bg-slate-800/30 border border-white/5 text-center">
+                  <div className="p-6 rounded-2xl bg-slate-100/30 border border-slate-100 text-center">
                     <Info className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                     <p className="text-slate-400">Select a result to view details</p>
                   </div>
@@ -1461,7 +1461,7 @@ Context:
                     saveReportToSession(report);
                     window.location.href = "/regulations/report";
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
                 >
                   <Download className="w-5 h-5" />
                   Export Report
@@ -1480,7 +1480,7 @@ export default function RegulationsPage() {
     <React.Suspense fallback={
       <Navigation>
         <div className="p-6 flex justify-center min-h-[40vh]">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
         </div>
       </Navigation>
     }>

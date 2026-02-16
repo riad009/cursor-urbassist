@@ -20,35 +20,43 @@ import {
   FolderKanban,
   FileBarChart,
   Pencil,
+  Box,
+  PenTool,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useLanguage } from "@/lib/language-context";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
+import { cn } from "@/lib/utils";
 
-type DocStatus = "To do" | "In progress" | "Completed" | "Downloadable";
-
-/** Completed = document record exists (content ready); Downloadable = file exported */
-
-const DOCUMENT_TYPES: { type: string; label: string; icon: React.ElementType; href: (id: string) => string }[] = [
-  { type: "LOCATION_PLAN", label: "Location plan (situation)", icon: Map, href: (id) => `/location-plan?project=${id}` },
-  { type: "SITE_PLAN", label: "Site plan", icon: Layers, href: (id) => `/editor?project=${id}` },
-  { type: "SECTION", label: "Section", icon: Scissors, href: (id) => `/terrain?project=${id}` },
-  { type: "ELEVATION", label: "Elevations", icon: Building2, href: (id) => `/terrain?project=${id}` },
-  { type: "LANDSCAPE_INSERTION", label: "Landscape insertion", icon: Image, href: (id) => `/landscape?project=${id}` },
-  { type: "DESCRIPTIVE_STATEMENT", label: "Descriptive notice", icon: FileText, href: (id) => `/statement?project=${id}` },
-];
-
-function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null }): DocStatus {
-  if (doc.fileUrl || doc.fileData) return "Downloadable";
-  return "Completed";
-}
+type DocStatus = "not_started" | "in_progress" | "completed";
 
 export default function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
+  const { t } = useLanguage();
+
+  const DOCUMENT_TYPES: {
+    type: string;
+    label: string;
+    labelFr: string;
+    icon: React.ElementType;
+    href: (id: string) => string;
+    isMain?: boolean;
+  }[] = [
+      { type: "SITE_PLAN", label: "Site plan (Main section)", labelFr: "Plan de masse (Section principale)", icon: Layers, href: (id) => `/editor?project=${id}`, isMain: true },
+      { type: "LOCATION_PLAN", label: "Location plan", labelFr: "Plan de situation", icon: Map, href: (id) => `/location-plan?project=${id}` },
+      { type: "SECTION", label: "Section", labelFr: "Coupe", icon: Scissors, href: (id) => `/terrain?project=${id}` },
+      { type: "ELEVATION", label: "Elevations", labelFr: "Élévations", icon: Building2, href: (id) => `/terrain?project=${id}` },
+      { type: "LANDSCAPE_INSERTION", label: "Landscape insertion", labelFr: "Insertion paysagère", icon: Image, href: (id) => `/landscape?project=${id}` },
+      { type: "DESCRIPTIVE_STATEMENT", label: "Descriptive notice", labelFr: "Notice descriptive", icon: FileText, href: (id) => `/statement?project=${id}` },
+    ];
+
   const [project, setProject] = useState<{
     id: string;
     name: string;
     address: string | null;
+    coordinates?: string | null;
+    paidAt?: string | null;
     documents?: { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }[];
     regulatoryAnalysis?: { id: string } | null;
     protectedAreas?: { type: string; name: string }[];
@@ -77,13 +85,21 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     };
   }, [projectId, user, authLoading]);
 
+  function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null } | undefined): DocStatus {
+    if (!doc) return "not_started";
+    if (doc.fileUrl || doc.fileData) return "completed";
+    return "in_progress";
+  }
+
+  const isEn = t("auth.next") === "Next";
+
   const showLoading = authLoading || (!!user && !!projectId && loading);
   if (showLoading) {
     return (
       <Navigation>
         <div className="p-6 flex flex-col items-center justify-center min-h-[40vh] gap-3">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-          <p className="text-slate-400 text-sm">Loading project…</p>
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          <p className="text-slate-500 text-sm">{t("common.loading")}</p>
         </div>
       </Navigation>
     );
@@ -93,9 +109,9 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     return (
       <Navigation>
         <div className="p-6 max-w-2xl mx-auto">
-          <p className="text-slate-400">Project not found.</p>
-          <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block">
-            ← Back to projects
+          <p className="text-slate-500">Project not found.</p>
+          <Link href="/projects" className="text-blue-600 hover:underline mt-2 inline-block">
+            ← {t("newProj.back")}
           </Link>
         </div>
       </Navigation>
@@ -110,65 +126,93 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     {} as Record<string, { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }>
   );
 
+  const statusConfig = {
+    not_started: {
+      label: isEn ? "Not Started" : "Non commencé",
+      icon: <Circle className="w-4 h-4 text-slate-400" />,
+      badge: "bg-slate-100 text-slate-500 border border-slate-200",
+    },
+    in_progress: {
+      label: isEn ? "In Progress" : "En cours",
+      icon: <Clock className="w-4 h-4 text-amber-500" />,
+      badge: "bg-amber-50 text-amber-600 border border-amber-200",
+    },
+    completed: {
+      label: isEn ? "Completed" : "Terminé",
+      icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />,
+      badge: "bg-emerald-50 text-emerald-600 border border-emerald-200",
+    },
+  };
+
   return (
     <Navigation>
-      <div className="p-6 lg:p-8 max-w-3xl mx-auto">
+      <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+        {/* ── Header ── */}
         <div className="mb-8">
           <Link
             href="/projects"
-            className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
+            className="text-sm text-slate-500 hover:text-slate-700 transition-colors inline-flex items-center gap-1"
           >
             <FolderKanban className="w-4 h-4" />
-            Projects
+            {t("nav.projects")}
           </Link>
-          <h1 className="text-2xl lg:text-3xl font-bold text-white mt-2">{project.name}</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-slate-900 mt-2">{project.name}</h1>
           {project.address && (
-            <p className="text-slate-400 mt-1 flex items-center gap-2">
-              <MapPin className="w-4 h-4" />
-              {project.address}
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-slate-500 flex items-center gap-2">
+                <MapPin className="w-4 h-4" />
+                {project.address}
+              </p>
+              <Link
+                href={`/projects/new`}
+                className="text-xs text-blue-600 hover:text-blue-700 ml-2"
+              >
+                <Pencil className="w-3 h-3 inline mr-1" />
+                {isEn ? "Edit address" : "Modifier l'adresse"}
+              </Link>
+            </div>
           )}
         </div>
 
+        {/* ── PLU Analysis ── */}
         {project.regulatoryAnalysis && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            <p className="font-medium text-emerald-200">PLU analysis completed</p>
+          <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+            <p className="font-medium text-emerald-700">{t("overview.pluCompleted")}</p>
             <div className="flex flex-wrap gap-2 ml-auto">
               <Link
                 href={`/regulations?project=${project.id}`}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 text-sm font-medium hover:bg-emerald-500/30"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-100 text-emerald-700 text-sm font-medium hover:bg-emerald-200 transition-colors"
               >
-                View analysis
+                {t("overview.viewAnalysis")}
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
                 href={`/plu-analysis?project=${project.id}`}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 border border-slate-200 transition-colors"
               >
                 <Download className="w-4 h-4" />
-                Export analysis as PDF
+                {t("overview.exportPdf")}
               </Link>
             </div>
           </div>
         )}
 
-        {/* PLU Analysis – when not yet completed */}
         {!project.regulatoryAnalysis && (
-          <div className="mb-8 p-5 rounded-2xl bg-blue-500/10 border border-blue-500/20">
-            <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-              <FileBarChart className="w-5 h-5 text-blue-400" />
-              PLU Analysis
+          <div className="mb-8 p-5 rounded-2xl bg-blue-50 border border-blue-200">
+            <h2 className="text-lg font-semibold text-slate-900 mb-2 flex items-center gap-2">
+              <FileBarChart className="w-5 h-5 text-blue-500" />
+              {t("overview.pluTitle")}
             </h2>
-            <p className="text-slate-400 text-sm mb-4">
-              Complete your project description to launch the PLU analysis and get regulatory constraints and recommendations.
+            <p className="text-slate-600 text-sm mb-4">
+              {t("overview.pluInfo")}
             </p>
             <div className="flex flex-wrap gap-3">
               <Link
                 href={`/projects/${project.id}/description`}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-100 text-blue-700 text-sm font-medium hover:bg-blue-200 transition-colors"
               >
-                Complete description & launch
+                {t("overview.completeDesc")}
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -176,9 +220,9 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
         )}
 
         {Array.isArray(project.protectedAreas) && project.protectedAreas.length > 0 && (
-          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
-            <h3 className="text-sm font-semibold text-amber-200 mb-2">Protected Area</h3>
-            <ul className="text-sm text-slate-300 space-y-1">
+          <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+            <h3 className="text-sm font-semibold text-amber-700 mb-2">{t("overview.protectedArea")}</h3>
+            <ul className="text-sm text-slate-600 space-y-1">
               {project.protectedAreas.filter((a) => a.type !== "INFO").map((a, i) => (
                 <li key={i}>{a.name}</li>
               ))}
@@ -186,85 +230,121 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
-        {/* Plan de Situation - A3 structured document with 3 map views */}
-        <div className="mb-8 p-5 rounded-2xl bg-purple-500/10 border border-purple-500/20">
-          <h2 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
-            <Map className="w-5 h-5 text-purple-400" />
-            Plan de Situation
-          </h2>
-          <p className="text-slate-400 text-sm mb-4">
-            Generate your location plan with aerial, IGN, and cadastral views. Export as A3 or A4 PDF.
-          </p>
-          <Link
-            href={`/site-plan-document?project=${project.id}`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500/20 text-purple-300 text-sm font-medium hover:bg-purple-500/30"
-          >
-            Open Plan de Situation
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-        </div>
-
-        <h2 className="text-lg font-semibold text-white mb-4">Documents to produce</h2>
-        <p className="text-slate-400 text-sm mb-6">
-          Each document can be: To do → In progress → Completed → Downloadable. For finalized documents use Edit to change content or Export PDF to download.
+        {/* ── Documents / Sections to produce ── */}
+        <h2 className="text-lg font-semibold text-slate-900 mb-2">{t("overview.docsToProduceFr")}</h2>
+        <p className="text-slate-500 text-sm mb-6">
+          {isEn
+            ? "Each section can be edited individually. The intelligent editor and 3D view are available from the main section."
+            : "Chaque section est modifiable individuellement. L'éditeur intelligent et la vue 3D sont accessibles depuis la section principale."}
         </p>
 
         <ul className="space-y-3">
-          {DOCUMENT_TYPES.map(({ type, label, icon: Icon, href }) => {
+          {DOCUMENT_TYPES.map(({ type, label, labelFr, icon: Icon, href, isMain }) => {
             const doc = docsByType[type];
-            const status: DocStatus = doc ? getDocStatus(doc) : "To do";
-            const isFinalized = status === "Completed" || status === "Downloadable";
-            const statusIcon =
-              status === "Downloadable" ? (
-                <Download className="w-4 h-4 text-emerald-400" />
-              ) : status === "Completed" ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <Circle className="w-4 h-4 text-slate-500" />
-              );
-            const isSitePlan = type === "SITE_PLAN";
-            return (
-              <li
-                key={type}
-                className="flex flex-wrap items-center gap-4 p-4 rounded-xl bg-slate-800/50 border border-white/10"
-              >
-                <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center shrink-0">
-                  <Icon className="w-5 h-5 text-blue-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-white">{label}</p>
-                  {isSitePlan && (
-                    <p className="text-xs text-slate-500 mt-0.5">Auto-generated from project address and selected parcels.</p>
-                  )}
-                  <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                    {statusIcon}
-                    {status}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {isFinalized ? (
-                    <>
-                      <Link
-                        href={href(project.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600"
-                      >
-                        <Pencil className="w-4 h-4" />
-                        Edit
-                      </Link>
+            const status = getDocStatus(doc);
+            const cfg = statusConfig[status];
+
+            if (isMain) {
+              return (
+                <li
+                  key={type}
+                  className="p-5 rounded-2xl bg-gradient-to-br from-blue-50 via-purple-50/50 to-white border border-blue-200 shadow-sm"
+                >
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                      <Icon className="w-6 h-6 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-semibold text-slate-900 text-lg">{isEn ? label : labelFr}</p>
+                        <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", cfg.badge)}>
+                          {cfg.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {isEn
+                          ? "Central section with intelligent editor and 3D terrain view."
+                          : "Section centrale avec éditeur intelligent et vue 3D du terrain."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/editor?project=${project.id}`}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                    >
+                      <PenTool className="w-4 h-4" />
+                      {isEn ? "Intelligent Editor" : "Éditeur intelligent"}
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                    <Link
+                      href={`/terrain?project=${project.id}`}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition-colors shadow-sm"
+                    >
+                      <Box className="w-4 h-4" />
+                      {isEn ? "3D Terrain View" : "Vue 3D du terrain"}
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                    <Link
+                      href={href(project.id)}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 border border-slate-200 transition-colors"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      {t("overview.edit")}
+                    </Link>
+                    {status === "completed" && (
                       <Link
                         href={`/export?project=${project.id}&doc=${type}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 border border-emerald-200 transition-colors"
                       >
                         <Download className="w-4 h-4" />
                         Export PDF
                       </Link>
-                    </>
-                  ) : (
+                    )}
+                  </div>
+                </li>
+              );
+            }
+
+            return (
+              <li
+                key={type}
+                className="flex flex-wrap items-center gap-4 p-4 rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
+                  <Icon className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900">{isEn ? label : labelFr}</p>
+                  <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                    {cfg.icon}
+                    {cfg.label}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <Link
+                    href={href(project.id)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 border border-slate-200 transition-colors"
+                  >
+                    <Pencil className="w-4 h-4" />
+                    {t("overview.edit")}
+                  </Link>
+                  {status === "completed" && (
+                    <Link
+                      href={`/export?project=${project.id}&doc=${type}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-medium hover:bg-blue-100 border border-blue-200 transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      Export PDF
+                    </Link>
+                  )}
+                  {status === "not_started" && (
                     <Link
                       href={href(project.id)}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 text-sm font-medium hover:bg-blue-500/30"
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
                     >
-                      {status === "To do" ? "Start" : "Continue"}
+                      {t("overview.start")}
                       <ArrowRight className="w-4 h-4" />
                     </Link>
                   )}
@@ -274,13 +354,32 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           })}
         </ul>
 
-        <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-slate-800/50 border border-white/10">
+        {/* ── Plan de Situation A3 ── */}
+        <div className="mt-6 p-5 rounded-2xl bg-purple-50 border border-purple-200 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900 mb-2 flex items-center gap-2">
+            <Map className="w-5 h-5 text-purple-600" />
+            {t("overview.planDeSituation")}
+          </h2>
+          <p className="text-slate-600 text-sm mb-4">
+            {t("overview.planDeSituationInfo")}
+          </p>
+          <Link
+            href={`/site-plan-document?project=${project.id}`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 transition-colors shadow-sm"
+          >
+            {t("overview.openPlanDeSituation")}
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+
+        {/* ── Next step / Export bar ── */}
+        <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm">
           <div>
-            <h3 className="font-medium text-white mb-2">Next step</h3>
-            <p className="text-slate-400 text-sm">
+            <h3 className="font-medium text-slate-900 mb-2">{t("overview.nextStep")}</h3>
+            <p className="text-slate-500 text-sm">
               {getNextStep(`/projects/${project.id}`, project.id)
-                ? "Continue to the next step in your planning application."
-                : "Export your application when all documents are complete."}
+                ? t("overview.continueNext")
+                : t("overview.exportWhenDone")}
             </p>
           </div>
           <div className="shrink-0">
@@ -288,15 +387,15 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
               <NextStepButton
                 canProceed={true}
                 nextHref={getNextStep(`/projects/${project.id}`, project.id)!.href}
-                nextLabel={`Next: ${getNextStep(`/projects/${project.id}`, project.id)!.label}`}
+                nextLabel={`${t("overview.nextStep")}: ${getNextStep(`/projects/${project.id}`, project.id)!.label}`}
               />
             ) : (
               <Link
                 href={`/export?project=${project.id}`}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-medium hover:bg-emerald-500/30"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 transition-colors shadow-sm"
               >
                 <Download className="w-4 h-4" />
-                Go to export
+                {t("overview.goToExport")}
               </Link>
             )}
           </div>

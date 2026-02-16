@@ -33,20 +33,20 @@ function ReportSection({
         <thead>
           <tr>
             <th
-              className="text-left p-3 font-bold text-white uppercase border border-gray-200"
+              className="text-left p-3 font-bold text-slate-900 uppercase border border-gray-200"
               style={{ backgroundColor: TABLE_HEADER_BG }}
             >
               RÉGLEMENTATION
             </th>
             <th
-              className="text-center p-3 font-bold text-white uppercase border border-gray-200 w-28"
+              className="text-center p-3 font-bold text-slate-900 uppercase border border-gray-200 w-28"
               style={{ backgroundColor: TABLE_HEADER_BG }}
             >
               CONFORMITÉ
             </th>
             {showRecommandations && (
               <th
-                className="text-center p-3 font-bold text-white uppercase border border-gray-200 w-32"
+                className="text-center p-3 font-bold text-slate-900 uppercase border border-gray-200 w-32"
                 style={{ backgroundColor: TABLE_HEADER_BG }}
               >
                 RECOMMANDATIONS
@@ -95,13 +95,13 @@ export default function RegulatoryReportPage() {
       <Navigation>
         <div className="p-6 max-w-2xl mx-auto text-center">
           <FileText className="w-16 h-16 text-slate-500 mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-white mb-2">No report data</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">No report data</h1>
           <p className="text-slate-400 mb-6">
             Run an analysis on the AI Analysis page and click &quot;Export Report&quot; to generate the regulatory analysis document.
           </p>
           <Link
             href="/regulations"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white hover:bg-slate-700"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 hover:bg-slate-100"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to AI Analysis
@@ -129,14 +129,14 @@ export default function RegulatoryReportPage() {
           <button
             type="button"
             onClick={handlePrint}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:opacity-90"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold hover:opacity-90"
           >
             <Download className="w-5 h-5" />
             Print / Save as PDF
           </button>
           <Link
             href="/regulations"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white hover:bg-slate-700"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 hover:bg-slate-100"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to AI Analysis
@@ -160,7 +160,7 @@ export default function RegulatoryReportPage() {
                   {["ADRESSE DU PROJET", "NOM DE LA ZONE", "TYPE DE RÉGLEMENT", "LOTISSEMENT", "ZONE ABF"].map((h) => (
                     <th
                       key={h}
-                      className="text-center p-3 font-bold text-white uppercase border border-gray-200"
+                      className="text-center p-3 font-bold text-slate-900 uppercase border border-gray-200"
                       style={{ backgroundColor: TABLE_HEADER_BG }}
                     >
                       {h}

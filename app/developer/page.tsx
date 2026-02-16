@@ -41,8 +41,8 @@ export default function DeveloperPage() {
     <Navigation>
       <div className="p-6 lg:p-8 max-w-4xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Sparkles className="w-8 h-8 text-purple-400" />
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <Sparkles className="w-8 h-8 text-purple-600" />
             Developer Module
           </h1>
           <p className="text-slate-400 mt-1">
@@ -55,10 +55,10 @@ export default function DeveloperPage() {
           )}
         </div>
 
-        <div className="rounded-2xl bg-slate-800/50 border border-white/10 p-8">
+        <div className="rounded-2xl bg-white border border-slate-200 p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div
-              className="border-2 border-dashed border-white/20 rounded-xl p-8 text-center hover:border-purple-500/50 transition-colors"
+              className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-purple-500/50 transition-colors"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -75,7 +75,7 @@ export default function DeveloperPage() {
               />
               <label htmlFor="dev-upload" className="cursor-pointer block">
                 {file ? (
-                  <p className="text-white font-medium">{file.name}</p>
+                  <p className="text-slate-900 font-medium">{file.name}</p>
                 ) : (
                   <>
                     <Upload className="w-12 h-12 text-slate-500 mx-auto mb-2" />
@@ -86,14 +86,14 @@ export default function DeveloperPage() {
               </label>
             </div>
             {error && (
-              <div className="p-3 rounded-lg bg-red-500/20 text-red-400 text-sm">
+              <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">
                 {error}
               </div>
             )}
             <button
               type="submit"
               disabled={loading || !file}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-slate-900 font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -109,19 +109,19 @@ export default function DeveloperPage() {
           {(result || analysis) && (
             <div className="mt-8 space-y-4">
               {result && (
-                <div className="p-4 rounded-xl bg-slate-900/50">
+                <div className="p-4 rounded-xl bg-slate-50">
                   <p className="text-sm text-slate-400 mb-2">Result</p>
                   <img
                     src={result}
                     alt="Generated visual"
-                    className="max-w-full rounded-lg border border-white/10"
+                    className="max-w-full rounded-lg border border-slate-200"
                   />
                 </div>
               )}
               {analysis && (
-                <div className="p-4 rounded-xl bg-slate-900/50">
+                <div className="p-4 rounded-xl bg-slate-50">
                   <p className="text-sm text-slate-400 mb-2">AI Analysis & Recommendations</p>
-                  <pre className="text-sm text-slate-300 whitespace-pre-wrap font-sans">{analysis}</pre>
+                  <pre className="text-sm text-slate-600 whitespace-pre-wrap font-sans">{analysis}</pre>
                 </div>
               )}
             </div>

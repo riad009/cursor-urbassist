@@ -1605,22 +1605,22 @@ function SitePlanContent() {
   const violationChecks = complianceChecks.filter((c) => c.status === "violation");
 
   return (
-    <div className={cn("bg-slate-950 flex flex-col overflow-hidden", isFullScreen ? "fixed inset-0 z-50 h-screen" : "h-screen")}>
+    <div className={cn("bg-white flex flex-col overflow-hidden", isFullScreen ? "fixed inset-0 z-50 h-screen" : "h-screen")}>
       {/* Real-time PLU violation banner (spec 2.8) */}
       {violationChecks.length > 0 && (
-        <div className="px-4 py-2.5 bg-red-500/20 border-b border-red-500/40 flex items-center gap-3 text-sm text-red-200 flex-wrap">
+        <div className="px-4 py-2.5 bg-red-50 border-b border-red-500/40 flex items-center gap-3 text-sm text-red-200 flex-wrap">
           <AlertTriangle className="w-5 h-5 shrink-0" />
           <span className="font-medium">PLU alert:</span>
           <span>{violationChecks[0].message}</span>
           {violationChecks.length > 1 && (
-            <span className="text-red-300/90">+{violationChecks.length - 1} more</span>
+            <span className="text-red-600/90">+{violationChecks.length - 1} more</span>
           )}
           <button onClick={() => setShowCompliance(true)} className="ml-auto px-2 py-1 rounded bg-red-500/30 hover:bg-red-500/50 text-xs font-medium">View all</button>
         </div>
       )}
 
       {/* Top Bar */}
-      <div className="h-14 bg-slate-900 border-b border-white/10 flex items-center justify-between px-4 gap-3 shrink-0">
+      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {(() => {
             const prevStep = getPrevStep(pathname, currentProjectId);
@@ -1631,7 +1631,7 @@ function SitePlanContent() {
                   if (isDirty && currentProjectId) await saveSitePlan();
                   router.push(prevStep ? prevStep.href : "/projects");
                 }}
-                className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors shrink-0"
+                className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors shrink-0"
               >
                 <ArrowLeft className="w-5 h-5" />
                 <span className="text-sm font-medium hidden sm:block">
@@ -1641,20 +1641,20 @@ function SitePlanContent() {
             );
           })()}
           <div className="h-6 w-px bg-white/10 shrink-0" />
-          <h1 className="text-lg font-semibold text-white truncate">
+          <h1 className="text-lg font-semibold text-slate-900 truncate">
             Site Plan / Plan de Masse
           </h1>
-          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-xs font-medium shrink-0">
+          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-600 text-xs font-medium shrink-0">
             {currentScale.label}
           </span>
 
           {/* 2D / 3D Toggle */}
-          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 shrink-0">
+          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
             <button
               onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); }}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
-                viewMode === "2d" ? "bg-blue-500 text-white shadow" : "text-slate-400 hover:text-white"
+                viewMode === "2d" ? "bg-blue-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
               )}
             >
               <LayoutGrid className="w-4 h-4" />
@@ -1664,7 +1664,7 @@ function SitePlanContent() {
               onClick={() => setViewMode("3d")}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
-                viewMode === "3d" ? "bg-violet-500 text-white shadow" : "text-slate-400 hover:text-white"
+                viewMode === "3d" ? "bg-violet-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
               )}
             >
               <CuboidIcon className="w-4 h-4" />
@@ -1673,12 +1673,12 @@ function SitePlanContent() {
           </div>
 
           {/* Guided vs Free design */}
-          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 shrink-0">
+          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
             <button
               onClick={() => setCreationMode("guided")}
               className={cn(
                 "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
-                creationMode === "guided" ? "bg-amber-500/80 text-slate-900 shadow" : "text-slate-400 hover:text-white"
+                creationMode === "guided" ? "bg-amber-500/80 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
               )}
             >
               Guided
@@ -1687,7 +1687,7 @@ function SitePlanContent() {
               onClick={() => { setCreationMode("free"); setPlacementMode(false); }}
               className={cn(
                 "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
-                creationMode === "free" ? "bg-slate-600 text-white" : "text-slate-400 hover:text-white"
+                creationMode === "free" ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-900"
               )}
             >
               Free design
@@ -1700,7 +1700,7 @@ function SitePlanContent() {
             <select
               value={currentProjectId || ""}
               onChange={(e) => setCurrentProjectId(e.target.value || null)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm max-w-[200px]"
+              className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm max-w-[200px]"
             >
               <option value="">No project</option>
               {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1709,12 +1709,12 @@ function SitePlanContent() {
           {currentProjectId && (
             <>
               <button onClick={saveSitePlan} disabled={saving}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50 text-sm">
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-600 hover:bg-emerald-200 disabled:opacity-50 text-sm">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
               {editorCanProceed && (
-                <span className="hidden sm:inline flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-medium">
+                <span className="hidden sm:inline flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-100 text-emerald-600 text-xs font-medium">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Site plan completed
                 </span>
               )}
@@ -1730,7 +1730,7 @@ function SitePlanContent() {
                         if (isDirty && currentProjectId) await saveSitePlan();
                         router.push(nextHref);
                       }}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sky-500 hover:bg-sky-600 text-white transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sky-500 hover:bg-sky-600 text-slate-900 transition-colors"
                     >
                       {nextLabel}
                       <ArrowRight className="w-4 h-4" />
@@ -1738,7 +1738,7 @@ function SitePlanContent() {
                   );
                 }
                 return (
-                  <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-700/50 text-slate-400 cursor-not-allowed border border-white/5" title="Name all elements, meet green %, and add at least one footprint">
+                  <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-100" title="Name all elements, meet green %, and add at least one footprint">
                     {nextLabel}
                     <ArrowRight className="w-4 h-4 opacity-60" />
                     <span className="text-xs font-normal text-slate-500 ml-1">(complete required fields)</span>
@@ -1749,46 +1749,46 @@ function SitePlanContent() {
           )}
           <div className="h-6 w-px bg-white/10" />
           <select value={currentScale.label} onChange={(e) => { const s = SCALES.find((sc) => sc.label === e.target.value); if (s) setCurrentScale(s); }}
-            className="px-2 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm">
+            className="px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm">
             {SCALES.map((s) => <option key={s.label} value={s.label}>{s.label}</option>)}
           </select>
-          <select value={paperSize} onChange={(e) => setPaperSize(e.target.value as "A4" | "A3")} className="px-2 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm" title="Paper size for export (A3 recommended)">
+          <select value={paperSize} onChange={(e) => setPaperSize(e.target.value as "A4" | "A3")} className="px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm" title="Paper size for export (A3 recommended)">
             <option value="A4">A4</option>
             <option value="A3">A3</option>
           </select>
-          <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-2 rounded-lg text-slate-400 hover:text-white" title={isFullScreen ? "Exit full screen" : "Full screen"}>
+          <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title={isFullScreen ? "Exit full screen" : "Full screen"}>
             {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
-          <button onClick={() => setPreviewMode(!previewMode)} className={cn("p-2 rounded-lg", previewMode ? "bg-amber-500/20 text-amber-400" : "text-slate-400 hover:text-white")} title="Preview mode (read-only)"><Eye className="w-4 h-4" /></button>
-          <button onClick={() => setShowTutorial(true)} className="p-2 rounded-lg text-slate-400 hover:text-white" title="Tutorial"><Play className="w-4 h-4" /></button>
-          <button onClick={() => setShowGrid(!showGrid)} className={cn("p-2 rounded-lg", showGrid ? "bg-blue-500/20 text-blue-400" : "text-slate-400 hover:text-white")} title="Toggle grid"><Grid3X3 className="w-4 h-4" /></button>
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("p-2 rounded-lg", snapEnabled ? "bg-purple-500/20 text-purple-400" : "text-slate-400 hover:text-white")} title="Snap"><Magnet className="w-4 h-4" /></button>
-          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-0.5">
-            <button onClick={() => handleZoom(-25)} className="p-1 text-slate-400 hover:text-white"><ZoomOut className="w-4 h-4" /></button>
-            <span className="px-1.5 text-xs text-white min-w-[40px] text-center">{zoom}%</span>
-            <button onClick={() => handleZoom(25)} className="p-1 text-slate-400 hover:text-white"><ZoomIn className="w-4 h-4" /></button>
+          <button onClick={() => setPreviewMode(!previewMode)} className={cn("p-2 rounded-lg", previewMode ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:text-slate-900")} title="Preview mode (read-only)"><Eye className="w-4 h-4" /></button>
+          <button onClick={() => setShowTutorial(true)} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title="Tutorial"><Play className="w-4 h-4" /></button>
+          <button onClick={() => setShowGrid(!showGrid)} className={cn("p-2 rounded-lg", showGrid ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-900")} title="Toggle grid"><Grid3X3 className="w-4 h-4" /></button>
+          <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("p-2 rounded-lg", snapEnabled ? "bg-purple-100 text-purple-600" : "text-slate-400 hover:text-slate-900")} title="Snap"><Magnet className="w-4 h-4" /></button>
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+            <button onClick={() => handleZoom(-25)} className="p-1 text-slate-400 hover:text-slate-900"><ZoomOut className="w-4 h-4" /></button>
+            <span className="px-1.5 text-xs text-slate-900 min-w-[40px] text-center">{zoom}%</span>
+            <button onClick={() => handleZoom(25)} className="p-1 text-slate-400 hover:text-slate-900"><ZoomIn className="w-4 h-4" /></button>
           </div>
-          <button onClick={handleUndo} disabled={!canUndo} className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-40" title="Undo"><Undo2 className="w-4 h-4" /></button>
-          <button onClick={handleRedo} disabled={!canRedo} className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-40" title="Redo"><Redo2 className="w-4 h-4" /></button>
-          <button onClick={handleClearAll} className="p-2 rounded-lg text-slate-400 hover:text-white" title="Clear All"><RotateCcw className="w-4 h-4" /></button>
+          <button onClick={handleUndo} disabled={!canUndo} className="p-2 rounded-lg text-slate-400 hover:text-slate-900 disabled:opacity-40" title="Undo"><Undo2 className="w-4 h-4" /></button>
+          <button onClick={handleRedo} disabled={!canRedo} className="p-2 rounded-lg text-slate-400 hover:text-slate-900 disabled:opacity-40" title="Redo"><Redo2 className="w-4 h-4" /></button>
+          <button onClick={handleClearAll} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title="Clear All"><RotateCcw className="w-4 h-4" /></button>
         </div>
       </div>
 
       {/* Unnamed warning */}
       {unnamedElementsWarning && unnamedElementsWarning.length > 0 && (
-        <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3 text-sm text-amber-200">
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm text-amber-700">
           <AlertTriangle className="w-5 h-5 shrink-0" />
           <span>Name all elements before saving. Unnamed: {unnamedElementsWarning.map((u) => `#${u.index} (${u.type})`).join(", ")}.</span>
-          <button onClick={() => setUnnamedElementsWarning(null)} className="ml-auto text-amber-400 hover:text-amber-300">x</button>
+          <button onClick={() => setUnnamedElementsWarning(null)} className="ml-auto text-amber-600 hover:text-amber-700">x</button>
         </div>
       )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
-          <div className="w-[72px] sm:w-44 bg-slate-900 border-r border-white/10 flex flex-col py-3 gap-0.5 overflow-y-auto shrink-0">
-            <div className="px-2 pb-1.5 mb-1 border-b border-white/10">
-              <p className="text-[10px] font-semibold text-amber-400/90 uppercase tracking-wider">Free wall drawing</p>
+          <div className="w-[72px] sm:w-44 bg-white border-r border-slate-200 flex flex-col py-3 gap-0.5 overflow-y-auto shrink-0">
+            <div className="px-2 pb-1.5 mb-1 border-b border-slate-200">
+              <p className="text-[10px] font-semibold text-amber-600/90 uppercase tracking-wider">Free wall drawing</p>
               <p className="text-[10px] text-slate-500 mt-0.5">Line · Rect · Polygon</p>
             </div>
             <div className="flex flex-col items-center gap-0.5">
@@ -1799,7 +1799,7 @@ function SitePlanContent() {
                 return (
                   <button key={tool.id} onClick={() => handleToolSelect(tool.id as Tool)}
                     className={cn("w-full sm:w-auto min-w-[48px] h-10 rounded-xl flex items-center justify-center gap-2 sm:gap-2 px-2 transition-all",
-                      activeTool === tool.id ? "bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-lg shadow-blue-500/25" : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                      activeTool === tool.id ? "bg-gradient-to-br from-blue-500 to-purple-500 text-slate-900 shadow-lg shadow-blue-500/25" : "text-slate-400 hover:bg-slate-100 hover:text-slate-900"
                     )} title={tooltip}>
                     <Icon className="w-4 h-4 shrink-0" />
                     <span className={cn("text-xs font-medium truncate max-w-[88px]", isDrawTool ? "inline" : "hidden sm:inline")}>{tool.label}</span>
@@ -1812,24 +1812,24 @@ function SitePlanContent() {
               const Icon = t.icon;
               return (
                 <button key={t.id} onClick={() => addTemplate(t.id)}
-                  className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-800 transition-all"
+                  className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all"
                   title={t.id === "access" ? "Site access: triangle + Access label" : `${t.label}${t.width && t.height ? ` (${t.width}m × ${t.height}m)` : ""}`}>
                   <Icon className="w-4 h-4" style={{ color: t.color }} />
                 </button>
               );
             })}
             <div className="w-8 h-px bg-white/10 my-1" />
-            <button onClick={addExistingBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-800 transition-all" title="Add Existing Building">
+            <button onClick={addExistingBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all" title="Add Existing Building">
               <Building2 className="w-4 h-4 text-gray-400" />
             </button>
-            <button onClick={addNewBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-blue-400 hover:bg-blue-500/20 transition-all" title="Add New Construction">
+            <button onClick={addNewBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-blue-600 hover:bg-blue-100 transition-all" title="Add New Construction">
               <Plus className="w-4 h-4" />
             </button>
             {currentProjectId && (
               <button
                 onClick={loadTerrainFromIgn}
                 disabled={loadingIgnTerrain}
-                className="w-12 h-10 rounded-xl flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+                className="w-12 h-10 rounded-xl flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-all disabled:opacity-50"
                 title="Load terrain from IGN (RGE ALTI®) – adds elevation points for 3D"
               >
                 {loadingIgnTerrain ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mountain className="w-4 h-4" />}
@@ -1848,7 +1848,7 @@ function SitePlanContent() {
               <Ruler className="w-4 h-4" />
             </Link>
             <div className="flex-1" />
-            <button onClick={handleDelete} className="w-12 h-10 rounded-xl flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-all" title="Delete"><Trash2 className="w-4 h-4" /></button>
+            <button onClick={handleDelete} className="w-12 h-10 rounded-xl flex items-center justify-center text-red-600 hover:bg-red-50 transition-all" title="Delete"><Trash2 className="w-4 h-4" /></button>
           </div>
         )}
 
@@ -1863,14 +1863,14 @@ function SitePlanContent() {
               )}
               {(activeTool === "polygon" || activeTool === "parcel") && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-                  <div className="px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm">
-                    Click to add points. <span className="text-amber-400 font-medium">Double-click</span> to complete.
-                    {polygonPoints.length > 0 && <span className="ml-2 text-emerald-400">({polygonPoints.length} pts)</span>}
+                  <div className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm">
+                    Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
+                    {polygonPoints.length > 0 && <span className="ml-2 text-emerald-600">({polygonPoints.length} pts)</span>}
                   </div>
                 </div>
               )}
               {loadingExistingBuildings && (
-                <div className="absolute top-4 right-4 z-20 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm flex items-center gap-2">
+                <div className="absolute top-4 right-4 z-20 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />Loading existing buildings...
                 </div>
               )}
@@ -1880,24 +1880,24 @@ function SitePlanContent() {
                 </div>
               )}
               {creationMode === "guided" && !hideFreeDesignHint && (
-                <div className="absolute top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-20 flex items-start gap-2 px-4 py-3 rounded-xl bg-slate-800/95 border border-amber-500/30 text-sm text-slate-200 shadow-xl">
+                <div className="absolute top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-20 flex items-start gap-2 px-4 py-3 rounded-xl bg-slate-100/95 border border-amber-200 text-sm text-slate-700 shadow-xl">
                   <p className="flex-1">
-                    To <strong className="text-amber-400">draw walls or shapes</strong> (lines, rectangles, polygons), switch to <strong className="text-white">Free design</strong> and use the tools in the left toolbar.
+                    To <strong className="text-amber-600">draw walls or shapes</strong> (lines, rectangles, polygons), switch to <strong className="text-slate-900">Free design</strong> and use the tools in the left toolbar.
                   </p>
-                  <button onClick={() => setHideFreeDesignHint(true)} className="p-1 rounded text-slate-400 hover:text-white shrink-0" aria-label="Dismiss">×</button>
+                  <button onClick={() => setHideFreeDesignHint(true)} className="p-1 rounded text-slate-400 hover:text-slate-900 shrink-0" aria-label="Dismiss">×</button>
                   <button onClick={() => { setCreationMode("free"); setHideFreeDesignHint(true); }} className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-900 font-medium text-xs hover:bg-amber-400">
                     Use Free design
                   </button>
                 </div>
               )}
               <div className="absolute bottom-4 right-4 z-20">
-                <div className="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 text-xs font-mono">
+                <div className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-mono">
                   X: {formatMeasurement(pixelsToMeters(mousePos.x))} | Y: {formatMeasurement(pixelsToMeters(mousePos.y))}
                 </div>
               </div>
               {/* Graphic scale (spec 2.9) */}
               <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1">
-                <div className="px-3 py-1.5 rounded-lg bg-slate-800/90 border border-white/10 text-slate-300 text-xs font-mono">
+                <div className="px-3 py-1.5 rounded-lg bg-slate-100/90 border border-slate-200 text-slate-600 text-xs font-mono">
                   Scale 1:{currentScale.value === 0.5 ? "50" : currentScale.value === 1 ? "100" : currentScale.value === 2 ? "200" : "500"}
                 </div>
                 <div className="flex items-center gap-0.5">
@@ -1905,12 +1905,12 @@ function SitePlanContent() {
                   <span className="text-[10px] text-slate-400 ml-1">5 m</span>
                 </div>
               </div>
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+              <div className="absolute inset-0 flex items-center justify-center bg-white">
                 <canvas ref={canvasRef} className="shadow-2xl" />
               </div>
             </>
           ) : (
-            <div className="absolute inset-0 bg-slate-900">
+            <div className="absolute inset-0 bg-white">
               <Inline3DViewer
                 buildings={buildingDetails}
                 elevationPoints={elevationPoints}
@@ -1920,16 +1920,16 @@ function SitePlanContent() {
                   if (id) setRightTab("buildings");
                 }}
               />
-              <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-800/90 border border-white/10 text-slate-300 text-sm">
-                <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-white">2D</strong> view.</span>
-                <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-white text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
+              <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
+                <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
+                <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
               </div>
             </div>
           )}
         </div>
 
         {/* Right Panel */}
-        <div className="w-80 bg-slate-900 border-l border-white/10 flex flex-col">
+        <div className="w-80 bg-white border-l border-slate-200 flex flex-col">
           {creationMode === "guided" ? (
             <GuidedCreation
               step={guidedStep}
@@ -1992,7 +1992,7 @@ function SitePlanContent() {
             />
           ) : (
             <>
-          <div className="flex border-b border-white/10">
+          <div className="flex border-b border-slate-200">
             {([
               { id: "layers" as const, label: "Layers", icon: Layers },
               { id: "buildings" as const, label: "Buildings", icon: Building2 },
@@ -2000,7 +2000,7 @@ function SitePlanContent() {
             ]).map((tab) => (
               <button key={tab.id} onClick={() => setRightTab(tab.id)}
                 className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors",
-                  rightTab === tab.id ? "text-white border-b-2 border-blue-500 bg-slate-800/50" : "text-slate-400 hover:text-white"
+                  rightTab === tab.id ? "text-slate-900 border-b-2 border-blue-500 bg-white" : "text-slate-400 hover:text-slate-900"
                 )}>
                 <tab.icon className="w-3.5 h-3.5" />{tab.label}
               </button>
@@ -2009,18 +2009,18 @@ function SitePlanContent() {
 
           {/* Compliance */}
           {currentProjectId && (
-            <div className="border-b border-white/10">
-              <button onClick={() => setShowCompliance(!showCompliance)} className="w-full flex items-center justify-between p-3 text-left hover:bg-slate-800/50">
-                <span className="text-sm font-medium text-white flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" />Compliance</span>
+            <div className="border-b border-slate-200">
+              <button onClick={() => setShowCompliance(!showCompliance)} className="w-full flex items-center justify-between p-3 text-left hover:bg-white">
+                <span className="text-sm font-medium text-slate-900 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Compliance</span>
                 <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
               </button>
               {showCompliance && complianceChecks.length > 0 && (
                 <div className="p-3 pt-0 max-h-32 overflow-y-auto space-y-1.5">
                   {complianceChecks.map((c, i) => (
                     <div key={i} className={cn("p-2 rounded-lg text-xs",
-                      c.status === "compliant" && "bg-emerald-500/10 text-emerald-400",
-                      c.status === "warning" && "bg-amber-500/10 text-amber-400",
-                      c.status === "violation" && "bg-red-500/10 text-red-400"
+                      c.status === "compliant" && "bg-emerald-50 text-emerald-600",
+                      c.status === "warning" && "bg-amber-50 text-amber-600",
+                      c.status === "violation" && "bg-red-50 text-red-600"
                     )}><span className="font-medium">{c.rule}</span>: {c.message}</div>
                   ))}
                 </div>
@@ -2033,7 +2033,7 @@ function SitePlanContent() {
             {rightTab === "layers" && (
               <div className="p-3">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Layers className="w-4 h-4" />Layers</h3>
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Layers className="w-4 h-4" />Layers</h3>
                   <span className="text-xs text-slate-500">{layers.length}</span>
                 </div>
                 {layers.length === 0 ? (
@@ -2041,9 +2041,9 @@ function SitePlanContent() {
                 ) : (
                   <div className="space-y-1">
                     {layers.map((layer) => (
-                      <div key={layer.id} className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 hover:bg-slate-800">
+                      <div key={layer.id} className="flex items-center gap-2 p-2 rounded-lg bg-white hover:bg-slate-100">
                         <div className={cn("w-7 h-7 rounded flex items-center justify-center",
-                          layer.name === "Land Parcel" ? "bg-emerald-500/20 text-emerald-400" : "bg-blue-500/20 text-blue-400"
+                          layer.name === "Land Parcel" ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600"
                         )}>
                           {layer.name === "Land Parcel" ? <MapPin className="w-3 h-3" /> :
                             layer.type === "rect" ? <Square className="w-3 h-3" /> :
@@ -2052,10 +2052,10 @@ function SitePlanContent() {
                             <Pentagon className="w-3 h-3" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-white truncate capitalize">{layer.name}</p>
+                          <p className="text-xs text-slate-900 truncate capitalize">{layer.name}</p>
                           <p className="text-[10px] text-slate-500">{layer.type}</p>
                         </div>
-                        <button className="p-1 text-slate-400 hover:text-white">
+                        <button className="p-1 text-slate-400 hover:text-slate-900">
                           {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                         </button>
                       </div>
@@ -2068,17 +2068,17 @@ function SitePlanContent() {
             {rightTab === "buildings" && (
               <div className="p-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-white">Building Details</h3>
+                  <h3 className="text-sm font-semibold text-slate-900">Building Details</h3>
                   <span className="text-xs text-slate-500">{buildingDetails.length}</span>
                 </div>
                 {buildingDetails.length === 0 ? (
                   <div className="text-center py-6 space-y-3">
                     <p className="text-sm text-slate-500">No buildings yet.</p>
                     <div className="flex flex-col gap-2">
-                      <button onClick={addExistingBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white text-xs">
+                      <button onClick={addExistingBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
                         <Building2 className="w-3 h-3" />Add Existing Building
                       </button>
-                      <button onClick={addNewBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-blue-500/30 text-blue-400 hover:text-blue-300 text-xs">
+                      <button onClick={addNewBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
                         <Plus className="w-3 h-3" />Add New Construction
                       </button>
                     </div>
@@ -2117,10 +2117,10 @@ function SitePlanContent() {
                       />
                     ))}
                     <div className="flex gap-2">
-                      <button onClick={addExistingBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white text-xs">
+                      <button onClick={addExistingBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
                         <Building2 className="w-3 h-3" />Existing
                       </button>
-                      <button onClick={addNewBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-blue-500/30 text-blue-400 hover:text-blue-300 text-xs">
+                      <button onClick={addNewBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
                         <Plus className="w-3 h-3" />New
                       </button>
                     </div>
@@ -2137,8 +2137,8 @@ function SitePlanContent() {
           </div>
 
           {/* Bottom Properties */}
-          <div className="border-t border-white/10 p-3">
-            <h3 className="text-sm font-semibold text-white mb-2 flex items-center gap-2"><Settings className="w-4 h-4" />Properties</h3>
+          <div className="border-t border-slate-200 p-3">
+            <h3 className="text-sm font-semibold text-slate-900 mb-2 flex items-center gap-2"><Settings className="w-4 h-4" />Properties</h3>
             {selectedObject ? (
               <div className="space-y-2">
                 <div>
@@ -2151,14 +2151,14 @@ function SitePlanContent() {
                       updateLayers(fabricRef.current!);
                     }}
                     placeholder="e.g. Main building"
-                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm" />
+                    className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   {selectedObject.width != null && (
-                    <div><span className="text-slate-500">Width: </span><span className="text-amber-400 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}</span></div>
+                    <div><span className="text-slate-500">Width: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}</span></div>
                   )}
                   {selectedObject.height != null && (
-                    <div><span className="text-slate-500">Height: </span><span className="text-amber-400 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}</span></div>
+                    <div><span className="text-slate-500">Height: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}</span></div>
                   )}
                 </div>
               </div>
@@ -2210,12 +2210,12 @@ function SitePlanContent() {
       {/* Tutorial modal + Load example (spec UX) */}
       {showTutorial && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60" onClick={() => setShowTutorial(false)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2"><Play className="w-5 h-5 text-amber-400" /> Site plan tutorial</h3>
-              <button onClick={() => setShowTutorial(false)} className="p-1 rounded text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2"><Play className="w-5 h-5 text-amber-600" /> Site plan tutorial</h3>
+              <button onClick={() => setShowTutorial(false)} className="p-1 rounded text-slate-400 hover:text-slate-900"><X className="w-5 h-5" /></button>
             </div>
-            <ol className="list-decimal list-inside space-y-2 text-sm text-slate-300 mb-6">
+            <ol className="list-decimal list-inside space-y-2 text-sm text-slate-600 mb-6">
               <li>Choose a project and ensure address/parcels are set so the parcel can auto-load.</li>
               <li>Use <strong>Guided</strong> to add a building (type → place → size → roof) or <strong>Free design</strong> for shapes.</li>
               <li>Add <strong>Access</strong> (triangle), <strong>Parking</strong> (5×2.5 m), and <strong>VRD</strong> (utilities) from the left toolbar.</li>
@@ -2239,7 +2239,7 @@ function SitePlanContent() {
                   setShowTutorial(false);
                 }
               }}
-              className="w-full py-2.5 rounded-xl bg-amber-500/20 text-amber-300 font-medium hover:bg-amber-500/30"
+              className="w-full py-2.5 rounded-xl bg-amber-100 text-amber-700 font-medium hover:bg-amber-200"
             >
               <FileText className="w-4 h-4 inline mr-2" /> Load example (Access + Parking + House)
             </button>
@@ -2501,18 +2501,18 @@ function Inline3DViewer({
     <div className="relative w-full h-full min-h-[280px]">
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
       {isReady && (
-        <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:max-w-md flex flex-col gap-2 px-4 py-3 rounded-xl bg-slate-900/95 border border-white/20 text-sm text-slate-200 shadow-lg">
-          <span className="flex items-center gap-2"><span className="text-blue-400 font-medium shrink-0">3D:</span> Drag to rotate · Scroll to zoom · Right-drag to pan</span>
-          <span className="flex items-center gap-2"><span className="text-amber-400 font-medium shrink-0">Edit:</span> Click a building to select it, then edit in the <strong>Buildings</strong> panel on the right.</span>
+        <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:max-w-md flex flex-col gap-2 px-4 py-3 rounded-xl bg-white/95 border border-slate-300 text-sm text-slate-700 shadow-lg">
+          <span className="flex items-center gap-2"><span className="text-blue-600 font-medium shrink-0">3D:</span> Drag to rotate · Scroll to zoom · Right-drag to pan</span>
+          <span className="flex items-center gap-2"><span className="text-amber-600 font-medium shrink-0">Edit:</span> Click a building to select it, then edit in the <strong>Buildings</strong> panel on the right.</span>
         </div>
       )}
       {!isReady && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 text-red-400 text-sm">{error}</div>
+        <div className="absolute inset-0 flex items-center justify-center bg-white/95 text-red-600 text-sm">{error}</div>
       )}
     </div>
   );
@@ -2523,7 +2523,7 @@ function Inline3DViewer({
 export default function SitePlanPage() {
   return (
     <Suspense fallback={
-      <div className="h-screen bg-slate-950 flex items-center justify-center">
+      <div className="h-screen bg-white flex items-center justify-center">
         <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
     }>

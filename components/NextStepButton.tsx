@@ -44,8 +44,8 @@ export function NextStepButton({
     <span
       className={cn(
         "inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium",
-        "bg-slate-700/50 text-slate-400 cursor-not-allowed",
-        "border border-white/5",
+        "bg-slate-100 text-slate-400 cursor-not-allowed",
+        "border border-slate-200",
         className
       )}
       title={disabledMessage}

@@ -45,7 +45,7 @@ function ReportContent({ text }: { text: string }) {
     }
     if (trimmed.startsWith("## ")) {
       out.push(
-        <h2 key={i} className="text-lg font-bold text-white mt-6 mb-2 first:mt-0">
+        <h2 key={i} className="text-lg font-bold text-slate-900 mt-6 mb-2 first:mt-0">
           {trimmed.slice(3)}
         </h2>
       );
@@ -73,7 +73,7 @@ function ReportContent({ text }: { text: string }) {
         i++;
       }
       out.push(
-        <ul key={i} className="list-disc list-inside space-y-1 my-2 text-slate-300 text-sm">
+        <ul key={i} className="list-disc list-inside space-y-1 my-2 text-slate-600 text-sm">
           {bullets.map((b, j) => (
             <li key={j}>{renderInline(b)}</li>
           ))}
@@ -90,7 +90,7 @@ function ReportContent({ text }: { text: string }) {
         i++;
       }
       out.push(
-        <ol key={i} className="list-decimal list-inside space-y-1 my-2 text-slate-300 text-sm">
+        <ol key={i} className="list-decimal list-inside space-y-1 my-2 text-slate-600 text-sm">
           {numbered.map((n, j) => (
             <li key={j}>{renderInline(n)}</li>
           ))}
@@ -99,7 +99,7 @@ function ReportContent({ text }: { text: string }) {
       continue;
     }
     out.push(
-      <p key={i} className="text-slate-300 text-sm leading-relaxed my-2">
+      <p key={i} className="text-slate-600 text-sm leading-relaxed my-2">
         {renderInline(trimmed)}
       </p>
     );
@@ -118,7 +118,7 @@ function renderInline(str: string): React.ReactNode {
       if (boldMatch.index > 0) {
         parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>);
       }
-      parts.push(<strong key={key++} className="text-white font-semibold">{boldMatch[1]}</strong>);
+      parts.push(<strong key={key++} className="text-slate-900 font-semibold">{boldMatch[1]}</strong>);
       remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
     } else {
       parts.push(<span key={key++}>{remaining}</span>);
@@ -356,9 +356,9 @@ export default function LandscapePage() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/25">
-                <Image className="w-5 h-5 text-white" />
+                <Image className="w-5 h-5 text-slate-900" />
               </div>
-              <h1 className="text-2xl font-bold text-white">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Landscape Integration
               </h1>
             </div>
@@ -371,7 +371,7 @@ export default function LandscapePage() {
             <div className="flex items-center gap-3">
               <button
                 onClick={resetAdjustments}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 font-medium hover:bg-slate-100 transition-colors"
               >
                 <RefreshCw className="w-4 h-4" />
                 Reset
@@ -379,7 +379,7 @@ export default function LandscapePage() {
               <button
                 onClick={generateIntegrationReport}
                 disabled={isGeneratingReport}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white font-semibold hover:shadow-lg transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg transition-all disabled:opacity-50"
               >
                 {isGeneratingReport ? (
                   <>
@@ -398,7 +398,7 @@ export default function LandscapePage() {
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="px-3 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white text-sm"
+                    className="px-3 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   >
                     <option value="">Select project</option>
                     {projects.map((p) => (
@@ -408,7 +408,7 @@ export default function LandscapePage() {
                   <button
                     onClick={generateInsertionImage}
                     disabled={isGeneratingImage || !selectedProjectId}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:shadow-lg hover:shadow-emerald-500/25 transition-all disabled:opacity-50"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-emerald-500/25 transition-all disabled:opacity-50"
                   >
                     {isGeneratingImage ? (
                       <>
@@ -424,7 +424,7 @@ export default function LandscapePage() {
                   </button>
                 </>
               )}
-              <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-700 text-white font-semibold hover:bg-slate-600 transition-all">
+              <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 text-slate-900 font-semibold hover:bg-slate-200 transition-all">
                 <Download className="w-5 h-5" />
                 Export
               </button>
@@ -443,8 +443,8 @@ export default function LandscapePage() {
               className={cn(
                 "relative border-2 border-dashed rounded-2xl p-12 text-center transition-all",
                 dragActive
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-white/20 hover:border-white/40 bg-slate-800/30"
+                  ? "border-emerald-500 bg-emerald-50"
+                  : "border-slate-300 hover:border-white/40 bg-slate-100/30"
               )}
             >
               <input
@@ -455,18 +455,18 @@ export default function LandscapePage() {
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
               <div className="space-y-4">
-                <div className="w-20 h-20 rounded-2xl bg-slate-700/50 flex items-center justify-center mx-auto">
+                <div className="w-20 h-20 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
                   <Upload className="w-10 h-10 text-slate-400" />
                 </div>
                 <div>
-                  <p className="text-xl font-semibold text-white">
+                  <p className="text-xl font-semibold text-slate-900">
                     Upload Site Photo
                   </p>
                   <p className="text-slate-400 mt-1">
                     Drop your photo here, click to browse, or use camera
                   </p>
                 </div>
-                <p className="text-sm text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mt-3">
+                <p className="text-sm text-amber-700/90 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
                   The construction must be visible or integrable in the photo. Prefer a shot from public space, or from sufficient distance.
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -476,14 +476,14 @@ export default function LandscapePage() {
             </div>
 
             <div className="space-y-4">
-              <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
+              <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-200">
                 <div className="flex items-center gap-3 mb-4">
-                  <Sparkles className="w-6 h-6 text-emerald-400" />
-                  <h3 className="text-lg font-semibold text-white">
+                  <Sparkles className="w-6 h-6 text-emerald-600" />
+                  <h3 className="text-lg font-semibold text-slate-900">
                     AI-Powered Integration
                   </h3>
                 </div>
-                <p className="text-slate-300 mb-4">
+                <p className="text-slate-600 mb-4">
                   Upload a photo and our AI will analyze perspective,
                   lighting, and environment to help integrate your project
                   realistically.
@@ -512,7 +512,7 @@ export default function LandscapePage() {
                 Required: <strong className="text-slate-400">Near environment</strong> and <strong className="text-slate-400">Distant environment</strong> photos improve the integration report.
               </p>
               <div className="grid grid-cols-2 gap-4 mt-3">
-                <label className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center cursor-pointer hover:bg-slate-700/30 transition-colors">
+                <label className="p-4 rounded-xl bg-slate-100/30 border border-slate-100 text-center cursor-pointer hover:bg-slate-50 transition-colors">
                   <input
                     type="file"
                     accept="image/*"
@@ -520,13 +520,13 @@ export default function LandscapePage() {
                     onChange={handleFileChange}
                     className="hidden"
                   />
-                  <Camera className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
-                  <p className="text-sm text-slate-300 font-medium">
+                  <Camera className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-600 font-medium">
                     Use Camera
                   </p>
                   <p className="text-xs text-slate-500 mt-1">Near or distant</p>
                 </label>
-                <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5 text-center">
+                <div className="p-4 rounded-xl bg-slate-100/30 border border-slate-100 text-center">
                   <Grid3X3 className="w-8 h-8 text-slate-500 mx-auto mb-2" />
                   <p className="text-sm text-slate-400">From Project</p>
                 </div>
@@ -538,7 +538,7 @@ export default function LandscapePage() {
           <div className="grid lg:grid-cols-4 gap-6">
             {/* Preview Area */}
             <div className="lg:col-span-3 space-y-4">
-              <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-white/10">
+              <div className="relative aspect-video rounded-2xl overflow-hidden bg-white border border-slate-200">
                 {/* Main Photo */}
                 <div
                   className="absolute inset-0 flex items-center justify-center"
@@ -565,7 +565,7 @@ export default function LandscapePage() {
                           top: `${(analysisResult.horizonLine || 0.35) * 100}%`,
                         }}
                       >
-                        <span className="absolute -top-5 left-2 text-xs text-blue-400 bg-slate-900/80 px-1 rounded">
+                        <span className="absolute -top-5 left-2 text-xs text-blue-600 bg-slate-50 px-1 rounded">
                           Horizon
                         </span>
                       </div>
@@ -582,7 +582,7 @@ export default function LandscapePage() {
                           height: `${(analysisResult.bestIntegrationZone.h || 0.4) * 100}%`,
                         }}
                       >
-                        <span className="absolute -top-5 left-0 text-xs text-emerald-400 bg-slate-900/80 px-1 rounded">
+                        <span className="absolute -top-5 left-0 text-xs text-emerald-600 bg-slate-50 px-1 rounded">
                           Best integration zone
                         </span>
                       </div>
@@ -597,7 +597,7 @@ export default function LandscapePage() {
                     style={{ opacity: opacity / 100 }}
                   >
                     <div
-                      className="border-2 border-dashed border-blue-400/50 rounded-lg overflow-hidden bg-slate-900/80 flex items-center justify-center"
+                      className="border-2 border-dashed border-blue-400/50 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center"
                       style={{
                         position: "absolute",
                         top: analysisResult?.bestIntegrationZone ? `${(analysisResult.bestIntegrationZone.y || 0.4) * 100}%` : "40%",
@@ -614,8 +614,8 @@ export default function LandscapePage() {
                         />
                       ) : selectedProjectId ? (
                         <div className="p-4 text-center">
-                          <Building2 className="w-10 h-10 text-blue-400/70 mx-auto mb-2" />
-                          <p className="text-xs text-blue-300/90 font-medium">
+                          <Building2 className="w-10 h-10 text-blue-600/70 mx-auto mb-2" />
+                          <p className="text-xs text-blue-700/90 font-medium">
                             {projects.find((p) => p.id === selectedProjectId)?.name}
                           </p>
                           <p className="text-[10px] text-slate-400 mt-1">
@@ -624,7 +624,7 @@ export default function LandscapePage() {
                         </div>
                       ) : (
                         <div className="p-4 text-center">
-                          <Building2 className="w-10 h-10 text-blue-400/50 mx-auto mb-2" />
+                          <Building2 className="w-10 h-10 text-blue-600/50 mx-auto mb-2" />
                           <p className="text-xs text-slate-400">
                             Select a project and click &quot;Realistic image&quot; to generate integration
                           </p>
@@ -646,20 +646,20 @@ export default function LandscapePage() {
 
                 {analysisResult && !isAnalyzing && (
                   <div className="absolute top-4 left-4 flex flex-col gap-2">
-                    <div className="px-3 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-lg border border-emerald-500/30 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs text-emerald-400 font-medium">
+                    <div className="px-3 py-1.5 rounded-full bg-emerald-100 backdrop-blur-lg border border-emerald-200 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      <span className="text-xs text-emerald-600 font-medium">
                         {analysisResult.ambiance || "Analyzed"} |
                         Scale: {analysisResult.suggestedScale?.toFixed(1) || "1.0"}x
                       </span>
                     </div>
                     {geminiUsed === true && (
-                      <div className="px-3 py-1.5 rounded-full bg-blue-500/20 backdrop-blur-lg border border-blue-500/30 text-xs text-blue-300 font-medium">
+                      <div className="px-3 py-1.5 rounded-full bg-blue-100 backdrop-blur-lg border border-blue-200 text-xs text-blue-700 font-medium">
                         Gemini AI analysis applied
                       </div>
                     )}
                     {geminiUsed === false && (
-                      <div className="px-3 py-1.5 rounded-lg bg-amber-500/20 backdrop-blur-lg border border-amber-500/30 text-xs text-amber-200 max-w-xs">
+                      <div className="px-3 py-1.5 rounded-lg bg-amber-100 backdrop-blur-lg border border-amber-200 text-xs text-amber-700 max-w-xs">
                         {geminiError || "Set GEMINI_API_KEY in .env and restart the server for AI-powered analysis."}
                       </div>
                     )}
@@ -667,12 +667,12 @@ export default function LandscapePage() {
                 )}
 
                 {analysisError && !isAnalyzing && (
-                  <div className="absolute top-4 left-4 right-4 px-3 py-2 rounded-xl bg-amber-500/20 backdrop-blur-lg border border-amber-500/30 flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs text-amber-200 font-medium">{analysisError}</span>
+                  <div className="absolute top-4 left-4 right-4 px-3 py-2 rounded-xl bg-amber-100 backdrop-blur-lg border border-amber-200 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs text-amber-700 font-medium">{analysisError}</span>
                     {analysisError.includes("Sign in") && (
                       <Link
                         href="/login"
-                        className="text-xs font-semibold text-amber-300 hover:text-amber-200 underline"
+                        className="text-xs font-semibold text-amber-700 hover:text-amber-700 underline"
                       >
                         Sign in
                       </Link>
@@ -681,26 +681,26 @@ export default function LandscapePage() {
                 )}
 
                 {/* Controls Overlay */}
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/80 backdrop-blur-lg border border-white/10">
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-slate-50 backdrop-blur-lg border border-slate-200">
                   <button
                     onClick={() => setZoom(Math.max(25, zoom - 25))}
-                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-slate-900 transition-colors"
                   >
                     <ZoomOut className="w-4 h-4" />
                   </button>
-                  <span className="text-sm text-white min-w-[50px] text-center">
+                  <span className="text-sm text-slate-900 min-w-[50px] text-center">
                     {zoom}%
                   </span>
                   <button
                     onClick={() => setZoom(Math.min(200, zoom + 25))}
-                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-slate-900 transition-colors"
                   >
                     <ZoomIn className="w-4 h-4" />
                   </button>
                   <div className="w-px h-4 bg-white/20" />
                   <button
                     onClick={() => setRotation((rotation + 90) % 360)}
-                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                    className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-slate-900 transition-colors"
                   >
                     <RotateCw className="w-4 h-4" />
                   </button>
@@ -709,14 +709,14 @@ export default function LandscapePage() {
                     className={cn(
                       "p-2 rounded-lg transition-colors",
                       flipX
-                        ? "bg-blue-500/20 text-blue-400"
-                        : "hover:bg-white/10 text-slate-400 hover:text-white"
+                        ? "bg-blue-100 text-blue-600"
+                        : "hover:bg-white/10 text-slate-400 hover:text-slate-900"
                     )}
                   >
                     <FlipHorizontal className="w-4 h-4" />
                   </button>
                   <div className="w-px h-4 bg-white/20" />
-                  <button className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
+                  <button className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-slate-900 transition-colors">
                     <Maximize2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -727,21 +727,21 @@ export default function LandscapePage() {
                 <div className={cn(
                   "rounded-2xl border overflow-hidden",
                   reportUnauthorized
-                    ? "bg-amber-500/10 border-amber-500/20"
-                    : "bg-slate-900/80 border-white/10 shadow-lg"
+                    ? "bg-amber-50 border-amber-200"
+                    : "bg-slate-50 border-slate-200 shadow-lg"
                 )}>
                   <div className={cn(
                     "flex items-center gap-3 px-5 py-4 border-b",
-                    reportUnauthorized ? "border-amber-500/20 bg-amber-500/5" : "border-white/10 bg-violet-500/10"
+                    reportUnauthorized ? "border-amber-200 bg-amber-500/5" : "border-slate-200 bg-violet-500/10"
                   )}>
                     <div className={cn(
                       "w-10 h-10 rounded-xl flex items-center justify-center",
-                      reportUnauthorized ? "bg-amber-500/20" : "bg-violet-500/20"
+                      reportUnauthorized ? "bg-amber-100" : "bg-violet-500/20"
                     )}>
-                      <FileText className={cn("w-5 h-5", reportUnauthorized ? "text-amber-400" : "text-violet-400")} />
+                      <FileText className={cn("w-5 h-5", reportUnauthorized ? "text-amber-600" : "text-violet-400")} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white">
+                      <h3 className="font-semibold text-slate-900">
                         AI Landscape Integration Report
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
@@ -750,11 +750,11 @@ export default function LandscapePage() {
                     </div>
                   </div>
                   {reportUnauthorized ? (
-                    <div className="p-5 text-sm text-slate-300 space-y-3">
+                    <div className="p-5 text-sm text-slate-600 space-y-3">
                       <p>{integrationReport}</p>
                       <Link
                         href="/login"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 font-medium hover:bg-amber-500/30 transition-colors"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-100 text-amber-600 font-medium hover:bg-amber-200 transition-colors"
                       >
                         Sign in
                       </Link>
@@ -769,7 +769,7 @@ export default function LandscapePage() {
 
               {/* Quick Actions */}
               <div className="flex flex-wrap gap-3">
-                <label className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-white font-medium hover:bg-slate-700/50 transition-colors cursor-pointer">
+                <label className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 font-medium hover:bg-slate-100 transition-colors cursor-pointer">
                   <input
                     type="file"
                     accept="image/*"
@@ -779,12 +779,12 @@ export default function LandscapePage() {
                   <Upload className="w-5 h-5 text-slate-400" />
                   Change Photo
                 </label>
-                <div className="flex-1 min-w-[180px] flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10">
+                <div className="flex-1 min-w-[180px] flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200">
                   <Building2 className="w-5 h-5 text-slate-400 shrink-0" />
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="flex-1 min-w-0 bg-transparent text-white text-sm font-medium focus:outline-none cursor-pointer"
+                    className="flex-1 min-w-0 bg-transparent text-slate-900 text-sm font-medium focus:outline-none cursor-pointer"
                   >
                     <option value="">Import Design (select project)</option>
                     {projects.map((p) => (
@@ -792,7 +792,7 @@ export default function LandscapePage() {
                     ))}
                   </select>
                 </div>
-                <div className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800/50 border border-white/10 text-slate-400 text-sm">
+                <div className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-400 text-sm">
                   <Trees className="w-5 h-5" />
                   Landscaping (from report)
                 </div>
@@ -802,9 +802,9 @@ export default function LandscapePage() {
             {/* Controls Panel */}
             <div className="space-y-4">
               {/* Layers */}
-              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
-                  <Layers className="w-4 h-4 text-blue-400" />
+              <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-4">
+                  <Layers className="w-4 h-4 text-blue-600" />
                   Layers
                 </h3>
                 <div className="space-y-2">
@@ -817,7 +817,7 @@ export default function LandscapePage() {
                         onClick={() => toggleLayerVisibility(layer.id)}
                         className={cn(
                           "p-1.5 rounded transition-colors",
-                          layer.visible ? "text-white" : "text-slate-500"
+                          layer.visible ? "text-slate-900" : "text-slate-500"
                         )}
                       >
                         {layer.visible ? (
@@ -830,16 +830,16 @@ export default function LandscapePage() {
                         className={cn(
                           "w-4 h-4",
                           layer.type === "photo"
-                            ? "text-emerald-400"
+                            ? "text-emerald-600"
                             : layer.type === "design"
-                              ? "text-blue-400"
-                              : "text-amber-400"
+                              ? "text-blue-600"
+                              : "text-amber-600"
                         )}
                       />
                       <span
                         className={cn(
                           "flex-1 text-sm",
-                          layer.visible ? "text-white" : "text-slate-500"
+                          layer.visible ? "text-slate-900" : "text-slate-500"
                         )}
                       >
                         {layer.name}
@@ -851,27 +851,27 @@ export default function LandscapePage() {
 
               {/* Generated insertion image */}
               {generatedImageUrl && (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-3">
-                    <Image className="w-4 h-4 text-emerald-400" />
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
+                    <Image className="w-4 h-4 text-emerald-600" />
                     Generated insertion image
                   </h3>
-                  <img src={generatedImageUrl} alt="Landscape insertion" className="w-full rounded-lg border border-white/10" />
+                  <img src={generatedImageUrl} alt="Landscape insertion" className="w-full rounded-lg border border-slate-200" />
                   <p className="text-xs text-slate-400 mt-2">Shown in the overlay. Export via Export Center → Landscape Insertion.</p>
                 </div>
               )}
 
               {imageError && (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
-                  <p className="text-xs text-amber-400">{imageError}</p>
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
+                  <p className="text-xs text-amber-600">{imageError}</p>
                 </div>
               )}
 
               {analysisError && (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
-                  <p className="text-xs text-amber-400 mb-2">{analysisError}</p>
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
+                  <p className="text-xs text-amber-600 mb-2">{analysisError}</p>
                   {analysisError.includes("Sign in") && (
-                    <Link href="/login" className="text-xs font-medium text-amber-300 hover:text-amber-200 underline">
+                    <Link href="/login" className="text-xs font-medium text-amber-700 hover:text-amber-700 underline">
                       Sign in to enable AI
                     </Link>
                   )}
@@ -881,7 +881,7 @@ export default function LandscapePage() {
               {/* AI Analysis Results */}
               {analysisResult && (
                 <div className="p-4 rounded-2xl bg-violet-500/10 border border-violet-500/20">
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-3">
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-3">
                     <Sparkles className="w-4 h-4 text-violet-400" />
                     AI Analysis
                   </h3>
@@ -889,7 +889,7 @@ export default function LandscapePage() {
                     {analysisResult.ambiance && (
                       <div className="flex justify-between">
                         <span className="text-slate-400">Ambiance</span>
-                        <span className="text-white capitalize">
+                        <span className="text-slate-900 capitalize">
                           {analysisResult.ambiance}
                         </span>
                       </div>
@@ -897,7 +897,7 @@ export default function LandscapePage() {
                     {analysisResult.orientation && (
                       <div className="flex justify-between">
                         <span className="text-slate-400">Orientation</span>
-                        <span className="text-white capitalize">
+                        <span className="text-slate-900 capitalize">
                           {analysisResult.orientation}
                         </span>
                       </div>
@@ -905,7 +905,7 @@ export default function LandscapePage() {
                     {analysisResult.suggestedScale && (
                       <div className="flex justify-between">
                         <span className="text-slate-400">Scale</span>
-                        <span className="text-white">
+                        <span className="text-slate-900">
                           {analysisResult.suggestedScale.toFixed(1)}x
                         </span>
                       </div>
@@ -913,7 +913,7 @@ export default function LandscapePage() {
                     {analysisResult.horizonLine && (
                       <div className="flex justify-between">
                         <span className="text-slate-400">Horizon</span>
-                        <span className="text-white">
+                        <span className="text-slate-900">
                           {Math.round(analysisResult.horizonLine * 100)}%
                         </span>
                       </div>
@@ -923,9 +923,9 @@ export default function LandscapePage() {
               )}
 
               {/* Adjustments */}
-              <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
-                  <Sliders className="w-4 h-4 text-purple-400" />
+              <div className="p-4 rounded-2xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-4">
+                  <Sliders className="w-4 h-4 text-purple-600" />
                   Adjustments
                 </h3>
                 <div className="space-y-4">
@@ -946,7 +946,7 @@ export default function LandscapePage() {
                       onChange={(e) =>
                         setBrightness(Number(e.target.value))
                       }
-                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                      className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                     />
                   </div>
                   <div>
@@ -966,7 +966,7 @@ export default function LandscapePage() {
                       onChange={(e) =>
                         setContrast(Number(e.target.value))
                       }
-                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                      className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                     />
                   </div>
                   <div>
@@ -986,7 +986,7 @@ export default function LandscapePage() {
                       onChange={(e) =>
                         setOpacity(Number(e.target.value))
                       }
-                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                      className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                     />
                   </div>
                 </div>

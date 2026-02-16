@@ -173,9 +173,9 @@ export default function CalculationsPage() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/25">
-              <Calculator className="w-5 h-5 text-white" />
+              <Calculator className="w-5 h-5 text-slate-900" />
             </div>
-            <h1 className="text-2xl font-bold text-white">Calculations</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Calculations</h1>
           </div>
           <p className="text-slate-400">Precise measurements and calculations for your construction projects</p>
         </div>
@@ -193,35 +193,35 @@ export default function CalculationsPage() {
                     "p-4 rounded-xl border transition-all text-left",
                     activeCalc === calc.id
                       ? "bg-gradient-to-br " + calc.gradient + " border-transparent shadow-lg"
-                      : "bg-slate-800/50 border-white/10 hover:border-white/20"
+                      : "bg-white border-slate-200 hover:border-slate-300"
                   )}
                 >
                   <calc.icon className={cn(
                     "w-6 h-6 mb-2",
-                    activeCalc === calc.id ? "text-white" : "text-slate-400"
+                    activeCalc === calc.id ? "text-slate-900" : "text-slate-400"
                   )} />
                   <p className={cn(
                     "font-semibold",
-                    activeCalc === calc.id ? "text-white" : "text-slate-300"
+                    activeCalc === calc.id ? "text-slate-900" : "text-slate-600"
                   )}>{calc.title}</p>
                   <p className={cn(
                     "text-xs mt-0.5",
-                    activeCalc === calc.id ? "text-white/70" : "text-slate-500"
+                    activeCalc === calc.id ? "text-slate-900/70" : "text-slate-500"
                   )}>{calc.description}</p>
                 </button>
               ))}
             </div>
 
             {/* Calculator Input */}
-            <div className="p-6 rounded-2xl bg-slate-800/50 border border-white/10">
+            <div className="p-6 rounded-2xl bg-white border border-slate-200">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <activeCalculator.icon className="w-5 h-5 text-blue-400" />
+                <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                  <activeCalculator.icon className="w-5 h-5 text-blue-600" />
                   {activeCalculator.title} Calculator
                 </h3>
                 <button
                   onClick={clearInputs}
-                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white transition-colors"
+                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-slate-900 transition-colors"
                 >
                   <RefreshCw className="w-5 h-5" />
                 </button>
@@ -240,8 +240,8 @@ export default function CalculationsPage() {
                           className={cn(
                             "flex-1 py-3 rounded-xl text-sm font-medium transition-colors capitalize",
                             surfaceShape === shape
-                              ? "bg-blue-500 text-white"
-                              : "bg-slate-700 text-slate-400 hover:text-white"
+                              ? "bg-blue-500 text-slate-900"
+                              : "bg-slate-100 text-slate-400 hover:text-slate-900"
                           )}
                         >
                           {shape}
@@ -259,7 +259,7 @@ export default function CalculationsPage() {
                         value={surfaceLength}
                         onChange={(e) => setSurfaceLength(e.target.value)}
                         placeholder="0.00"
-                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                       />
                     </div>
                     {surfaceShape !== "circle" && (
@@ -272,7 +272,7 @@ export default function CalculationsPage() {
                           value={surfaceWidth}
                           onChange={(e) => setSurfaceWidth(e.target.value)}
                           placeholder="0.00"
-                          className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                         />
                       </div>
                     )}
@@ -284,7 +284,7 @@ export default function CalculationsPage() {
               {activeCalc === "distance" && (
                 <div className="space-y-4">
                   <div className="grid sm:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl bg-slate-700/50 border border-white/5">
+                    <div className="p-4 rounded-xl bg-slate-100 border border-slate-100">
                       <p className="text-sm text-slate-400 mb-3">Point A</p>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -294,7 +294,7 @@ export default function CalculationsPage() {
                             value={x1}
                             onChange={(e) => setX1(e.target.value)}
                             placeholder="0"
-                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-200 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                           />
                         </div>
                         <div>
@@ -304,12 +304,12 @@ export default function CalculationsPage() {
                             value={y1}
                             onChange={(e) => setY1(e.target.value)}
                             placeholder="0"
-                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-200 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                           />
                         </div>
                       </div>
                     </div>
-                    <div className="p-4 rounded-xl bg-slate-700/50 border border-white/5">
+                    <div className="p-4 rounded-xl bg-slate-100 border border-slate-100">
                       <p className="text-sm text-slate-400 mb-3">Point B</p>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -319,7 +319,7 @@ export default function CalculationsPage() {
                             value={x2}
                             onChange={(e) => setX2(e.target.value)}
                             placeholder="0"
-                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-200 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                           />
                         </div>
                         <div>
@@ -329,7 +329,7 @@ export default function CalculationsPage() {
                             value={y2}
                             onChange={(e) => setY2(e.target.value)}
                             placeholder="0"
-                            className="w-full px-3 py-2 rounded-lg bg-slate-600 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            className="w-full px-3 py-2 rounded-lg bg-slate-200 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                           />
                         </div>
                       </div>
@@ -348,7 +348,7 @@ export default function CalculationsPage() {
                       value={volumeLength}
                       onChange={(e) => setVolumeLength(e.target.value)}
                       placeholder="0.00"
-                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                   <div>
@@ -358,7 +358,7 @@ export default function CalculationsPage() {
                       value={volumeWidth}
                       onChange={(e) => setVolumeWidth(e.target.value)}
                       placeholder="0.00"
-                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                   <div>
@@ -368,7 +368,7 @@ export default function CalculationsPage() {
                       value={volumeHeight}
                       onChange={(e) => setVolumeHeight(e.target.value)}
                       placeholder="0.00"
-                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                 </div>
@@ -385,7 +385,7 @@ export default function CalculationsPage() {
                         value={buildingArea}
                         onChange={(e) => setBuildingArea(e.target.value)}
                         placeholder="0.00"
-                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                       />
                     </div>
                     <div>
@@ -395,7 +395,7 @@ export default function CalculationsPage() {
                         value={plotArea}
                         onChange={(e) => setPlotArea(e.target.value)}
                         placeholder="0.00"
-                        className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                       />
                     </div>
                   </div>
@@ -406,7 +406,7 @@ export default function CalculationsPage() {
                       value={maxCoverage}
                       onChange={(e) => setMaxCoverage(e.target.value)}
                       placeholder="50"
-                      className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                     />
                   </div>
                 </div>
@@ -415,7 +415,7 @@ export default function CalculationsPage() {
               {/* Calculate Button */}
               <button
                 onClick={calculate}
-                className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+                className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all"
               >
                 <Calculator className="w-5 h-5" />
                 Calculate
@@ -424,7 +424,7 @@ export default function CalculationsPage() {
             </div>
 
             {/* Formula Info */}
-            <div className="p-4 rounded-xl bg-slate-800/30 border border-white/5">
+            <div className="p-4 rounded-xl bg-slate-100/30 border border-slate-100">
               <p className="text-sm text-slate-400">
                 {activeCalc === "surface" && surfaceShape === "rectangle" && "Formula: Area = Length × Width"}
                 {activeCalc === "surface" && surfaceShape === "circle" && "Formula: Area = π × r²"}
@@ -439,14 +439,14 @@ export default function CalculationsPage() {
           {/* Results History */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                <History className="w-5 h-5 text-blue-400" />
+              <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-600" />
                 Recent Results
               </h3>
               {results.length > 0 && (
                 <button
                   onClick={() => setResults([])}
-                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-red-400 transition-colors"
+                  className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-red-600 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -454,7 +454,7 @@ export default function CalculationsPage() {
             </div>
 
             {results.length === 0 ? (
-              <div className="p-8 rounded-2xl bg-slate-800/30 border border-white/5 text-center">
+              <div className="p-8 rounded-2xl bg-slate-100/30 border border-slate-100 text-center">
                 <Calculator className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                 <p className="text-slate-400">No calculations yet</p>
                 <p className="text-sm text-slate-500">Results will appear here</p>
@@ -472,8 +472,8 @@ export default function CalculationsPage() {
                       className={cn(
                         "p-4 rounded-xl border transition-all",
                         isCoverageWarning
-                          ? "bg-red-500/10 border-red-500/20"
-                          : "bg-slate-800/50 border-white/10"
+                          ? "bg-red-50 border-red-500/20"
+                          : "bg-white border-slate-200"
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -482,19 +482,19 @@ export default function CalculationsPage() {
                             "w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br",
                             calc.gradient
                           )}>
-                            <calc.icon className="w-5 h-5 text-white" />
+                            <calc.icon className="w-5 h-5 text-slate-900" />
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="text-xl font-bold text-white">
+                              <p className="text-xl font-bold text-slate-900">
                                 {result.value}
                                 <span className="text-sm font-normal text-slate-400 ml-1">{result.unit}</span>
                               </p>
                               {result.type === "coverage" && (
                                 isCoverageOk ? (
-                                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                                 ) : (
-                                  <AlertTriangle className="w-5 h-5 text-red-400" />
+                                  <AlertTriangle className="w-5 h-5 text-red-600" />
                                 )
                               )}
                             </div>
@@ -503,13 +503,13 @@ export default function CalculationsPage() {
                         </div>
                         <button
                           onClick={() => copyResult(result)}
-                          className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                          className="p-2 rounded-lg hover:bg-white/10 text-slate-400 hover:text-slate-900 transition-colors"
                         >
                           <Copy className="w-4 h-4" />
                         </button>
                       </div>
                       {isCoverageWarning && (
-                        <p className="text-xs text-red-400 mt-2">
+                        <p className="text-xs text-red-600 mt-2">
                           Exceeds max coverage of {maxCoverage}%
                         </p>
                       )}
@@ -520,7 +520,7 @@ export default function CalculationsPage() {
             )}
 
             {results.length > 0 && (
-              <button className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors">
+              <button className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 font-medium hover:bg-slate-100 transition-colors">
                 <Save className="w-5 h-5" />
                 Save to Project
               </button>

@@ -154,8 +154,8 @@ export default function Building3DPage() {
     <Navigation>
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Box className="w-8 h-8 text-amber-400" />
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <Box className="w-8 h-8 text-amber-600" />
             Building 3D Model
           </h1>
           <p className="text-slate-400 mt-1">
@@ -165,15 +165,15 @@ export default function Building3DPage() {
 
         <div className="grid lg:grid-cols-4 gap-6">
           <div className="lg:col-span-1 space-y-4">
-            <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <div className="p-4 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 <Layers className="w-4 h-4" />
                 Project
               </h3>
               <select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-800 border border-white/10 text-white text-sm"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm"
               >
                 <option value="">Select project</option>
                 {projects.map((p) => (
@@ -189,8 +189,8 @@ export default function Building3DPage() {
               )}
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <div className="p-4 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 <Ruler className="w-4 h-4" />
                 Dimensions (m)
               </h3>
@@ -204,7 +204,7 @@ export default function Building3DPage() {
                     step={0.5}
                     value={model.width}
                     onChange={(e) => update({ width: Number(e.target.value) || 12 })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   />
                 </div>
                 <div>
@@ -216,7 +216,7 @@ export default function Building3DPage() {
                     step={0.5}
                     value={model.depth}
                     onChange={(e) => update({ depth: Number(e.target.value) || 10 })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   />
                 </div>
               </div>
@@ -224,15 +224,15 @@ export default function Building3DPage() {
                 type="button"
                 onClick={syncFromSitePlan}
                 disabled={syncing || !projectId}
-                className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
+                className="mt-3 w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 disabled:opacity-50"
               >
                 {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 Sync from site plan
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <div className="p-4 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 <Home className="w-4 h-4" />
                 Wall heights (m)
               </h3>
@@ -253,7 +253,7 @@ export default function Building3DPage() {
                         },
                       })
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   />
                 </div>
                 <div>
@@ -272,7 +272,7 @@ export default function Building3DPage() {
                         },
                       })
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   />
                 </div>
                 <div>
@@ -291,14 +291,14 @@ export default function Building3DPage() {
                         },
                       })
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-3">Roof</h3>
+            <div className="p-4 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">Roof</h3>
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Type</label>
@@ -309,7 +309,7 @@ export default function Building3DPage() {
                         roof: { ...model.roof, type: e.target.value, pitch: model.roof?.pitch ?? 35, overhang: model.roof?.overhang ?? 0.5 },
                       })
                     }
-                    className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                   >
                     {ROOF_TYPES.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -332,7 +332,7 @@ export default function Building3DPage() {
                             roof: { ...model.roof, pitch: Number(e.target.value) || 35 },
                           })
                         }
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
                     <div>
@@ -348,7 +348,7 @@ export default function Building3DPage() {
                             roof: { ...model.roof, overhang: Number(e.target.value) ?? 0.5 },
                           })
                         }
-                        className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
                   </>
@@ -361,7 +361,7 @@ export default function Building3DPage() {
                 type="button"
                 onClick={saveModel}
                 disabled={saving || !projectId}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-semibold disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-slate-900 font-semibold disabled:opacity-50"
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save 3D model
@@ -370,7 +370,7 @@ export default function Building3DPage() {
                 type="button"
                 onClick={generateElevations}
                 disabled={generating || !projectId}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-semibold disabled:opacity-50"
               >
                 {generating ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -386,8 +386,8 @@ export default function Building3DPage() {
                 className={cn(
                   "p-3 rounded-xl text-sm flex items-start gap-2",
                   message.type === "success"
-                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                    : "bg-red-500/20 text-red-400 border border-red-500/30"
+                    ? "bg-emerald-100 text-emerald-600 border border-emerald-200"
+                    : "bg-red-50 text-red-600 border border-red-200"
                 )}
               >
                 <Info className="w-4 h-4 shrink-0 mt-0.5" />
@@ -397,10 +397,10 @@ export default function Building3DPage() {
           </div>
 
           <div className="lg:col-span-3">
-            <div className="rounded-2xl bg-slate-800/50 border border-white/10 overflow-hidden">
-              <div className="p-3 border-b border-white/10 flex items-center justify-between flex-wrap gap-2">
-                <span className="text-white text-sm font-medium flex items-center gap-2">
-                  <Box className="w-4 h-4 text-amber-400" />
+            <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
+              <div className="p-3 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-slate-900 text-sm font-medium flex items-center gap-2">
+                  <Box className="w-4 h-4 text-amber-600" />
                   3D preview — interactive
                 </span>
                 <div className="flex items-center gap-1 flex-wrap">
@@ -414,7 +414,7 @@ export default function Building3DPage() {
                     <button
                       key={v.id}
                       type="button"
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-700/50 text-slate-300 hover:bg-slate-600/50"
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200/50"
                       title={v.label}
                     >
                       {v.label}
@@ -423,7 +423,7 @@ export default function Building3DPage() {
                   <button
                     type="button"
                     onClick={() => setMessage({ type: "success", text: "Export: Save 3D model then use Generate elevations for PDF export." })}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/80 hover:bg-blue-500 text-white flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/80 hover:bg-blue-500 text-slate-900 flex items-center gap-1"
                   >
                     Export
                   </button>

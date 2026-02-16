@@ -239,9 +239,9 @@ export default function AdminPage() {
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-white" />
+                <Shield className="w-5 h-5 text-slate-900" />
               </div>
               Credits & Subscriptions
             </h1>
@@ -253,10 +253,10 @@ export default function AdminPage() {
           </div>
 
           {user && (
-            <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20">
-              <Coins className="w-6 h-6 text-amber-400" />
+            <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200">
+              <Coins className="w-6 h-6 text-amber-600" />
               <div>
-                <p className="text-2xl font-bold text-white">
+                <p className="text-2xl font-bold text-slate-900">
                   {user.credits}
                 </p>
                 <p className="text-xs text-slate-400">Credits Available</p>
@@ -271,8 +271,8 @@ export default function AdminPage() {
             className={cn(
               "p-4 rounded-xl border flex items-center gap-3",
               message.type === "success"
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                : "bg-red-500/10 border-red-500/30 text-red-400"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-600"
+                : "bg-red-50 border-red-200 text-red-600"
             )}
           >
             {message.type === "success" ? (
@@ -297,8 +297,8 @@ export default function AdminPage() {
               className={cn(
                 "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-colors",
                 activeTab === tab.id
-                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
-                  : "bg-slate-800/50 text-slate-400 border border-white/10 hover:bg-slate-700/50"
+                  ? "bg-blue-100 text-blue-600 border border-blue-200"
+                  : "bg-white text-slate-400 border border-slate-200 hover:bg-slate-100"
               )}
             >
               <tab.icon className="w-4 h-4" />
@@ -316,7 +316,7 @@ export default function AdminPage() {
             {/* Credit Packages */}
             {activeTab === "credits" && (
               <div className="space-y-4">
-                <h2 className="text-lg font-semibold text-white">
+                <h2 className="text-lg font-semibold text-slate-900">
                   Purchase Credits
                 </h2>
                 <p className="text-sm text-slate-400">
@@ -330,12 +330,12 @@ export default function AdminPage() {
                       className={cn(
                         "rounded-2xl border p-6 relative",
                         i === 2
-                          ? "border-blue-500/50 bg-blue-500/5 ring-2 ring-blue-500/30"
-                          : "border-white/10 bg-slate-800/50"
+                          ? "border-blue-500/50 bg-blue-50/80 ring-2 ring-blue-200"
+                          : "border-slate-200 bg-white"
                       )}
                     >
                       {i === 2 && (
-                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-500 text-white text-xs font-medium">
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-500 text-slate-900 text-xs font-medium">
                           Best Value
                         </div>
                       )}
@@ -343,16 +343,16 @@ export default function AdminPage() {
                         <Zap
                           className={cn(
                             "w-8 h-8 mx-auto mb-2",
-                            i === 2 ? "text-blue-400" : "text-amber-400"
+                            i === 2 ? "text-blue-600" : "text-amber-600"
                           )}
                         />
-                        <p className="text-3xl font-bold text-white">
+                        <p className="text-3xl font-bold text-slate-900">
                           {pkg.credits}
                         </p>
                         <p className="text-sm text-slate-400">credits</p>
                       </div>
                       <div className="text-center mb-4">
-                        <p className="text-2xl font-bold text-white">
+                        <p className="text-2xl font-bold text-slate-900">
                           {pkg.priceFormatted}
                         </p>
                         <p className="text-xs text-slate-500">
@@ -365,8 +365,8 @@ export default function AdminPage() {
                         className={cn(
                           "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium transition-all",
                           i === 2
-                            ? "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-lg"
-                            : "bg-slate-700 text-white hover:bg-slate-600"
+                            ? "bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 hover:shadow-lg"
+                            : "bg-slate-100 text-slate-900 hover:bg-slate-200"
                         )}
                       >
                         {purchasing === pkg.id ? (
@@ -381,8 +381,8 @@ export default function AdminPage() {
                 </div>
 
                 {/* Credit costs */}
-                <div className="p-5 rounded-2xl bg-slate-800/30 border border-white/5">
-                  <h3 className="text-sm font-semibold text-white mb-3">
+                <div className="p-5 rounded-2xl bg-slate-100/30 border border-slate-100">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
                     Credit Costs per Feature
                   </h3>
                   <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -399,12 +399,12 @@ export default function AdminPage() {
                     ].map((item) => (
                       <div
                         key={item.name}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-700/30"
+                        className="flex items-center justify-between p-2 rounded-lg bg-slate-50"
                       >
                         <span className="text-xs text-slate-400">
                           {item.name}
                         </span>
-                        <span className="text-xs font-medium text-amber-400">
+                        <span className="text-xs font-medium text-amber-600">
                           {item.cost} cr
                         </span>
                       </div>
@@ -418,14 +418,14 @@ export default function AdminPage() {
             {activeTab === "plans" && (
               <div className="space-y-6">
                 {user?.role === "ADMIN" && (
-                  <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
-                    <h3 className="text-lg font-semibold text-white mb-3">Manage subscription plans</h3>
+                  <div className="p-5 rounded-2xl bg-white border border-slate-200">
+                    <h3 className="text-lg font-semibold text-slate-900 mb-3">Manage subscription plans</h3>
                     <div className="flex flex-wrap gap-2 mb-4">
                       {!showAddPlan ? (
                         <button
                           type="button"
                           onClick={() => setShowAddPlan(true)}
-                          className="px-4 py-2 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 text-sm font-medium"
+                          className="px-4 py-2 rounded-xl bg-blue-100 text-blue-600 border border-blue-200 text-sm font-medium"
                         >
                           Add plan
                         </button>
@@ -434,7 +434,7 @@ export default function AdminPage() {
                         type="button"
                         onClick={syncPlansToStripe}
                         disabled={syncingStripe}
-                        className="px-4 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+                        className="px-4 py-2 rounded-xl bg-emerald-100 text-emerald-600 border border-emerald-200 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
                       >
                         {syncingStripe ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                         Sync plans to Stripe
@@ -446,20 +446,20 @@ export default function AdminPage() {
                           placeholder="Name"
                           value={newPlan.name}
                           onChange={(e) => setNewPlan((p) => ({ ...p, name: e.target.value }))}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                          className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                           required
                         />
                         <input
                           placeholder="Slug (e.g. starter)"
                           value={newPlan.slug}
                           onChange={(e) => setNewPlan((p) => ({ ...p, slug: e.target.value }))}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                          className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                         />
                         <input
                           placeholder="Description"
                           value={newPlan.description}
                           onChange={(e) => setNewPlan((p) => ({ ...p, description: e.target.value }))}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                          className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                         />
                         <div className="flex gap-2">
                           <input
@@ -468,39 +468,39 @@ export default function AdminPage() {
                             placeholder="Price (€/month)"
                             value={newPlan.priceMonthly}
                             onChange={(e) => setNewPlan((p) => ({ ...p, priceMonthly: Number(e.target.value) }))}
-                            className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                            className="flex-1 px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                           />
                           <input
                             type="number"
                             placeholder="Credits/month"
                             value={newPlan.creditsPerMonth}
                             onChange={(e) => setNewPlan((p) => ({ ...p, creditsPerMonth: Number(e.target.value) }))}
-                            className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                            className="flex-1 px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                           />
                         </div>
                         <input
                           placeholder="Stripe Price ID (optional)"
                           value={newPlan.stripePriceId}
                           onChange={(e) => setNewPlan((p) => ({ ...p, stripePriceId: e.target.value }))}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                          className="w-full px-3 py-2 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                         />
                         <div className="flex gap-2">
-                          <button type="submit" className="px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium">Create</button>
-                          <button type="button" onClick={() => setShowAddPlan(false)} className="px-4 py-2 rounded-xl bg-slate-700 text-slate-300 text-sm">Cancel</button>
+                          <button type="submit" className="px-4 py-2 rounded-xl bg-blue-500 text-slate-900 text-sm font-medium">Create</button>
+                          <button type="button" onClick={() => setShowAddPlan(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm">Cancel</button>
                         </div>
                       </form>
                     ) : null}
                     <div className="mt-4 space-y-2">
                       {adminPlans.map((plan) => (
-                        <div key={plan.id} className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-slate-700/30">
-                          <span className="font-medium text-white">{plan.name}</span>
+                        <div key={plan.id} className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-slate-50">
+                          <span className="font-medium text-slate-900">{plan.name}</span>
                           <span className="text-slate-400 text-sm">€{plan.priceMonthly}/mo · {plan.creditsPerMonth} cr</span>
                           {plan.stripePriceId && <span className="text-xs text-slate-500 truncate">{plan.stripePriceId}</span>}
-                          {plan.isActive === false && <span className="text-xs text-amber-400">Inactive</span>}
+                          {plan.isActive === false && <span className="text-xs text-amber-600">Inactive</span>}
                           <button
                             type="button"
                             onClick={() => setEditingPlanId(editingPlanId === plan.id ? null : plan.id)}
-                            className="ml-auto text-xs text-blue-400"
+                            className="ml-auto text-xs text-blue-600"
                           >
                             {editingPlanId === plan.id ? "Done" : "Edit"}
                           </button>
@@ -509,25 +509,25 @@ export default function AdminPage() {
                               <input
                                 defaultValue={plan.priceMonthly}
                                 onBlur={(e) => updatePlan(plan.id, { priceMonthly: Number(e.target.value) })}
-                                className="w-20 px-2 py-1 rounded bg-slate-800 text-white text-xs"
+                                className="w-20 px-2 py-1 rounded bg-slate-100 text-slate-900 text-xs"
                                 placeholder="Price"
                               />
                               <input
                                 defaultValue={plan.creditsPerMonth}
                                 onBlur={(e) => updatePlan(plan.id, { creditsPerMonth: Number(e.target.value) })}
-                                className="w-20 px-2 py-1 rounded bg-slate-800 text-white text-xs"
+                                className="w-20 px-2 py-1 rounded bg-slate-100 text-slate-900 text-xs"
                                 placeholder="Credits"
                               />
                               <input
                                 defaultValue={plan.stripePriceId || ""}
                                 onBlur={(e) => updatePlan(plan.id, { stripePriceId: e.target.value || null })}
-                                className="flex-1 min-w-[120px] px-2 py-1 rounded bg-slate-800 text-white text-xs"
+                                className="flex-1 min-w-[120px] px-2 py-1 rounded bg-slate-100 text-slate-900 text-xs"
                                 placeholder="Stripe Price ID"
                               />
                               <button
                                 type="button"
                                 onClick={() => updatePlan(plan.id, { isActive: !plan.isActive })}
-                                className="px-2 py-1 rounded bg-slate-600 text-white text-xs"
+                                className="px-2 py-1 rounded bg-slate-200 text-slate-900 text-xs"
                               >
                                 {plan.isActive === false ? "Activate" : "Deactivate"}
                               </button>
@@ -545,18 +545,18 @@ export default function AdminPage() {
                     className={cn(
                       "rounded-2xl border p-6",
                       i === 1
-                        ? "border-blue-500/50 bg-blue-500/5 ring-2 ring-blue-500/30"
-                        : "border-white/10 bg-slate-800/50"
+                        ? "border-blue-500/50 bg-blue-50/80 ring-2 ring-blue-200"
+                        : "border-slate-200 bg-white"
                     )}
                   >
-                    <h3 className="text-lg font-bold text-white">
+                    <h3 className="text-lg font-bold text-slate-900">
                       {plan.name}
                     </h3>
                     <p className="text-slate-400 text-sm mt-1">
                       {plan.description}
                     </p>
                     <div className="mt-4">
-                      <span className="text-3xl font-bold text-white">
+                      <span className="text-3xl font-bold text-slate-900">
                         €{plan.priceMonthly}
                       </span>
                       <span className="text-slate-400">/month</span>
@@ -569,9 +569,9 @@ export default function AdminPage() {
                         (f) => (
                           <li
                             key={f}
-                            className="flex items-center gap-2 text-sm text-slate-300"
+                            className="flex items-center gap-2 text-sm text-slate-600"
                           >
-                            <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                             {f}
                           </li>
                         )
@@ -587,8 +587,8 @@ export default function AdminPage() {
                       className={cn(
                         "w-full mt-6 py-2.5 rounded-xl font-medium flex items-center justify-center gap-2",
                         plan.priceMonthly === 0
-                          ? "bg-slate-700 text-slate-300 cursor-default"
-                          : "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-lg"
+                          ? "bg-slate-100 text-slate-600 cursor-default"
+                          : "bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 hover:shadow-lg"
                       )}
                     >
                       {subscribing === plan.id ? (
@@ -603,7 +603,7 @@ export default function AdminPage() {
                       )}
                     </button>
                     {plan.priceMonthly > 0 && !plan.stripePriceId && (
-                      <p className="text-xs text-amber-400/90 mt-2 text-center">
+                      <p className="text-xs text-amber-600/90 mt-2 text-center">
                         Add Stripe Price ID in Admin to open Stripe checkout
                       </p>
                     )}
@@ -615,8 +615,8 @@ export default function AdminPage() {
 
             {/* Transaction History */}
             {activeTab === "history" && (
-              <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
-                <h3 className="text-lg font-semibold text-white mb-4">
+              <div className="p-5 rounded-2xl bg-white border border-slate-200">
+                <h3 className="text-lg font-semibold text-slate-900 mb-4">
                   Transaction History
                 </h3>
                 {transactions.length > 0 ? (
@@ -624,10 +624,10 @@ export default function AdminPage() {
                     {transactions.map((tx) => (
                       <div
                         key={tx.id}
-                        className="flex items-center justify-between p-3 rounded-lg bg-slate-700/30"
+                        className="flex items-center justify-between p-3 rounded-lg bg-slate-50"
                       >
                         <div>
-                          <p className="text-sm text-white">
+                          <p className="text-sm text-slate-900">
                             {tx.description}
                           </p>
                           <p className="text-xs text-slate-500">
@@ -638,8 +638,8 @@ export default function AdminPage() {
                           className={cn(
                             "text-sm font-medium",
                             tx.amount > 0
-                              ? "text-emerald-400"
-                              : "text-red-400"
+                              ? "text-emerald-600"
+                              : "text-red-600"
                           )}
                         >
                           {tx.amount > 0 ? "+" : ""}

@@ -1471,24 +1471,24 @@ function EditorPageContent() {
     hasContent;
 
   return (
-    <div className="h-screen bg-slate-950 flex flex-col overflow-hidden">
+    <div className="h-screen bg-white flex flex-col overflow-hidden">
       {/* Top Bar */}
-      <div className="h-14 bg-slate-900 border-b border-white/10 flex items-center justify-between px-4">
+      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4">
         <div className="flex items-center gap-4">
-          <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+          <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
             <ArrowLeft className="w-5 h-5" />
             <span className="text-sm font-medium">Back</span>
           </Link>
           <div className="h-6 w-px bg-white/10" />
-          <h1 className="text-lg font-semibold text-white">Technical Drawing Editor</h1>
+          <h1 className="text-lg font-semibold text-slate-900">Technical Drawing Editor</h1>
           <Link
             href={currentProjectId ? `/site-plan?project=${currentProjectId}` : "/site-plan"}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors text-sm font-medium"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-100 text-blue-600 hover:bg-blue-200 transition-colors text-sm font-medium"
           >
             <Layers className="w-4 h-4" />
             <span>Site Plan</span>
           </Link>
-          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-xs font-medium">
+          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-600 text-xs font-medium">
             Scale {currentScale.label}
           </span>
           <div className="h-6 w-px bg-white/10" />
@@ -1499,13 +1499,13 @@ function EditorPageContent() {
             <Layers className="w-4 h-4" />
             <span>Facades Editor</span>
           </Link>
-          <Link href="/projects" className="text-slate-400 hover:text-white text-sm">Projects</Link>
+          <Link href="/projects" className="text-slate-400 hover:text-slate-900 text-sm">Projects</Link>
           {projects.length > 0 && (
             <div className="flex items-center gap-2">
               <select
                 value={currentProjectId || ""}
                 onChange={(e) => setCurrentProjectId(e.target.value || null)}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm"
               >
                 <option value="">No project</option>
                 {projects.map((p) => (
@@ -1517,7 +1517,7 @@ function EditorPageContent() {
                   <button
                     onClick={saveSitePlan}
                     disabled={saving}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-600 hover:bg-emerald-200 disabled:opacity-50"
                   >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Save
@@ -1535,7 +1535,7 @@ function EditorPageContent() {
         </div>
 
         {unnamedElementsWarning && unnamedElementsWarning.length > 0 && (
-          <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-200 text-sm">
+          <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-100 border border-amber-200 text-amber-700 text-sm">
             <AlertTriangle className="w-5 h-5 shrink-0" />
             <span>
               Name all elements before saving. Unnamed: {unnamedElementsWarning.map((u) => `#${u.index} (${u.type})`).join(", ")}.
@@ -1544,7 +1544,7 @@ function EditorPageContent() {
             <button
               type="button"
               onClick={() => setUnnamedElementsWarning(null)}
-              className="ml-auto text-amber-400 hover:text-amber-300"
+              className="ml-auto text-amber-600 hover:text-amber-700"
               aria-label="Dismiss"
             >
               ×
@@ -1560,7 +1560,7 @@ function EditorPageContent() {
               const scale = SCALES.find(s => s.label === e.target.value);
               if (scale) setCurrentScale(scale);
             }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 border border-white/10 text-white text-sm cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm cursor-pointer"
           >
             {SCALES.map(s => (
               <option key={s.label} value={s.label}>{s.label}</option>
@@ -1573,7 +1573,7 @@ function EditorPageContent() {
             onClick={() => setShowGrid(!showGrid)}
             className={cn(
               "p-2 rounded-lg transition-colors",
-              showGrid ? "bg-blue-500/20 text-blue-400" : "text-slate-400 hover:text-white"
+              showGrid ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-900"
             )}
             title="Toggle Grid"
           >
@@ -1584,7 +1584,7 @@ function EditorPageContent() {
             onClick={() => setSnapEnabled(!snapEnabled)}
             className={cn(
               "p-2 rounded-lg transition-colors",
-              snapEnabled ? "bg-purple-500/20 text-purple-400" : "text-slate-400 hover:text-white"
+              snapEnabled ? "bg-purple-100 text-purple-600" : "text-slate-400 hover:text-slate-900"
             )}
             title="Toggle Snap"
           >
@@ -1593,12 +1593,12 @@ function EditorPageContent() {
 
           <div className="h-6 w-px bg-white/10" />
 
-          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
-            <button onClick={() => handleZoom(-25)} className="p-1.5 text-slate-400 hover:text-white">
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+            <button onClick={() => handleZoom(-25)} className="p-1.5 text-slate-400 hover:text-slate-900">
               <ZoomOut className="w-4 h-4" />
             </button>
-            <span className="px-2 text-sm text-white min-w-[50px] text-center">{zoom}%</span>
-            <button onClick={() => handleZoom(25)} className="p-1.5 text-slate-400 hover:text-white">
+            <span className="px-2 text-sm text-slate-900 min-w-[50px] text-center">{zoom}%</span>
+            <button onClick={() => handleZoom(25)} className="p-1.5 text-slate-400 hover:text-slate-900">
               <ZoomIn className="w-4 h-4" />
             </button>
           </div>
@@ -1607,7 +1607,7 @@ function EditorPageContent() {
 
           <button
             onClick={handleClearAll}
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             title="Clear All"
           >
             <RotateCcw className="w-5 h-5" />
@@ -1617,7 +1617,7 @@ function EditorPageContent() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar */}
-        <div className="w-16 bg-slate-900 border-r border-white/10 flex flex-col items-center py-4 gap-1">
+        <div className="w-16 bg-white border-r border-slate-200 flex flex-col items-center py-4 gap-1">
           {/* Tools */}
           <div className="space-y-1">
             {tools.map((tool) => {
@@ -1629,8 +1629,8 @@ function EditorPageContent() {
                   className={cn(
                     "w-12 h-12 rounded-xl flex items-center justify-center transition-all group relative",
                     activeTool === tool.id
-                      ? "bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-lg shadow-blue-500/25"
-                      : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                      ? "bg-gradient-to-br from-blue-500 to-purple-500 text-slate-900 shadow-lg shadow-blue-500/25"
+                      : "text-slate-400 hover:bg-slate-100 hover:text-slate-900"
                   )}
                   title={`${tool.label} (${tool.shortcut})`}
                 >
@@ -1650,7 +1650,7 @@ function EditorPageContent() {
                 <button
                   key={template.id}
                   onClick={() => addTemplate(template.id)}
-                  className="w-12 h-12 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-800 transition-all group"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all group"
                   title={`${template.label} (${template.width}m × ${template.height}m)`}
                 >
                   <Icon className="w-5 h-5" style={{ color: template.color }} />
@@ -1684,7 +1684,7 @@ function EditorPageContent() {
           {/* Sample Parcel Button */}
           <button
             onClick={createSampleParcel}
-            className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all"
+            className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600 hover:bg-emerald-200 transition-all"
             title="Add Sample Land Parcel with Measurements"
           >
             <MapPin className="w-5 h-5" />
@@ -1695,7 +1695,7 @@ function EditorPageContent() {
           {/* Delete */}
           <button
             onClick={handleDelete}
-            className="w-12 h-12 rounded-xl flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-all"
+            className="w-12 h-12 rounded-xl flex items-center justify-center text-red-600 hover:bg-red-50 transition-all"
             title="Delete Selected"
           >
             <Trash2 className="w-5 h-5" />
@@ -1716,10 +1716,10 @@ function EditorPageContent() {
           {/* Polygon/Parcel instruction */}
           {(activeTool === "polygon" || activeTool === "parcel") && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-              <div className="px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white text-sm">
-                Click to add points. <span className="text-amber-400 font-medium">Double-click</span> to complete.
+              <div className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm">
+                Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
                 {polygonPoints.length > 0 && (
-                  <span className="ml-2 text-emerald-400">({polygonPoints.length} points)</span>
+                  <span className="ml-2 text-emerald-600">({polygonPoints.length} points)</span>
                 )}
               </div>
             </div>
@@ -1727,28 +1727,28 @@ function EditorPageContent() {
 
           {/* Mouse position display */}
           <div className="absolute bottom-4 right-4 z-20">
-            <div className="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 text-xs font-mono">
+            <div className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-mono">
               X: {formatMeasurement(pixelsToMeters(mousePos.x))} | Y: {formatMeasurement(pixelsToMeters(mousePos.y))}
             </div>
           </div>
 
           {/* Canvas */}
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+          <div className="absolute inset-0 flex items-center justify-center bg-white">
             <canvas ref={canvasRef} className="shadow-2xl" />
           </div>
         </div>
 
         {/* Right Panel */}
-        <div className="w-72 bg-slate-900 border-l border-white/10 flex flex-col">
+        <div className="w-72 bg-white border-l border-slate-200 flex flex-col">
           {/* Compliance Panel */}
           {currentProjectId && (
-            <div className="border-b border-white/10">
+            <div className="border-b border-slate-200">
               <button
                 onClick={() => setShowCompliance(!showCompliance)}
-                className="w-full flex items-center justify-between p-3 text-left hover:bg-slate-800/50"
+                className="w-full flex items-center justify-between p-3 text-left hover:bg-white"
               >
-                <span className="text-sm font-medium text-white flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-medium text-slate-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   Compliance
                 </span>
                 <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
@@ -1760,9 +1760,9 @@ function EditorPageContent() {
                       key={i}
                       className={cn(
                         "p-2 rounded-lg text-xs",
-                        c.status === "compliant" && "bg-emerald-500/10 text-emerald-400",
-                        c.status === "warning" && "bg-amber-500/10 text-amber-400",
-                        c.status === "violation" && "bg-red-500/10 text-red-400"
+                        c.status === "compliant" && "bg-emerald-50 text-emerald-600",
+                        c.status === "warning" && "bg-amber-50 text-amber-600",
+                        c.status === "violation" && "bg-red-50 text-red-600"
                       )}
                     >
                       <span className="font-medium">{c.rule}</span>: {c.message}
@@ -1771,7 +1771,7 @@ function EditorPageContent() {
                 </div>
               )}
               {showCompliance && currentProjectId && (
-                <p className="p-3 pt-0 text-xs text-slate-500 border-t border-white/5 mt-1">
+                <p className="p-3 pt-0 text-xs text-slate-500 border-t border-slate-100 mt-1">
                   If your PLU counts roof overhang in footprint, set overhang in Building 3D (View in 3D).
                 </p>
               )}
@@ -1779,9 +1779,9 @@ function EditorPageContent() {
           )}
           {/* Layers Panel */}
           <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-white/10">
+            <div className="p-4 border-b border-slate-200">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                   <Layers className="w-4 h-4" />
                   Layers
                 </h3>
@@ -1799,12 +1799,12 @@ function EditorPageContent() {
                 layers.map((layer) => (
                   <div
                     key={layer.id}
-                    className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 hover:bg-slate-800 transition-colors"
+                    className="flex items-center gap-2 p-2 rounded-lg bg-white hover:bg-slate-100 transition-colors"
                   >
                     <div
                       className={cn(
                         "w-8 h-8 rounded-lg flex items-center justify-center",
-                        layer.name === "Land Parcel" ? "bg-emerald-500/20 text-emerald-400" : "bg-blue-500/20 text-blue-400"
+                        layer.name === "Land Parcel" ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600"
                       )}
                     >
                       {layer.name === "Land Parcel" ? (
@@ -1820,10 +1820,10 @@ function EditorPageContent() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-white truncate capitalize">{layer.name}</p>
+                      <p className="text-sm text-slate-900 truncate capitalize">{layer.name}</p>
                       <p className="text-xs text-slate-500">{layer.type}</p>
                     </div>
-                    <button className="p-1 text-slate-400 hover:text-white">
+                    <button className="p-1 text-slate-400 hover:text-slate-900">
                       {layer.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                     </button>
                   </div>
@@ -1833,8 +1833,8 @@ function EditorPageContent() {
           </div>
 
           {/* Properties Panel */}
-          <div className="border-t border-white/10 p-4">
-            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+          <div className="border-t border-slate-200 p-4">
+            <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
               <Settings className="w-4 h-4" />
               Properties
             </h3>
@@ -1854,17 +1854,17 @@ function EditorPageContent() {
                       updateLayers(fabricRef.current!);
                     }}
                     placeholder="e.g. Main building"
-                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">Type</label>
-                  <p className="text-sm text-white capitalize">{selectedObject.type}</p>
+                  <p className="text-sm text-slate-900 capitalize">{selectedObject.type}</p>
                 </div>
                 {selectedObject.width && (
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">Width</label>
-                    <p className="text-sm text-amber-400 font-mono font-bold">
+                    <p className="text-sm text-amber-600 font-mono font-bold">
                       {formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}
                     </p>
                   </div>
@@ -1872,7 +1872,7 @@ function EditorPageContent() {
                 {selectedObject.height && (
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">Height</label>
-                    <p className="text-sm text-amber-400 font-mono font-bold">
+                    <p className="text-sm text-amber-600 font-mono font-bold">
                       {formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}
                     </p>
                   </div>
@@ -1927,29 +1927,29 @@ function EditorPageContent() {
             )}
 
             {/* Footprint Summary Table */}
-            <div className="mt-4 p-3 rounded-lg bg-slate-800/50 border border-white/5">
+            <div className="mt-4 p-3 rounded-lg bg-white border border-slate-100">
               <label className="text-xs text-slate-500 block mb-2">Footprint (m²)</label>
               <div className="text-xs space-y-1">
-                <div className="flex justify-between"><span className="text-slate-400">Existing</span><span className="text-white font-mono">{footprintSummary.existing.toFixed(0)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Projected</span><span className="text-amber-400 font-mono">{footprintSummary.projected.toFixed(0)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Max</span><span className="text-white font-mono">{footprintSummary.max.toFixed(0)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Remaining</span><span className="text-emerald-400 font-mono">{footprintSummary.remaining.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Existing</span><span className="text-slate-900 font-mono">{footprintSummary.existing.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Projected</span><span className="text-amber-600 font-mono">{footprintSummary.projected.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Max</span><span className="text-slate-900 font-mono">{footprintSummary.max.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Remaining</span><span className="text-emerald-600 font-mono">{footprintSummary.remaining.toFixed(0)}</span></div>
               </div>
             </div>
 
             {/* Green space verification table (PLU) */}
-            <div className="mt-4 p-3 rounded-lg bg-slate-800/50 border border-white/5">
+            <div className="mt-4 p-3 rounded-lg bg-white border border-slate-100">
               <label className="text-xs text-slate-500 block mb-2">Surface by type (PLU verification)</label>
               <div className="text-xs space-y-1">
                 {(["green", "gravel", "concrete", "asphalt", "building"] as const).map((t) => (
                   <div key={t} className="flex justify-between">
                     <span className="text-slate-400 capitalize">{t}</span>
-                    <span className="text-white font-mono">{(surfaceAreasByType[t] ?? 0).toFixed(1)} m²</span>
+                    <span className="text-slate-900 font-mono">{(surfaceAreasByType[t] ?? 0).toFixed(1)} m²</span>
                   </div>
                 ))}
-                <div className="border-t border-white/10 mt-2 pt-2 flex justify-between">
+                <div className="border-t border-slate-200 mt-2 pt-2 flex justify-between">
                   <span className="text-slate-400">Green % (min. {requiredGreenPct}% required)</span>
-                  <span className={cn("font-mono", greenPct >= requiredGreenPct ? "text-emerald-400" : "text-amber-400")}>
+                  <span className={cn("font-mono", greenPct >= requiredGreenPct ? "text-emerald-600" : "text-amber-600")}>
                     {greenPct.toFixed(1)}%
                   </span>
                 </div>
@@ -1996,7 +1996,7 @@ function EditorPageContent() {
 export default function EditorPage() {
   return (
     <Suspense fallback={
-      <div className="h-screen bg-slate-950 flex items-center justify-center">
+      <div className="h-screen bg-white flex items-center justify-center">
         <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
     }>

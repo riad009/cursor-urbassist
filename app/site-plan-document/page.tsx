@@ -247,7 +247,7 @@ function SitePlanDocumentContent() {
         return (
             <Navigation>
                 <div className="p-6 flex flex-col items-center justify-center min-h-[40vh] gap-3">
-                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
                     <p className="text-slate-400 text-sm">Chargement du projet…</p>
                 </div>
             </Navigation>
@@ -259,7 +259,7 @@ function SitePlanDocumentContent() {
             <Navigation>
                 <div className="p-6 max-w-2xl mx-auto">
                     <p className="text-slate-400">Projet non trouvé.</p>
-                    <Link href="/projects" className="text-blue-400 hover:underline mt-2 inline-block">
+                    <Link href="/projects" className="text-blue-600 hover:underline mt-2 inline-block">
                         ← Retour aux projets
                     </Link>
                 </div>
@@ -279,12 +279,12 @@ function SitePlanDocumentContent() {
                     <div className="flex items-center gap-3">
                         <Link
                             href={`/projects/${project.id}`}
-                            className="text-sm text-slate-400 hover:text-white inline-flex items-center gap-1"
+                            className="text-sm text-slate-400 hover:text-slate-900 inline-flex items-center gap-1"
                         >
                             <ArrowLeft className="w-4 h-4" /> Résumé
                         </Link>
-                        <h1 className="text-xl lg:text-2xl font-bold text-white flex items-center gap-2">
-                            <FileText className="w-6 h-6 text-blue-400" />
+                        <h1 className="text-xl lg:text-2xl font-bold text-slate-900 flex items-center gap-2">
+                            <FileText className="w-6 h-6 text-blue-600" />
                             Plan de Situation
                         </h1>
                     </div>
@@ -292,7 +292,7 @@ function SitePlanDocumentContent() {
                         <button
                             onClick={loadMaps}
                             disabled={loadingMaps}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm hover:bg-slate-200 disabled:opacity-50"
                         >
                             <RotateCcw className={`w-4 h-4 ${loadingMaps ? "animate-spin" : ""}`} />
                             Rafraîchir
@@ -300,7 +300,7 @@ function SitePlanDocumentContent() {
                         <button
                             onClick={exportPdf}
                             disabled={exportingPdf || !mapViews}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/80 text-white font-medium text-sm hover:bg-blue-500 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/80 text-slate-900 font-medium text-sm hover:bg-blue-500 disabled:opacity-50"
                         >
                             {exportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                             Exporter PDF
@@ -310,27 +310,27 @@ function SitePlanDocumentContent() {
 
                 {/* Project info bar */}
                 {project.address && (
-                    <div className="mb-4 p-3 rounded-xl bg-slate-800/50 border border-white/10 flex items-center gap-3 text-sm">
+                    <div className="mb-4 p-3 rounded-xl bg-white border border-slate-200 flex items-center gap-3 text-sm">
                         <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span className="text-white font-medium">{project.name}</span>
+                        <span className="text-slate-900 font-medium">{project.name}</span>
                         <span className="text-slate-400">—</span>
                         <span className="text-slate-400">{project.address}</span>
                     </div>
                 )}
 
                 {/* Controls */}
-                <div className="flex flex-wrap items-center gap-3 mb-6 p-4 rounded-xl bg-slate-800/50 border border-white/10">
+                <div className="flex flex-wrap items-center gap-3 mb-6 p-4 rounded-xl bg-white border border-slate-200">
                     {/* Format */}
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-400">Format</span>
-                        <div className="flex rounded-lg overflow-hidden border border-white/10">
+                        <div className="flex rounded-lg overflow-hidden border border-slate-200">
                             {(["A4", "A3"] as PageFormat[]).map((f) => (
                                 <button
                                     key={f}
                                     onClick={() => setFormat(f)}
                                     className={`px-3 py-1.5 text-sm font-medium ${format === f
                                             ? "bg-blue-500/30 text-blue-200"
-                                            : "bg-slate-700 text-slate-400 hover:bg-slate-600"
+                                            : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                         }`}
                                 >
                                     {f}
@@ -342,14 +342,14 @@ function SitePlanDocumentContent() {
                     {/* Orientation */}
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-400">Orientation</span>
-                        <div className="flex rounded-lg overflow-hidden border border-white/10">
+                        <div className="flex rounded-lg overflow-hidden border border-slate-200">
                             {(["landscape", "portrait"] as PageOrientation[]).map((o) => (
                                 <button
                                     key={o}
                                     onClick={() => setOrientation(o)}
                                     className={`px-3 py-1.5 text-sm font-medium capitalize ${orientation === o
                                             ? "bg-blue-500/30 text-blue-200"
-                                            : "bg-slate-700 text-slate-400 hover:bg-slate-600"
+                                            : "bg-slate-100 text-slate-400 hover:bg-slate-200"
                                         }`}
                                 >
                                     {o === "landscape" ? "Paysage" : "Portrait"}
@@ -367,7 +367,7 @@ function SitePlanDocumentContent() {
                                 const found = SCALE_OPTIONS.find((s) => s.label === e.target.value);
                                 if (found) setScale(found);
                             }}
-                            className="px-3 py-1.5 rounded-lg bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                         >
                             {SCALE_OPTIONS.map((s) => (
                                 <option key={s.label} value={s.label}>
@@ -395,14 +395,14 @@ function SitePlanDocumentContent() {
                     >
                         {/* Title bar */}
                         <div
-                            className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between"
+                            className="bg-slate-100 text-slate-900 px-4 py-2 flex items-center justify-between"
                             style={{ height: `${30 * previewScaleFactor}px` }}
                         >
                             <div>
                                 <p className="font-semibold" style={{ fontSize: `${10 * previewScaleFactor}px` }}>
                                     Plan de situation — {project.name}
                                 </p>
-                                <p className="text-slate-300" style={{ fontSize: `${7 * previewScaleFactor}px` }}>
+                                <p className="text-slate-600" style={{ fontSize: `${7 * previewScaleFactor}px` }}>
                                     {project.address}
                                 </p>
                             </div>
@@ -421,7 +421,7 @@ function SitePlanDocumentContent() {
                         >
                             {loadingMaps ? (
                                 <div className="flex-1 flex items-center justify-center">
-                                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
                                 </div>
                             ) : (
                                 <>
@@ -441,7 +441,7 @@ function SitePlanDocumentContent() {
                                         {/* Marker */}
                                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-lg" />
                                         <span
-                                            className="absolute bottom-1 left-1 bg-slate-800/80 text-white px-1.5 py-0.5 rounded text-[9px]"
+                                            className="absolute bottom-1 left-1 bg-white text-slate-900 px-1.5 py-0.5 rounded text-[9px]"
                                         >
                                             Vue aérienne
                                         </span>
@@ -462,7 +462,7 @@ function SitePlanDocumentContent() {
                                         )}
                                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-lg" />
                                         <span
-                                            className="absolute bottom-1 left-1 bg-slate-800/80 text-white px-1.5 py-0.5 rounded text-[9px]"
+                                            className="absolute bottom-1 left-1 bg-white text-slate-900 px-1.5 py-0.5 rounded text-[9px]"
                                         >
                                             Carte IGN
                                         </span>
@@ -483,7 +483,7 @@ function SitePlanDocumentContent() {
                                         )}
                                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full border-2 border-white shadow-lg" />
                                         <span
-                                            className="absolute bottom-1 left-1 bg-slate-800/80 text-white px-1.5 py-0.5 rounded text-[9px]"
+                                            className="absolute bottom-1 left-1 bg-white text-slate-900 px-1.5 py-0.5 rounded text-[9px]"
                                         >
                                             Vue cadastrale
                                         </span>
@@ -507,14 +507,14 @@ function SitePlanDocumentContent() {
                 <div className="mt-6 flex items-center justify-between max-w-3xl mx-auto">
                     <Link
                         href={`/projects/${project.id}`}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-slate-200 text-sm hover:bg-slate-600"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm hover:bg-slate-200"
                     >
                         <ArrowLeft className="w-4 h-4" /> Retour au résumé
                     </Link>
                     <button
                         onClick={exportPdf}
                         disabled={exportingPdf || !mapViews}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold hover:shadow-lg disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg disabled:opacity-50"
                     >
                         {exportingPdf ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
                         Exporter en PDF
@@ -531,7 +531,7 @@ export default function SitePlanDocumentPage() {
             fallback={
                 <Navigation>
                     <div className="p-6 flex items-center justify-center min-h-[40vh]">
-                        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
                     </div>
                 </Navigation>
             }

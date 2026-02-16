@@ -291,15 +291,15 @@ function StatementPageContent() {
     <Navigation>
       <div className="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
         {fromPayment && (
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
-            <Check className="w-5 h-5 text-emerald-400 shrink-0" />
+          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-3">
+            <Check className="w-5 h-5 text-emerald-600 shrink-0" />
             <div>
-              <p className="font-medium text-emerald-200">Payment complete</p>
+              <p className="font-medium text-emerald-700">Payment complete</p>
               <p className="text-sm text-slate-400">Complete your descriptive statement to finalize your dossier.</p>
             </div>
             <Link
               href={projectParam ? `/projects/${projectParam}` : "/projects"}
-              className="ml-auto text-sm text-emerald-400 hover:text-emerald-300"
+              className="ml-auto text-sm text-emerald-600 hover:text-emerald-700"
             >
               Back to project
             </Link>
@@ -310,9 +310,9 @@ function StatementPageContent() {
           <div>
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                <ClipboardList className="w-5 h-5 text-white" />
+                <ClipboardList className="w-5 h-5 text-slate-900" />
               </div>
-              <h1 className="text-2xl font-bold text-white">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Descriptive Statement
               </h1>
             </div>
@@ -325,10 +325,10 @@ function StatementPageContent() {
             <div className="flex gap-3">
               <button
                 onClick={handleCopy}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-white/10 text-white font-medium hover:bg-slate-700 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 font-medium hover:bg-slate-100 transition-colors"
               >
                 {copied ? (
-                  <Check className="w-4 h-4 text-emerald-400" />
+                  <Check className="w-4 h-4 text-emerald-600" />
                 ) : (
                   <Copy className="w-4 h-4" />
                 )}
@@ -336,7 +336,7 @@ function StatementPageContent() {
               </button>
               <button
                 onClick={handleExportPDF}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold hover:shadow-lg transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-slate-900 font-semibold hover:shadow-lg transition-all"
               >
                 <Download className="w-5 h-5" />
                 Export PDF
@@ -349,14 +349,14 @@ function StatementPageContent() {
           {/* Left: Questionnaire */}
           <div className="lg:col-span-2 space-y-4">
             {/* Project Selection */}
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
-              <label className="text-sm font-medium text-white block mb-2">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200">
+              <label className="text-sm font-medium text-slate-900 block mb-2">
                 Select Project
               </label>
               <select
                 value={selectedProject}
                 onChange={(e) => setSelectedProject(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-slate-700 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300"
               >
                 <option value="">Choose a project...</option>
                 {projects.map((p) => (
@@ -368,16 +368,16 @@ function StatementPageContent() {
             </div>
 
             {/* Progress */}
-            <div className="p-4 rounded-2xl bg-slate-800/50 border border-white/10">
+            <div className="p-4 rounded-2xl bg-white border border-slate-200">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-slate-400">
                   {answeredCount} of {QUESTIONS.length} questions answered
                 </span>
-                <span className="text-sm font-medium text-white">
+                <span className="text-sm font-medium text-slate-900">
                   {progress}%
                 </span>
               </div>
-              <div className="w-full bg-slate-700 rounded-full h-2">
+              <div className="w-full bg-slate-100 rounded-full h-2">
                 <div
                   className="bg-gradient-to-r from-indigo-500 to-blue-500 h-2 rounded-full transition-all"
                   style={{ width: `${progress}%` }}
@@ -390,13 +390,13 @@ function StatementPageContent() {
               ([sectionName, sectionQuestions]) => (
                 <div
                   key={sectionName}
-                  className="rounded-2xl bg-slate-800/50 border border-white/10 overflow-hidden"
+                  className="rounded-2xl bg-white border border-slate-200 overflow-hidden"
                 >
                   <button
                     onClick={() => toggleSection(sectionName)}
                     className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
                   >
-                    <h3 className="text-sm font-semibold text-white">
+                    <h3 className="text-sm font-semibold text-slate-900">
                       {sectionName}
                     </h3>
                     <div className="flex items-center gap-2">
@@ -420,7 +420,7 @@ function StatementPageContent() {
                     <div className="p-4 pt-0 space-y-4">
                       {sectionQuestions.map((q) => (
                         <div key={q.id}>
-                          <label className="text-sm text-slate-300 block mb-2">
+                          <label className="text-sm text-slate-600 block mb-2">
                             {q.question}
                           </label>
                           {q.type === "select" ? (
@@ -432,7 +432,7 @@ function StatementPageContent() {
                                   [q.id]: e.target.value,
                                 })
                               }
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                             >
                               <option value="">Select...</option>
                               {q.options?.map((opt) => (
@@ -453,7 +453,7 @@ function StatementPageContent() {
                                 })
                               }
                               placeholder={q.placeholder}
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                             />
                           ) : q.type === "textarea" ? (
                             <textarea
@@ -466,7 +466,7 @@ function StatementPageContent() {
                               }
                               placeholder={q.placeholder}
                               rows={3}
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
                             />
                           ) : (
                             <input
@@ -479,7 +479,7 @@ function StatementPageContent() {
                                 })
                               }
                               placeholder={q.placeholder}
-                              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 border border-white/10 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-300"
                             />
                           )}
                         </div>
@@ -494,7 +494,7 @@ function StatementPageContent() {
             <button
               onClick={handleGenerate}
               disabled={!selectedProject || isGenerating || answeredCount < 3}
-              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold hover:shadow-lg hover:shadow-indigo-500/25 transition-all disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-indigo-500/25 transition-all disabled:opacity-50"
             >
               {isGenerating ? (
                 <>
@@ -512,14 +512,14 @@ function StatementPageContent() {
 
           {/* Right: Preview */}
           <div className="space-y-4">
-            <div className="p-5 rounded-2xl bg-slate-800/50 border border-white/10">
-              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-indigo-400" />
                 Generated Statement
               </h3>
               {generatedText ? (
                 <div className="prose prose-invert prose-sm max-w-none">
-                  <div className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">
+                  <div className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">
                     {generatedText}
                   </div>
                 </div>
@@ -535,16 +535,16 @@ function StatementPageContent() {
             </div>
 
             {/* Credits Info */}
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-amber-400">
+                  <p className="text-sm font-medium text-amber-600">
                     Credits Required
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
                     Generating a descriptive statement costs 2 credits. You have{" "}
-                    <span className="text-white font-medium">
+                    <span className="text-slate-900 font-medium">
                       {user?.credits || 0}
                     </span>{" "}
                     credits.
@@ -554,8 +554,8 @@ function StatementPageContent() {
             </div>
 
             {/* Info */}
-            <div className="p-4 rounded-2xl bg-slate-800/30 border border-white/5">
-              <h4 className="text-sm font-medium text-white mb-2">
+            <div className="p-4 rounded-2xl bg-slate-100/30 border border-slate-100">
+              <h4 className="text-sm font-medium text-slate-900 mb-2">
                 What is a Notice Descriptive?
               </h4>
               <p className="text-xs text-slate-400">
