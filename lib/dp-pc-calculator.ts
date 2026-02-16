@@ -33,6 +33,8 @@ export interface DpPcInput {
   projectType: ProjectTypeChoice;
   /** Created floor area (surface de plancher créée) in m² */
   floorAreaCreated: number;
+  /** Created footprint (emprise au sol) in m² — compared with floorAreaCreated, stricter applies */
+  footprintCreated?: number;
   /** Only for existing_extension: existing floor area before work */
   existingFloorArea?: number;
   /** Extension: ground area of extension (for 40 m² rule) */
@@ -104,39 +106,31 @@ function calculateSwimmingPool(input: DpPcInput): DpPcResult {
 // ─── Independent Construction Rules ─────────────────────────────────────────
 
 function calculateNewConstruction(input: DpPcInput): DpPcResult {
-  const area = input.floorAreaCreated;
-  const totalAfterWork = (input.existingFloorArea ?? 0) + area;
+  const floorArea = input.floorAreaCreated;
+  const footprint = input.footprintCreated ?? floorArea;
+  // Use the stricter (larger) of footprint and floor area for threshold comparison
+  const stricterArea = Math.max(footprint, floorArea);
 
-  if (area < 5) {
+  if (stricterArea < 5) {
     return {
       determination: "NONE",
-      explanation: `La surface créée est de ${area} m² (moins de 5 m²). Aucune autorisation n'est requise.`,
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (les deux < 5 m²). Aucune autorisation n'est requise.`,
       detail: "new<5",
     };
   }
 
-  if (area <= 20) {
+  if (stricterArea <= 20) {
     return {
       determination: "DP",
-      explanation: `La surface de plancher créée est de ${area} m² (entre 5 et 20 m²). Une déclaration préalable suffit.`,
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (entre 5 et 20 m²). Une déclaration préalable suffit.`,
       detail: "new_5-20",
     };
   }
 
-  // > 20 m²
-  if (totalAfterWork > 150) {
-    return {
-      determination: "ARCHITECT_REQUIRED",
-      explanation: `La surface créée est de ${area} m². Comme la surface totale dépasse 150 m², un permis de construire et le recours à un architecte sont obligatoires.`,
-      detail: "new>150_architect",
-      architectRequired: true,
-      cannotOffer: true,
-    };
-  }
-
+  // > 20 m² → PC
   const result: DpPcResult = {
     determination: "PC",
-    explanation: `La surface de plancher créée est de ${area} m² (supérieure à 20 m²). Un permis de construire est nécessaire.`,
+    explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (supérieure à 20 m²). Un permis de construire est nécessaire.`,
     detail: "new>20",
   };
   return applyCompanyArchitect(result, input.submitterType);
@@ -146,15 +140,19 @@ function calculateNewConstruction(input: DpPcInput): DpPcResult {
 
 function calculateExistingExtension(input: DpPcInput): DpPcResult {
   const {
-    floorAreaCreated: area,
+    floorAreaCreated: floorArea,
+    footprintCreated,
     existingFloorArea = 0,
-    groundAreaExtension,
     changeOfUseOrFacade,
     inUrbanZone = true,
     submitterType,
   } = input;
 
-  const totalAfterWork = existingFloorArea + area;
+  const footprint = footprintCreated ?? floorArea;
+  // Use the stricter (larger) of footprint and floor area for DP/PC threshold
+  const stricterArea = Math.max(footprint, floorArea);
+  // 150 m² architect threshold uses ONLY total floor area (not footprint)
+  const totalFloorAfterWork = existingFloorArea + floorArea;
 
   // Facade modification or change of use → PC regardless
   if (changeOfUseOrFacade) {
@@ -164,10 +162,10 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
         "Un projet avec changement de destination ou modification de façade est soumis au permis de construire, quelle que soit la surface.",
       detail: "facade_change",
     };
-    if (totalAfterWork > 150) {
+    if (totalFloorAfterWork > 150) {
       return {
         determination: "ARCHITECT_REQUIRED",
-        explanation: `${result.explanation} De plus, la surface totale après travaux (${totalAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
+        explanation: `${result.explanation} De plus, la surface de plancher totale après travaux (${totalFloorAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
         detail: "facade_change_architect",
         architectRequired: true,
         cannotOffer: true,
@@ -177,82 +175,48 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
   }
 
   // ── Threshold depends on zone type ──
-  // Urban zone (PLU/PLUi U-zones): up to 40m² floor area → DP
-  // Non-urban zone: up to 20m² floor area → DP
+  // Urban zone (PLU/PLUi U-zones): up to 40 m² inclusive → DP
+  // Non-urban zone: up to 20 m² inclusive → DP
   const dpThreshold = inUrbanZone ? 40 : 20;
 
-  if (area < dpThreshold) {
-    if (totalAfterWork <= 150) {
+  // ── Extension ≤ threshold → DP (check 150 m² for architect) ──
+  if (stricterArea <= dpThreshold) {
+    if (totalFloorAfterWork <= 150) {
       return {
         determination: "DP",
         explanation: inUrbanZone
-          ? `La surface créée est de ${area} m² en zone urbaine (moins de ${dpThreshold} m²), et la surface totale après travaux est de ${totalAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`
-          : `La surface créée est de ${area} m² hors zone urbaine (moins de ${dpThreshold} m²). Une déclaration préalable suffit.`,
-        detail: `ext<${dpThreshold}`,
+          ? `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) en zone urbaine. Surface totale après travaux : ${totalFloorAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`
+          : `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) hors zone urbaine. Une déclaration préalable suffit.`,
+        detail: `ext<=${dpThreshold}`,
       };
     }
-    // Total > 150 but extension < threshold → still DP for extension, but architect for total
+    // Total floor area > 150 → PC + architect required
     return {
       determination: "ARCHITECT_REQUIRED",
-      explanation: `La surface créée est de ${area} m², mais la surface totale après travaux est de ${totalAfterWork} m² (supérieure à 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²), mais la surface de plancher totale après travaux est de ${totalFloorAfterWork} m² (> 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
       detail: "ext_total>150_architect",
       architectRequired: true,
       cannotOffer: true,
     };
   }
 
-  // 20-40 m² in urban zone → DP if total ≤ 150
-  if (area <= 40 && inUrbanZone) {
-    if (totalAfterWork <= 150) {
-      return {
-        determination: "DP",
-        explanation: `La surface créée est de ${area} m² en zone urbaine (entre 20 et 40 m²), et la surface totale après travaux est de ${totalAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`,
-        detail: "ext_20-40_urban_dp",
-      };
-    }
+  // ── Extension > threshold → PC (check 150 m² for architect) ──
+  if (totalFloorAfterWork > 150) {
     return {
       determination: "ARCHITECT_REQUIRED",
-      explanation: `La surface créée est de ${area} m² en zone urbaine, mais la surface totale après travaux est de ${totalAfterWork} m² (supérieure à 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
-      detail: "ext_20-40_urban_architect",
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (> ${dpThreshold} m²)${existingFloorArea ? `, surface existante : ${existingFloorArea} m²` : ""}. Surface totale après travaux : ${totalFloorAfterWork} m² (> 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
+      detail: "ext_architect",
       architectRequired: true,
       cannotOffer: true,
     };
   }
 
-  // > 40 m² (urban) or > 20 m² (non-urban) → PC
-  const extensionOverThreshold =
-    (typeof groundAreaExtension === "number" && groundAreaExtension > dpThreshold) ||
-    area > dpThreshold;
-
-  if (extensionOverThreshold || totalAfterWork > 150) {
-    const reasons: string[] = [];
-    if (extensionOverThreshold) reasons.push(`surface créée > ${dpThreshold} m²`);
-    if (totalAfterWork > 150) reasons.push("surface totale après travaux > 150 m²");
-    const needsArchitect = totalAfterWork > 150;
-
-    if (needsArchitect) {
-      return {
-        determination: "ARCHITECT_REQUIRED",
-        explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire avec architecte obligatoire est nécessaire.`,
-        detail: "ext_architect",
-        architectRequired: true,
-        cannotOffer: true,
-      };
-    }
-
-    const result: DpPcResult = {
-      determination: "PC",
-      explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, la surface existante de ${existingFloorArea} m²` : ""}, soit une surface totale après travaux de ${totalAfterWork} m². Comme ${reasons.join(" et ")}, un permis de construire est nécessaire.`,
-      detail: `ext>${dpThreshold}`,
-    };
-    return applyCompanyArchitect(result, submitterType);
-  }
-
-  return {
-    determination: "DP",
-    explanation: `La surface créée est de ${area} m²${existingFloorArea ? `, surface existante ${existingFloorArea} m²` : ""}, surface totale après travaux ${totalAfterWork} m². Une déclaration préalable suffit.`,
-    detail: "ext_dp",
+  const result: DpPcResult = {
+    determination: "PC",
+    explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (> ${dpThreshold} m²)${existingFloorArea ? `, surface existante : ${existingFloorArea} m²` : ""}. Surface totale après travaux : ${totalFloorAfterWork} m² (≤ 150 m²). Un permis de construire est nécessaire.`,
+    detail: `ext>${dpThreshold}`,
   };
+  return applyCompanyArchitect(result, submitterType);
 }
 
 // ─── Fence / Gate Rules ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
@@ -14,12 +14,12 @@ import {
     Pencil,
     ArrowLeft,
     Layers,
-    ChevronDown,
-    ChevronUp,
+
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
+import { processProtections } from "@/lib/sup-classification";
 import dynamic from "next/dynamic";
 
 const ZoneMap = dynamic(
@@ -53,7 +53,7 @@ export default function NewProjectPage() {
     const [loadingProtectedAreas, setLoadingProtectedAreas] = useState(false);
     const [cadastreError, setCadastreError] = useState<string | null>(null);
     const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
-    const [showAllProtected, setShowAllProtected] = useState(false);
+
 
     // When user clicks a surrounding skeleton parcel, add it to the sidebar list
     const handleViewportParcelClicked = React.useCallback((newParcels: typeof parcels) => {
@@ -151,12 +151,13 @@ export default function NewProjectPage() {
         setCreating(false);
     };
 
+    const classified = useMemo(() => processProtections(protectedAreas), [protectedAreas]);
+
     if (authLoading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
     if (!user) return <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-4"><h1 className="text-2xl font-bold text-slate-900">{t("newProj.signIn")}</h1><Link href="/login" className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold">{t("newProj.signInBtn")}</Link></div>;
 
     const totalSelectedArea = parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((s, p) => s + p.area, 0);
-    const hasWarning = protectedAreas.some((a: { type: string }) => ["ABF", "FLOOD_ZONE", "HERITAGE"].includes(a.type));
-    const visibleProtected = showAllProtected ? protectedAreas : protectedAreas.slice(0, 2);
+    const hasWarning = classified.criticalItems.length > 0;
 
     return (
         <Navigation>
@@ -368,46 +369,60 @@ export default function NewProjectPage() {
                                     </div>
                                 </div>
 
-                                {/* PROTECTED AREAS */}
+                                {/* PROTECTED AREAS — Tiered Display */}
                                 <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col shadow-sm">
                                     <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5 shrink-0">
                                         <Shield className="w-3.5 h-3.5 text-amber-500" />
                                         <p className="text-sm font-semibold text-slate-900 flex-1 truncate">{t("newProj.protections")}</p>
-                                        {selectedAddress && !loadingProtectedAreas && protectedAreas.length > 0 && (
+                                        {selectedAddress && !loadingProtectedAreas && (classified.criticalItems.length + classified.secondaryItems.length) > 0 && (
                                             <span className={cn("text-[9px] font-semibold px-1.5 py-0.5 rounded-full", hasWarning ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400")}>
-                                                {protectedAreas.length}
+                                                {classified.criticalItems.length + classified.secondaryItems.length}
                                             </span>
                                         )}
                                     </div>
-                                    <div className="p-2.5 overflow-y-auto max-h-[120px] scrollbar-thin">
+                                    <div className="p-2.5 overflow-y-auto max-h-[160px] scrollbar-thin">
                                         {!selectedAddress || loadingProtectedAreas ? (
                                             <div className="space-y-1.5 animate-pulse">
                                                 <div className="h-3 bg-slate-200 rounded w-full" />
                                                 <div className="h-3 bg-slate-200 rounded w-2/3" />
                                             </div>
-                                        ) : protectedAreas.length > 0 ? (
+                                        ) : (classified.criticalItems.length + classified.secondaryItems.length) > 0 ? (
                                             <div className="space-y-1">
-                                                {hasWarning && (
+                                                {/* ABF warning banner */}
+                                                {classified.requiresABF && (
+                                                    <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-1.5 flex items-center gap-1.5 mb-1">
+                                                        <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />
+                                                        <p className="text-[9px] font-semibold text-red-700">{t("newProj.abfRequired")}</p>
+                                                    </div>
+                                                )}
+                                                {/* Critical constraints warning */}
+                                                {hasWarning && !classified.requiresABF && (
                                                     <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-1.5 flex items-center gap-1.5 mb-1">
                                                         <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
                                                         <p className="text-[9px] text-amber-700">{t("newProj.constraintsDetected")}</p>
                                                     </div>
                                                 )}
-                                                {protectedAreas.map((area: { type: string; name: string; severity?: string; sourceUrl?: string | null; description?: string }, idx: number) => {
-                                                    const sevDot = area.severity === "high" ? "bg-red-400" : area.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
-                                                    const typeShort = area.type === "ABF" ? "ABF"
-                                                        : area.type === "SUP" ? "SUP"
-                                                            : area.type === "PRESCRIPTION" ? "PRESC"
-                                                                : area.type === "FLOOD_ZONE" ? "FLOOD"
-                                                                    : area.type === "HERITAGE" ? "PATRI"
-                                                                        : area.type === "SEISMIC" ? "SÉISME"
-                                                                            : area.type;
+
+                                                {/* ── CRITICAL ITEMS — always visible ── */}
+                                                {classified.criticalItems.map((item, idx) => {
+                                                    const sevDot = item.severity === "high" ? "bg-red-400" : item.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
                                                     return (
-                                                        <div key={idx} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                                                        <div key={`crit-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg bg-amber-50/50 border border-amber-100 transition-colors">
                                                             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sevDot}`} />
-                                                            <p className="text-xs text-slate-700 truncate flex-1">{area.name}</p>
-                                                            <span className="text-[8px] text-slate-400 uppercase shrink-0">{typeShort}</span>
-                                                            {area.sourceUrl && <a href={area.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[9px] text-blue-400 hover:text-blue-300 shrink-0">↗</a>}
+                                                            <p className="text-xs text-slate-800 font-medium truncate flex-1">{item.label}</p>
+                                                            <span className="text-[8px] text-amber-500 uppercase shrink-0 font-semibold">{item.type === "ABF" ? "ABF" : item.type === "FLOOD_ZONE" ? "RISQUE" : item.type === "HERITAGE" ? "PATRI" : item.categorie || item.type}</span>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* ── SECONDARY ITEMS — always visible ── */}
+                                                {classified.secondaryItems.map((item, idx) => {
+                                                    const sevDot = item.severity === "high" ? "bg-red-400" : item.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
+                                                    return (
+                                                        <div key={`sec-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                                                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sevDot}`} />
+                                                            <p className="text-xs text-slate-600 truncate flex-1">{item.label}</p>
+                                                            <span className="text-[8px] text-slate-400 uppercase shrink-0">{item.categorie || item.type}</span>
                                                         </div>
                                                     );
                                                 })}

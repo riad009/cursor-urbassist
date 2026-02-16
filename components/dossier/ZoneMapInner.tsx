@@ -58,6 +58,16 @@ function getZoneColor(zoneCode: string): string {
   return match ? ZONE_COLORS[match] : ZONE_COLORS.default;
 }
 
+/** Clears parcel selection when user clicks on empty map area (not on a parcel). */
+function MapClickHandler({ onClearSelection }: { onClearSelection: () => void }) {
+  useMapEvents({
+    click: () => {
+      onClearSelection();
+    },
+  });
+  return null;
+}
+
 function MapController({
   center,
   zoom,
@@ -307,6 +317,10 @@ export function ZoneMapInner({
   const [zoom, setZoom] = React.useState(17);
   const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("cadastre");
 
+  // Ref always mirrors selectedParcelIds so Leaflet event handlers read the latest value
+  const selectedIdsRef = useRef(selectedParcelIds);
+  selectedIdsRef.current = selectedParcelIds;
+
   // ── Viewport-loaded parcels (surrounding plots) ────────────────────
   const [viewportParcels, setViewportParcels] = useState<ParcelWithGeometry[]>([]);
 
@@ -341,13 +355,14 @@ export function ZoneMapInner({
   const handleParcelClick = useCallback(
     (id: string) => {
       if (!onParcelSelect) return;
-      const isSelected = selectedParcelIds.includes(id);
+      const current = selectedIdsRef.current;
+      const isSelected = current.includes(id);
       const next = isSelected
-        ? selectedParcelIds.filter((x) => x !== id)
-        : [...selectedParcelIds, id];
+        ? current.filter((x) => x !== id)
+        : [...current, id];
       onParcelSelect(next);
     },
-    [selectedParcelIds, onParcelSelect]
+    [onParcelSelect]
   );
 
   const zoneCollection = useMemo((): FeatureCollection | null => {
@@ -436,19 +451,6 @@ export function ZoneMapInner({
     };
   };
 
-  /** Cadastral look: white outlines, yellow highlight for selected (no red rectangles). */
-  const parcelStyle = (feature?: { properties?: { id?: string; selected?: boolean } }) => {
-    const selected = feature?.properties?.selected ?? false;
-    return {
-      color: selected ? "#b45309" : "#ffffff",
-      weight: selected ? 3 : 1.5,
-      fillColor: selected ? "#eab308" : "rgba(255,255,255,0.15)",
-      fillOpacity: selected ? 0.7 : 0.2,
-      fill: true,
-      fillRule: "nonzero" as const,
-      opacity: selected ? 1 : 0.95,
-    };
-  };
 
   return (
     <div className={className}>
@@ -505,7 +507,7 @@ export function ZoneMapInner({
 
         {/* Map — full width when no sidebar, else 2/3 */}
         <div className={showRegulationSidebar ? "lg:col-span-2 order-1 lg:order-2 rounded-xl overflow-hidden border border-white/10 bg-slate-900" : "w-full h-full rounded-xl overflow-hidden border border-white/10 bg-slate-900"} style={{ position: "relative" }}>
-          <style>{`.parcel-label-marker { border: none !important; background: transparent !important; }`}</style>
+          <style>{`.parcel-label-marker { border: none !important; background: transparent !important; pointer-events: none !important; }`}</style>
           <ViewToggle mode={viewMode} onChange={setViewMode} />
           <MapContainer
             center={center ? [center.lat, center.lng] : FRANCE_CENTER}
@@ -536,7 +538,7 @@ export function ZoneMapInner({
                 maxZoom={20}
               />
             )}
-            {center && <Marker position={[center.lat, center.lng]} />}
+            {center && <Marker position={[center.lat, center.lng]} interactive={false} />}
             {/* === INITIAL PARCELS — full styling + labels === */}
             {parcelCollection && (
               <GeoJSON
@@ -548,8 +550,8 @@ export function ZoneMapInner({
                     return {
                       color: selected ? "#b45309" : "#3b82f6",
                       weight: selected ? 3 : 1.5,
-                      fillColor: selected ? "#eab308" : "#3b82f6",
-                      fillOpacity: selected ? 0.45 : 0.08,
+                      fillColor: selected ? "#eab308" : "transparent",
+                      fillOpacity: selected ? 0.45 : 0,
                       fill: true,
                       fillRule: "nonzero" as const,
                       opacity: selected ? 1 : 0.5,
@@ -559,8 +561,8 @@ export function ZoneMapInner({
                   return {
                     color: selected ? "#b45309" : "#ffffff",
                     weight: selected ? 3 : 1.5,
-                    fillColor: selected ? "#eab308" : "rgba(255,255,255,0.15)",
-                    fillOpacity: selected ? 0.7 : 0.2,
+                    fillColor: selected ? "#eab308" : "transparent",
+                    fillOpacity: selected ? 0.7 : 0,
                     fill: true,
                     fillRule: "nonzero" as const,
                     opacity: selected ? 1 : 0.95,
@@ -573,6 +575,18 @@ export function ZoneMapInner({
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
+                        // Immediately reset visual style when deselecting so the user sees instant feedback
+                        const wasSelected = selectedIdsRef.current.includes(id);
+                        if (wasSelected) {
+                          (layer as L.Path).setStyle({
+                            color: viewMode === "cadastre" ? "#3b82f6" : "#ffffff",
+                            weight: 1.5,
+                            fillColor: "transparent",
+                            fillOpacity: 0,
+                            opacity: viewMode === "cadastre" ? 0.5 : 0.95,
+                            dashArray: viewMode === "cadastre" ? "4 4" : undefined,
+                          });
+                        }
                         handleParcelClick(id);
                       },
                     });
@@ -632,11 +646,23 @@ export function ZoneMapInner({
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
+                        // Immediately reset visual style when deselecting
+                        const wasSelected = selectedIdsRef.current.includes(id);
+                        if (wasSelected) {
+                          pathLayer.setStyle({
+                            color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
+                            weight: 0.5,
+                            fillColor: "transparent",
+                            fillOpacity: 0,
+                          });
+                        }
                         handleParcelClick(id);
-                        // Find the full parcel data and notify parent to add it to sidebar
-                        const vpParcel = viewportParcels.find((p) => p.id === id);
-                        if (vpParcel && onViewportParcelsLoaded) {
-                          onViewportParcelsLoaded([vpParcel]);
+                        // Only add to sidebar when selecting (not deselecting)
+                        if (!wasSelected) {
+                          const vpParcel = viewportParcels.find((p) => p.id === id);
+                          if (vpParcel && onViewportParcelsLoaded) {
+                            onViewportParcelsLoaded([vpParcel]);
+                          }
                         }
                       },
                     });
@@ -652,7 +678,7 @@ export function ZoneMapInner({
                         });
                       },
                       mouseout: () => {
-                        const sel = selectedParcelIds.includes(id);
+                        const sel = selectedIdsRef.current.includes(id);
                         if (!sel) {
                           pathLayer.setStyle({
                             color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
@@ -682,9 +708,13 @@ export function ZoneMapInner({
             )}
             {/* Parcel labels: ONLY for initial parcels */}
             {parcelLabels.map(({ position, label }, i) => (
-              <Marker key={`label-${i}-${label}-${viewMode}`} position={position} icon={createParcelLabelIcon(label, viewMode)} zIndexOffset={400} />
+              <Marker key={`label-${i}-${label}-${viewMode}`} position={position} icon={createParcelLabelIcon(label, viewMode)} zIndexOffset={400} interactive={false} />
             ))}
             <MapController center={center} zoom={zoom} onZoomChange={setZoom} />
+            {/* Clear selection when clicking on empty map area */}
+            {onParcelSelect && (
+              <MapClickHandler onClearSelection={() => onParcelSelect([])} />
+            )}
             {/* Auto-load surrounding parcel skeletons on pan/zoom */}
             <ViewportParcelsLoader onLoaded={handleViewportParcels} existingIds={existingParcelIds} />
           </MapContainer>

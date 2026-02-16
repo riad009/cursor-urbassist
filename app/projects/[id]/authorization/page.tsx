@@ -226,6 +226,7 @@ export default function AuthorizationPage({
       const r = calculateDpPc({
         projectType: "new_construction",
         floorAreaCreated: constructionFloorArea,
+        footprintCreated: constructionFootprint,
         inUrbanZone: isUrbanZone,
         submitterType: submitterType || undefined,
       });
@@ -239,6 +240,7 @@ export default function AuthorizationPage({
       const r = calculateDpPc({
         projectType: "existing_extension",
         floorAreaCreated: extensionFloorArea,
+        footprintCreated: extensionFootprint,
         existingFloorArea: existingArea || undefined,
         inUrbanZone: isUrbanZone,
         submitterType: submitterType || undefined,

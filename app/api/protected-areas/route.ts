@@ -17,6 +17,7 @@ interface ProtectedAreaResult {
   constraints: string[];
   sourceUrl: string | null;
   severity: "high" | "medium" | "low" | "info";
+  categorie?: string;
 }
 
 const API_HEADERS = { "User-Agent": "UrbAssist/1.0 (urbanisme)" };
@@ -68,6 +69,28 @@ function isAbfRelated(props: Record<string, unknown> | undefined): boolean {
   const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
   const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
   if (cat.includes("AC1") || cat.includes("MONUMENT") || lib.includes("monument historique") || lib.includes("abf") || lib.includes("site classé") || lib.includes("secteur sauvegardé")) return true;
+  return false;
+}
+
+/** Detect flood/risk prescriptions (P.P.R.I., inondation, PM1, PM2, etc.) */
+function isRiskRelated(props: Record<string, unknown> | undefined): boolean {
+  if (!props) return false;
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
+  const desc = String(props.libelong ?? props.LIBELLONG ?? props.description ?? "").toLowerCase();
+  const text = lib + " " + desc;
+  if (cat.startsWith("PM1") || cat.startsWith("PM2") || cat.startsWith("PM3")) return true;
+  if (text.includes("p.p.r.i") || text.includes("ppri") || text.includes("inondation") || text.includes("inondable") || text.includes("risque naturel") || text.includes("risque technologique") || text.includes("risque minier") || text.includes("zone à risque") || text.includes("zone a risque") || text.includes("submersion") || text.includes("crue") || text.includes("aléa")) return true;
+  return false;
+}
+
+/** Detect heritage/patrimoine items that aren't caught by isAbfRelated */
+function isHeritageRelated(props: Record<string, unknown> | undefined): boolean {
+  if (!props) return false;
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
+  if (cat.startsWith("AC2") || cat.startsWith("AC4")) return true;
+  if (lib.includes("patrimonial") || lib.includes("patrimoine") || lib.includes("site patrimonial") || lib.includes("site inscrit") || lib.includes("site classé") || lib.includes("périmètre de protection") || lib.includes("abords")) return true;
   return false;
 }
 
@@ -144,6 +167,7 @@ export async function POST(request: NextRequest) {
         const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? prescPaths[i]) as string;
         if (!name) continue;
         const desc = (props.libelong ?? props.LIBELLONG ?? props.description) as string;
+        const cat = String(props.categorie ?? props.CATEGORIE ?? "").toUpperCase().trim();
         if (isAbfRelated(props)) {
           addArea({
             type: "ABF",
@@ -156,6 +180,35 @@ export async function POST(request: NextRequest) {
             ],
             sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
             severity: "high",
+            categorie: cat || undefined,
+          });
+        } else if (isRiskRelated(props)) {
+          addArea({
+            type: "FLOOD_ZONE",
+            name: String(name),
+            description: desc || "Zone de risque naturel/technologique. Des contraintes spécifiques s'appliquent.",
+            distance: null,
+            constraints: [
+              "Construction may be restricted or conditioned",
+              "Check PPRI/PPRT specific rules",
+            ],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: cat || undefined,
+          });
+        } else if (isHeritageRelated(props)) {
+          addArea({
+            type: "HERITAGE",
+            name: String(name),
+            description: desc || "Zone patrimoine. Des obligations spécifiques peuvent s'appliquer.",
+            distance: null,
+            constraints: [
+              "Heritage protection constraints may apply",
+              "Check with ABF or local authorities",
+            ],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: cat || undefined,
           });
         } else {
           addArea({
@@ -166,6 +219,7 @@ export async function POST(request: NextRequest) {
             constraints: ["Check PLU document for specific rules", "Prescriptions may impose additional constraints"],
             sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
             severity: "medium",
+            categorie: cat || undefined,
           });
         }
       }
@@ -182,6 +236,7 @@ export async function POST(request: NextRequest) {
         const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
         const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? props.type_sup ?? supPaths[i]) as string;
         if (!name) continue;
+        const supCat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase().trim();
         if (isAbfRelated(props)) {
           addArea({
             type: "ABF",
@@ -191,6 +246,29 @@ export async function POST(request: NextRequest) {
             constraints: ["ABF approval may be required", "SUP imposes constraints; verify with mairie"],
             sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
             severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else if (isRiskRelated(props)) {
+          addArea({
+            type: "FLOOD_ZONE",
+            name: `SUP – ${String(name)}`,
+            description: "Servitude de risque naturel/technologique. Des contraintes spécifiques s'appliquent.",
+            distance: null,
+            constraints: ["Construction may be restricted", "Check PPRI/PPRT rules"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else if (isHeritageRelated(props)) {
+          addArea({
+            type: "HERITAGE",
+            name: `SUP – ${String(name)}`,
+            description: "Servitude patrimoine. Des obligations spécifiques peuvent s'appliquer.",
+            distance: null,
+            constraints: ["Heritage protection constraints may apply", "Check with local authorities"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: supCat || undefined,
           });
         } else {
           addArea({
@@ -201,6 +279,7 @@ export async function POST(request: NextRequest) {
             constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
             sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
             severity: "medium",
+            categorie: supCat || undefined,
           });
         }
       }
