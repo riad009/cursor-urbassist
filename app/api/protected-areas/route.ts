@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 // - Public utility easements / SUP (assiette-sup-s/l/p, acte-sup)
 // - Protection perimeters → ABF zone, heritage, flood, etc.
 // Plus Monuments Historiques, Géorisques, Sites Patrimoniaux Remarquables.
+//
+// PERFORMANCE: All external API calls run in PARALLEL via Promise.allSettled.
 
 interface ProtectedAreaResult {
   type: string;
@@ -18,13 +20,8 @@ interface ProtectedAreaResult {
 }
 
 const API_HEADERS = { "User-Agent": "UrbAssist/1.0 (urbanisme)" };
-const API_TIMEOUT = 12000;
+const API_TIMEOUT = 6000; // Reduced from 12s → 6s for faster responses
 const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
-
-/** GeoJSON Point for API Carto (EPSG:4326). */
-function pointGeom(lng: number, lat: number): { type: "Point"; coordinates: [number, number] } {
-  return { type: "Point", coordinates: [lng, lat] };
-}
 
 /** Small GeoJSON Polygon buffer (~11m) for reliable intersection. */
 function smallPolygonGeom(lng: number, lat: number): { type: "Polygon"; coordinates: number[][][] } {
@@ -41,60 +38,17 @@ function smallPolygonGeom(lng: number, lat: number): { type: "Polygon"; coordina
   };
 }
 
-/** Fetch GPU layer by geometric intersection (official API Carto method).
- *  Per the official spec, GPU endpoints only accept `geom` (GeoJSON) and optionally `partition`.
- *  They do NOT accept `lon`/`lat` parameters.
- *  Uses polygon geometry for better intersection reliability. */
+/** Fetch GPU layer by geometric intersection — single fast GET.
+ *  Removed serial POST and Point fallbacks that added massive latency. */
 async function fetchGpuByGeom(
   path: string,
   lng: number,
   lat: number,
-  category?: string
 ): Promise<unknown[]> {
-  // Use a small polygon buffer for better intersection results
   const geom = smallPolygonGeom(lng, lat);
   const geomEnc = encodeURIComponent(JSON.stringify(geom));
-  const catParam = category ? `&categorie=${encodeURIComponent(category)}` : "";
-
-  // 1. GET with geom (documented primary method)
   try {
-    const res = await fetch(`${APICARTO_GPU}/${path}?geom=${geomEnc}${catParam}`, {
-      headers: API_HEADERS,
-      signal: AbortSignal.timeout(API_TIMEOUT),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const features = data?.features ?? [];
-      if (features.length > 0) return features;
-    }
-  } catch {
-    // continue to POST
-  }
-
-  // 2. POST with JSON body (documented: "toutes les requêtes peuvent se faire en POST ou en GET")
-  try {
-    const body: Record<string, unknown> = { geom };
-    if (category) body.categorie = category;
-    const res = await fetch(`${APICARTO_GPU}/${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...API_HEADERS },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(API_TIMEOUT),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const features = data?.features ?? [];
-      if (features.length > 0) return features;
-    }
-  } catch {
-    // continue
-  }
-
-  // 3. Last resort: try with point geometry (smaller footprint)
-  try {
-    const ptGeom = pointGeom(lng, lat);
-    const ptEnc = encodeURIComponent(JSON.stringify(ptGeom));
-    const res = await fetch(`${APICARTO_GPU}/${path}?geom=${ptEnc}${catParam}`, {
+    const res = await fetch(`${APICARTO_GPU}/${path}?geom=${geomEnc}`, {
       headers: API_HEADERS,
       signal: AbortSignal.timeout(API_TIMEOUT),
     });
@@ -103,7 +57,7 @@ async function fetchGpuByGeom(
       return data?.features ?? [];
     }
   } catch {
-    // ignore
+    // timeout or network error
   }
   return [];
 }
@@ -139,209 +93,214 @@ export async function POST(request: NextRequest) {
       areas.push(area);
     }
 
-    // 1. Prescriptions (PLU/PLUi) — official API Carto geom intersection
-    const prescriptionLayers = ["prescription-surf", "prescription-lin", "prescription-pct"];
-    for (const path of prescriptionLayers) {
-      try {
-        const features = await fetchGpuByGeom(path, lng, lat);
-        for (const f of features.slice(0, 10)) {
-          const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
-          const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? path) as string;
-          if (!name) continue;
-          const desc = (props.libelong ?? props.LIBELLONG ?? props.description) as string;
-          if (isAbfRelated(props)) {
-            addArea({
-              type: "ABF",
-              name: String(name),
-              description: desc || "Prescription or SUP related to heritage/ABF. Approval from the Architecte des Bâtiments de France (ABF) may be required.",
-              distance: null,
-              constraints: [
-                "ABF approval may be required for exterior modifications",
-                "Verify with your mairie and PLU document",
-              ],
-              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-              severity: "high",
-            });
-          } else {
-            addArea({
-              type: "PRESCRIPTION",
-              name: String(name),
-              description: desc || "Prescription from the urban planning document applies to this parcel. Verify with your mairie.",
-              distance: null,
-              constraints: ["Check PLU document for specific rules", "Prescriptions may impose additional constraints"],
-              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-              severity: "medium",
-            });
-          }
-        }
-      } catch (e) {
-        console.log(`GPU ${path} unavailable:`, e);
-      }
-    }
-
-    // 2. Servitudes d'utilité publique (SUP) — assiettes and optionally ABF (AC1)
-    const supLayers = ["assiette-sup-s", "assiette-sup-l", "assiette-sup-p"];
-    for (const path of supLayers) {
-      try {
-        const features = await fetchGpuByGeom(path, lng, lat);
-        for (const f of features.slice(0, 10)) {
-          const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
-          const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? props.type_sup ?? path) as string;
-          if (!name) continue;
-          if (isAbfRelated(props)) {
-            addArea({
-              type: "ABF",
-              name: `SUP – ${String(name)}`,
-              description: "Public utility easement (SUP) related to heritage or monuments. ABF approval may be required.",
-              distance: null,
-              constraints: ["ABF approval may be required", "SUP imposes constraints; verify with mairie"],
-              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-              severity: "high",
-            });
-          } else {
-            addArea({
-              type: "SUP",
-              name: String(name),
-              description: "Servitude d'utilité publique (SUP) applies to this parcel. Verify with your mairie.",
-              distance: null,
-              constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
-              sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-              severity: "medium",
-            });
-          }
-        }
-      } catch (e) {
-        console.log(`GPU ${path} unavailable:`, e);
-      }
-    }
-
-    // 3. Monuments Historiques (ABF perimeters - 500m around listed monuments)
-    try {
-      const mhRes = await fetch(
+    // ── Run ALL external API calls in PARALLEL ──────────────────────────
+    // Previously these ran sequentially (prescriptions loop, SUP loop, then
+    // Monuments, Géorisques, SPR one by one). Now they all fire at once.
+    const [
+      prescSurfResult,
+      prescLinResult,
+      prescPctResult,
+      supSResult,
+      supLResult,
+      supPResult,
+      mhResult,
+      riskResult,
+      sprResult,
+    ] = await Promise.allSettled([
+      // GPU prescription layers
+      fetchGpuByGeom("prescription-surf", lng, lat),
+      fetchGpuByGeom("prescription-lin", lng, lat),
+      fetchGpuByGeom("prescription-pct", lng, lat),
+      // GPU SUP layers
+      fetchGpuByGeom("assiette-sup-s", lng, lat),
+      fetchGpuByGeom("assiette-sup-l", lng, lat),
+      fetchGpuByGeom("assiette-sup-p", lng, lat),
+      // Monuments Historiques
+      fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/liste-des-immeubles-proteges-au-titre-des-monuments-historiques/records?where=within_distance(geolocalisation%2C%20geom'POINT(${lng}%20${lat})'%2C%20500m)&limit=10`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-
-      if (mhRes.ok) {
-        const mhData = await mhRes.json();
-        if (mhData.results && mhData.results.length > 0) {
-          for (const mh of mhData.results) {
-            areas.push({
-              type: "ABF",
-              name: `Monument Historique: ${mh.tico || mh.appellation_courante || "Listed building"}`,
-              description: `Located within 500m of a listed historical monument. Approval from the Architecte des Bâtiments de France (ABF) is required.`,
-              distance: null,
-              constraints: [
-                "ABF approval required for any exterior modification",
-                "Materials and colors must be approved by ABF",
-                "New construction must be harmonious with surroundings",
-                "Roof type and slope may be imposed",
-                "Fences and walls subject to ABF approval",
-              ],
-              sourceUrl: "https://www.culture.gouv.fr/Thematiques/Monuments-Sites",
-              severity: "high",
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.log("Monuments historiques API unavailable:", e);
-    }
-
-    // 4. Natural risk zones (Géorisques)
-    try {
-      const riskRes = await fetch(
+        { signal: AbortSignal.timeout(API_TIMEOUT) }
+      ).then(r => r.ok ? r.json() : null).catch(() => null),
+      // Géorisques
+      fetch(
         `https://georisques.gouv.fr/api/v1/resultats_rapport_risques?latlon=${lat},${lng}`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-
-      if (riskRes.ok) {
-        const riskData = await riskRes.json();
-        if (riskData.data) {
-          // Flood zone
-          if (riskData.data.risques_inondation) {
-            areas.push({
-              type: "FLOOD_ZONE",
-              name: "Zone inondable",
-              description:
-                "The parcel is located in a flood risk zone (PPRI). Specific construction rules apply.",
-              distance: null,
-              constraints: [
-                "Building floor must be above reference flood level",
-                "Underground parking may be prohibited",
-                "Specific materials required for flood resistance",
-                "Insurance obligations under Cat-Nat regime",
-              ],
-              sourceUrl: "https://www.georisques.gouv.fr/",
-              severity: "high",
-            });
-          }
-
-          // Seismic zone
-          if (riskData.data.zonage_sismique) {
-            areas.push({
-              type: "SEISMIC",
-              name: `Zone sismique ${riskData.data.zonage_sismique}`,
-              description: `Seismic zone ${riskData.data.zonage_sismique}. Anti-seismic construction norms may apply.`,
-              distance: null,
-              constraints: [
-                "Anti-seismic construction norms (Eurocode 8) may apply",
-                "Structural reinforcement requirements",
-              ],
-              sourceUrl: "https://www.georisques.gouv.fr/",
-              severity: "medium",
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.log("Géorisques API unavailable:", e);
-    }
-
-    // 5. Sites Patrimoniaux Remarquables (SPR) and Sites classés
-    try {
-      const siteRes = await fetch(
+        { signal: AbortSignal.timeout(API_TIMEOUT) }
+      ).then(r => r.ok ? r.json() : null).catch(() => null),
+      // Sites Patrimoniaux Remarquables
+      fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/sites-patrimoniaux-remarquables/records?where=within_distance(geo_point_2d%2C%20geom'POINT(${lng}%20${lat})'%2C%201000m)&limit=5`,
-        { signal: AbortSignal.timeout(8000) }
-      );
+        { signal: AbortSignal.timeout(API_TIMEOUT) }
+      ).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
 
-      if (siteRes.ok) {
-        const siteData = await siteRes.json();
-        if (siteData.results && siteData.results.length > 0) {
-          for (const site of siteData.results) {
-            areas.push({
-              type: "HERITAGE",
-              name: `Site Patrimonial Remarquable: ${site.nom || "Heritage site"}`,
-              description:
-                "Located within or near a Site Patrimonial Remarquable (SPR). Enhanced architectural controls apply.",
-              distance: null,
-              constraints: [
-                "ABF approval required",
-                "Strict architectural guidelines apply",
-                "Material palette may be restricted",
-                "Demolition may require authorization",
-                "Specific urban planning rules (PVAP/PSMV) apply",
-              ],
-              sourceUrl: null,
-              severity: "high",
-            });
-          }
+    // ── Process prescription results ──────────────────────────────────
+    const prescResults = [prescSurfResult, prescLinResult, prescPctResult];
+    const prescPaths = ["prescription-surf", "prescription-lin", "prescription-pct"];
+    for (let i = 0; i < prescResults.length; i++) {
+      const result = prescResults[i];
+      if (result.status !== "fulfilled") continue;
+      const features = result.value as unknown[];
+      for (const f of features.slice(0, 10)) {
+        const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
+        const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? prescPaths[i]) as string;
+        if (!name) continue;
+        const desc = (props.libelong ?? props.LIBELLONG ?? props.description) as string;
+        if (isAbfRelated(props)) {
+          addArea({
+            type: "ABF",
+            name: String(name),
+            description: desc || "Prescription or SUP related to heritage/ABF. Approval from the Architecte des Bâtiments de France (ABF) may be required.",
+            distance: null,
+            constraints: [
+              "ABF approval may be required for exterior modifications",
+              "Verify with your mairie and PLU document",
+            ],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+          });
+        } else {
+          addArea({
+            type: "PRESCRIPTION",
+            name: String(name),
+            description: desc || "Prescription from the urban planning document applies to this parcel. Verify with your mairie.",
+            distance: null,
+            constraints: ["Check PLU document for specific rules", "Prescriptions may impose additional constraints"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "medium",
+          });
         }
       }
-    } catch (e) {
-      console.log("SPR API unavailable:", e);
     }
 
-    // 6. If no results from APIs, check based on commune data
+    // ── Process SUP results ───────────────────────────────────────────
+    const supResults = [supSResult, supLResult, supPResult];
+    const supPaths = ["assiette-sup-s", "assiette-sup-l", "assiette-sup-p"];
+    for (let i = 0; i < supResults.length; i++) {
+      const result = supResults[i];
+      if (result.status !== "fulfilled") continue;
+      const features = result.value as unknown[];
+      for (const f of features.slice(0, 10)) {
+        const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
+        const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? props.type_sup ?? supPaths[i]) as string;
+        if (!name) continue;
+        if (isAbfRelated(props)) {
+          addArea({
+            type: "ABF",
+            name: `SUP – ${String(name)}`,
+            description: "Public utility easement (SUP) related to heritage or monuments. ABF approval may be required.",
+            distance: null,
+            constraints: ["ABF approval may be required", "SUP imposes constraints; verify with mairie"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+          });
+        } else {
+          addArea({
+            type: "SUP",
+            name: String(name),
+            description: "Servitude d'utilité publique (SUP) applies to this parcel. Verify with your mairie.",
+            distance: null,
+            constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "medium",
+          });
+        }
+      }
+    }
+
+    // ── Process Monuments Historiques ──────────────────────────────────
+    if (mhResult.status === "fulfilled" && mhResult.value) {
+      const mhData = mhResult.value as { results?: Array<Record<string, unknown>> };
+      if (mhData.results && mhData.results.length > 0) {
+        for (const mh of mhData.results) {
+          areas.push({
+            type: "ABF",
+            name: `Monument Historique: ${mh.tico || mh.appellation_courante || "Listed building"}`,
+            description: `Located within 500m of a listed historical monument. Approval from the Architecte des Bâtiments de France (ABF) is required.`,
+            distance: null,
+            constraints: [
+              "ABF approval required for any exterior modification",
+              "Materials and colors must be approved by ABF",
+              "New construction must be harmonious with surroundings",
+              "Roof type and slope may be imposed",
+              "Fences and walls subject to ABF approval",
+            ],
+            sourceUrl: "https://www.culture.gouv.fr/Thematiques/Monuments-Sites",
+            severity: "high",
+          });
+        }
+      }
+    }
+
+    // ── Process Géorisques ────────────────────────────────────────────
+    if (riskResult.status === "fulfilled" && riskResult.value) {
+      const riskData = riskResult.value as { data?: Record<string, unknown> };
+      if (riskData.data) {
+        if (riskData.data.risques_inondation) {
+          areas.push({
+            type: "FLOOD_ZONE",
+            name: "Zone inondable",
+            description: "The parcel is located in a flood risk zone (PPRI). Specific construction rules apply.",
+            distance: null,
+            constraints: [
+              "Building floor must be above reference flood level",
+              "Underground parking may be prohibited",
+              "Specific materials required for flood resistance",
+              "Insurance obligations under Cat-Nat regime",
+            ],
+            sourceUrl: "https://www.georisques.gouv.fr/",
+            severity: "high",
+          });
+        }
+        if (riskData.data.zonage_sismique) {
+          areas.push({
+            type: "SEISMIC",
+            name: `Zone sismique ${riskData.data.zonage_sismique}`,
+            description: `Seismic zone ${riskData.data.zonage_sismique}. Anti-seismic construction norms may apply.`,
+            distance: null,
+            constraints: [
+              "Anti-seismic construction norms (Eurocode 8) may apply",
+              "Structural reinforcement requirements",
+            ],
+            sourceUrl: "https://www.georisques.gouv.fr/",
+            severity: "medium",
+          });
+        }
+      }
+    }
+
+    // ── Process Sites Patrimoniaux Remarquables ───────────────────────
+    if (sprResult.status === "fulfilled" && sprResult.value) {
+      const siteData = sprResult.value as { results?: Array<Record<string, unknown>> };
+      if (siteData.results && siteData.results.length > 0) {
+        for (const site of siteData.results) {
+          areas.push({
+            type: "HERITAGE",
+            name: `Site Patrimonial Remarquable: ${site.nom || "Heritage site"}`,
+            description:
+              "Located within or near a Site Patrimonial Remarquable (SPR). Enhanced architectural controls apply.",
+            distance: null,
+            constraints: [
+              "ABF approval required",
+              "Strict architectural guidelines apply",
+              "Material palette may be restricted",
+              "Demolition may require authorization",
+              "Specific urban planning rules (PVAP/PSMV) apply",
+            ],
+            sourceUrl: null,
+            severity: "high",
+          });
+        }
+      }
+    }
+
+    // ── Commune fallback if nothing found ─────────────────────────────
     if (areas.length === 0 && citycode) {
-      // Use the commune data to provide general information
       try {
         const communeRes = await fetch(
-          `https://geo.api.gouv.fr/communes/${citycode}?fields=population,surface`
+          `https://geo.api.gouv.fr/communes/${citycode}?fields=population,surface`,
+          { signal: AbortSignal.timeout(3000) }
         );
         if (communeRes.ok) {
           const commune = await communeRes.json();
-          // Large historic cities are more likely to have protected areas
           if (commune.population > 50000) {
             areas.push({
               type: "INFO",
@@ -358,8 +317,8 @@ export async function POST(request: NextRequest) {
             });
           }
         }
-      } catch (e) {
-        console.log("Commune API unavailable:", e);
+      } catch {
+        // ignore
       }
     }
 

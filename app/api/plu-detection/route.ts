@@ -130,24 +130,12 @@ export async function POST(request: NextRequest) {
       regulations: Record<string, unknown> | null; pdfUrl: string | null;
     } = { zoneType: null, zoneName: null, communeName: null, pluType: null, pluStatus: null, regulations: null, pdfUrl: null };
 
-    // ── Step 1: Commune info ────────────────────────────────────────────
+    // ── Run commune lookup + ALL GPU layers in PARALLEL ─────────────────
+    // Previously commune lookup ran first (blocking GPU by 1-2s). Now everything runs at once.
     let communeCode = citycode as string | undefined;
     let communeName = "";
 
-    if (hasCoords) {
-      try {
-        const r = await fetch(`https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=code,nom&limit=1`, { signal: AbortSignal.timeout(5000) });
-        if (r.ok) { const c = await r.json(); if (c[0]) { communeCode = c[0].code; communeName = c[0].nom; } }
-      } catch { /* optional */ }
-    }
-    if (communeCode && !communeName) {
-      try { const r = await fetch(`https://geo.api.gouv.fr/communes/${communeCode}?fields=nom`, { signal: AbortSignal.timeout(3000) }); if (r.ok) { const c = await r.json(); communeName = c?.nom ?? ""; } } catch { /* */ }
-    }
-    console.log(`[PLU] Commune: ${communeName} (${communeCode ?? "?"})`);
-
-    // ── Step 2: ALL GPU layers in PARALLEL ──────────────────────────────
-    // Run zone-urba (polygon + point), document, secteur-cc, prescriptions, info all at once.
-    const polyGeom = hasCoords ? polygonBuffer(lng, lat, 0.0005) : null; // ~55m buffer
+    const polyGeom = hasCoords ? polygonBuffer(lng, lat, 0.0005) : null;
     const ptGeom = hasCoords ? pointGeom(lng, lat) : null;
 
     type GpuResults = {
@@ -165,19 +153,24 @@ export async function POST(request: NextRequest) {
     };
 
     if (hasCoords && polyGeom && ptGeom) {
+      // Commune lookup runs concurrently with ALL GPU calls
+      const communePromise = fetch(`https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=code,nom&limit=1`, { signal: AbortSignal.timeout(5000) })
+        .then(async r => { if (r.ok) { const c = await r.json(); if (c[0]) { communeCode = c[0].code; communeName = c[0].nom; } } })
+        .catch(() => { /* optional */ });
+
       const settledResults = await Promise.allSettled([
         /* 0 */ gpuGet("zone-urba", polyGeom),
         /* 1 */ gpuGet("zone-urba", ptGeom),
         /* 2 */ fetch(`${GEOPORTAIL_GPU}/feature-info/du?lon=${lng}&lat=${lat}&typeName=zone_urba&zone=production`, { headers: API_HEADERS, signal: AbortSignal.timeout(API_TIMEOUT) }).then(r => r.ok ? r.json() : null).then(d => d?.features ?? []).catch(() => [] as unknown[]),
         /* 3 */ gpuGet("document", polyGeom),
         /* 4 */ gpuGet("secteur-cc", polyGeom),
-        /* 5 */ communeCode ? gpuMunicipality(communeCode) : Promise.resolve([]),
-        /* 6 */ gpuGet("prescription-surf", polyGeom),
-        /* 7 */ gpuGet("prescription-lin", polyGeom),
-        /* 8 */ gpuGet("prescription-pct", polyGeom),
-        /* 9 */ gpuGet("info-surf", polyGeom),
-        /* 10 */ gpuGet("info-lin", polyGeom),
-        /* 11 */ gpuGet("info-pct", polyGeom),
+        /* 5 */ gpuGet("prescription-surf", polyGeom),
+        /* 6 */ gpuGet("prescription-lin", polyGeom),
+        /* 7 */ gpuGet("prescription-pct", polyGeom),
+        /* 8 */ gpuGet("info-surf", polyGeom),
+        /* 9 */ gpuGet("info-lin", polyGeom),
+        /* 10 */ gpuGet("info-pct", polyGeom),
+        /* 11 */ communePromise,
       ]);
 
       const val = (i: number) => settledResults[i].status === "fulfilled" ? (settledResults[i] as PromiseFulfilledResult<unknown[]>).value : [];
@@ -186,21 +179,34 @@ export async function POST(request: NextRequest) {
       gpu.zoneUrbaGP = val(2);
       gpu.document = val(3);
       gpu.secteurCc = val(4);
-      gpu.municipality = val(5);
-      gpu.prescriptionSurf = val(6);
-      gpu.prescriptionLin = val(7);
-      gpu.prescriptionPct = val(8);
-      gpu.infoSurf = val(9);
-      gpu.infoLin = val(10);
-      gpu.infoPct = val(11);
+      gpu.prescriptionSurf = val(5);
+      gpu.prescriptionLin = val(6);
+      gpu.prescriptionPct = val(7);
+      gpu.infoSurf = val(8);
+      gpu.infoLin = val(9);
+      gpu.infoPct = val(10);
+      // communeCode/communeName are now set via the communePromise side-effect
+
+      // Municipality lookup needs communeCode, so run it after commune resolves
+      if (communeCode) {
+        try { gpu.municipality = await gpuMunicipality(communeCode); } catch { /* */ }
+      }
+    } else if (hasCoords) {
+      // Has coords but missing geom (shouldn't happen, defensive)
+      try {
+        const r = await fetch(`https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=code,nom&limit=1`, { signal: AbortSignal.timeout(5000) });
+        if (r.ok) { const c = await r.json(); if (c[0]) { communeCode = c[0].code; communeName = c[0].nom; } }
+      } catch { /* */ }
     } else if (communeCode) {
-      // No coordinates — try municipality only
-      const [munResult] = await Promise.allSettled([gpuMunicipality(communeCode)]);
-      gpu.municipality = munResult.status === "fulfilled" ? munResult.value : [];
+      if (!communeName) {
+        try { const r = await fetch(`https://geo.api.gouv.fr/communes/${communeCode}?fields=nom`, { signal: AbortSignal.timeout(3000) }); if (r.ok) { const c = await r.json(); communeName = c?.nom ?? ""; } } catch { /* */ }
+      }
+      try { gpu.municipality = await gpuMunicipality(communeCode); } catch { /* */ }
     }
 
-    // ── Step 3: Extract zone from results ───────────────────────────────
-    // Prefer polygon result (better intersection), then point, then Geoportail
+    console.log(`[PLU] Commune: ${communeName} (${communeCode ?? "?"})`);
+
+    // ── Extract zone from results ───────────────────────────────────────
     let zoneFeatures: unknown[] =
       gpu.zoneUrbaPolygon.length > 0 ? gpu.zoneUrbaPolygon :
         gpu.zoneUrbaPoint.length > 0 ? gpu.zoneUrbaPoint :
@@ -244,7 +250,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // RNU check via municipality (correct param: `insee`)
+    // RNU check via municipality
     if (!pluInfo.zoneType && gpu.municipality.length > 0) {
       const props = (gpu.municipality[0] as { properties?: Record<string, unknown> })?.properties;
       if (props) {
@@ -285,23 +291,10 @@ export async function POST(request: NextRequest) {
     pluInfo.communeName = communeName;
     pluInfo.regulations = getDefaultRegulations(pluInfo.zoneType || "UB");
 
-    // ── Step 4: Optional Gemini AI enhancement ──────────────────────────
-    if (GEMINI_API_KEY && address && pluInfo.zoneType) {
-      try {
-        const prompt = `Based on French urban planning rules for zone ${pluInfo.zoneType} (${pluInfo.zoneName}) in ${communeName}, provide typical construction regulations in JSON format:
-{"maxHeight":number,"setbacks":{"front":number,"side":number,"rear":number},"maxCoverageRatio":number,"parkingRequirements":"string","greenSpaceRequirements":"string","roofConstraints":"string","facadeConstraints":"string"}
-Only return the JSON, no other text.`;
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 512 } }), signal: AbortSignal.timeout(8000) }
-        );
-        if (geminiRes.ok) {
-          const aiText = (await geminiRes.json()).candidates?.[0]?.content?.parts?.[0]?.text || "";
-          const m = aiText.match(/\{[\s\S]*\}/);
-          if (m) { try { pluInfo.regulations = { ...pluInfo.regulations, ...JSON.parse(m[0]) }; } catch { /* keep defaults */ } }
-        }
-      } catch { /* keep defaults */ }
-    }
+    // ── Gemini AI enhancement — NON-BLOCKING ────────────────────────────
+    // Removed from critical path. Default regulations are sufficient for
+    // the new project page. AI enhancement can be done later when the user
+    // views the project detail page.
 
     console.log(`[PLU] Result: zone=${pluInfo.zoneType} type=${pluInfo.pluType} status=${pluInfo.pluStatus}`);
 
