@@ -59,9 +59,14 @@ function getZoneColor(zoneCode: string): string {
 }
 
 /** Clears parcel selection when user clicks on empty map area (not on a parcel). */
-function MapClickHandler({ onClearSelection }: { onClearSelection: () => void }) {
+function MapClickHandler({ onClearSelection, parcelClickedRef }: { onClearSelection: () => void; parcelClickedRef: React.MutableRefObject<boolean> }) {
   useMapEvents({
     click: () => {
+      // If a parcel click just fired in this same event, skip clearing
+      if (parcelClickedRef.current) {
+        parcelClickedRef.current = false;
+        return;
+      }
       onClearSelection();
     },
   });
@@ -321,6 +326,9 @@ export function ZoneMapInner({
   const selectedIdsRef = useRef(selectedParcelIds);
   selectedIdsRef.current = selectedParcelIds;
 
+  // Flag to prevent MapClickHandler from clearing selection when a parcel was just clicked
+  const parcelClickedRef = useRef(false);
+
   // ── Viewport-loaded parcels (surrounding plots) ────────────────────
   const [viewportParcels, setViewportParcels] = useState<ParcelWithGeometry[]>([]);
 
@@ -575,6 +583,7 @@ export function ZoneMapInner({
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
+                        parcelClickedRef.current = true;
                         // Immediately reset visual style when deselecting so the user sees instant feedback
                         const wasSelected = selectedIdsRef.current.includes(id);
                         if (wasSelected) {
@@ -646,6 +655,7 @@ export function ZoneMapInner({
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
+                        parcelClickedRef.current = true;
                         // Immediately reset visual style when deselecting
                         const wasSelected = selectedIdsRef.current.includes(id);
                         if (wasSelected) {
@@ -713,7 +723,7 @@ export function ZoneMapInner({
             <MapController center={center} zoom={zoom} onZoomChange={setZoom} />
             {/* Clear selection when clicking on empty map area */}
             {onParcelSelect && (
-              <MapClickHandler onClearSelection={() => onParcelSelect([])} />
+              <MapClickHandler onClearSelection={() => onParcelSelect([])} parcelClickedRef={parcelClickedRef} />
             )}
             {/* Auto-load surrounding parcel skeletons on pan/zoom */}
             <ViewportParcelsLoader onLoaded={handleViewportParcels} existingIds={existingParcelIds} />
