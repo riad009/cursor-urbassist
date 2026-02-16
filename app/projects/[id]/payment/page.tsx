@@ -239,11 +239,17 @@ export default function PaymentPage({
               className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
             >
               {paying ? (
-                <><Loader2 className="w-5 h-5 animate-spin" /> {t("pay.processing")}</>
-              ) : credits > 0 ? (
-                <><CreditCard className="w-5 h-5" /> {t("pay.payWithCredit")}</>
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />{" "}
+                  {t("pay.processing")}
+                </>
               ) : (
-                <><CreditCard className="w-5 h-5" /> {t("pay.buyAndActivate")}</>
+                <>
+                  <CreditCard className="w-5 h-5" />{" "}
+                  {t("pay.processing") === "Processing…"
+                    ? "Confirm and access editor"
+                    : "Confirmer et accéder à l'éditeur"}
+                </>
               )}
             </button>
 

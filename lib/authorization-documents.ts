@@ -8,6 +8,7 @@ export interface AuthorizationDocument {
     code: string;
     label: string;
     description?: string;
+    tag?: string; // e.g. "ABF Required", "Existing", "Proposed"
 }
 
 // ─── Déclaration Préalable (DP) ─────────────────────────────────────────────
@@ -24,6 +25,15 @@ export const DP_DOCUMENTS: AuthorizationDocument[] = [
     { code: "DPC 8.1", label: "Notice descriptive du projet", description: "Description détaillée du projet et de son insertion" },
 ];
 
+// ─── DPC 11 — Only for ABF Heritage zones ───────────────────────────────────
+
+export const DPC11_DOCUMENT: AuthorizationDocument = {
+    code: "DPC 11",
+    label: "Notice relative aux modalités d'exécution des travaux",
+    description: "Requis en zone ABF / Patrimoine — détaille les modalités d'exécution",
+    tag: "ABF",
+};
+
 // ─── Permis de Construire (PC) ──────────────────────────────────────────────
 
 export const PC_DOCUMENTS: AuthorizationDocument[] = [
@@ -37,6 +47,21 @@ export const PC_DOCUMENTS: AuthorizationDocument[] = [
     { code: "PC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
 ];
 
+// Split PC5 for existing structures
+export const PC5_EXISTING: AuthorizationDocument = {
+    code: "PC 5a",
+    label: "Plan des façades et toitures — État existant",
+    description: "Élévations et toitures de la construction existante avant travaux",
+    tag: "Existant",
+};
+
+export const PC5_PROPOSED: AuthorizationDocument = {
+    code: "PC 5b",
+    label: "Plan des façades et toitures — État projeté",
+    description: "Élévations et toitures du projet après travaux",
+    tag: "Projeté",
+};
+
 // ─── Notes for single-family houses (PC) ────────────────────────────────────
 
 export const PC_ADDITIONAL_NOTES: string[] = [
@@ -46,10 +71,51 @@ export const PC_ADDITIONAL_NOTES: string[] = [
 
 /**
  * Returns the correct document list based on authorization type.
+ * Simple version — no project context.
  */
 export function getDocumentsForType(authType: string | null | undefined): AuthorizationDocument[] {
     if (!authType) return DP_DOCUMENTS;
     const upper = authType.toUpperCase();
     if (upper === "PC" || upper === "ARCHITECT_REQUIRED") return PC_DOCUMENTS;
     return DP_DOCUMENTS;
+}
+
+/**
+ * Returns the full document list for a project, including:
+ * - DPC11 when the project is in an ABF/Heritage zone (DP only)
+ * - Split PC5 into Existing + Proposed when working on existing structures (PC only)
+ */
+export function getDocumentsForProject(
+    authType: string | null | undefined,
+    options?: {
+        hasABF?: boolean;
+        isExistingStructure?: boolean;
+    }
+): AuthorizationDocument[] {
+    const upper = (authType || "").toUpperCase();
+    const isPC = upper === "PC" || upper === "ARCHITECT_REQUIRED";
+
+    if (isPC) {
+        let docs = [...PC_DOCUMENTS];
+
+        // Split PC5 into existing + proposed for projects with existing structures
+        if (options?.isExistingStructure) {
+            const pc5Index = docs.findIndex((d) => d.code === "PC 5");
+            if (pc5Index >= 0) {
+                docs.splice(pc5Index, 1, PC5_EXISTING, PC5_PROPOSED);
+            }
+        }
+
+        return docs;
+    }
+
+    // DP documents
+    let docs = [...DP_DOCUMENTS];
+
+    // Add DPC11 when in ABF Heritage zone
+    if (options?.hasABF) {
+        docs.push(DPC11_DOCUMENT);
+    }
+
+    return docs;
 }

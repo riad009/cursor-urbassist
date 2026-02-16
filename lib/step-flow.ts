@@ -1,7 +1,7 @@
 /**
  * Planning application step order. Used for step bar UI and "Next step" navigation.
  *
- * Phase 1 (before payment): Project → Authorization → Payment
+ * Phase 1 (before payment): Localisation → Authorization → Documents → Payment
  * Phase 2 (after payment):  Overview → Description → Location Plan → Site Plan → Statement → Export
  *
  * Note: PLU/Regulation Analysis is now a produced document, not a numbered step.
@@ -20,17 +20,18 @@ export interface PlanningStep {
 
 export const PLANNING_STEPS: readonly PlanningStep[] = [
   // ── Phase 1 – Project Creation (before payment) ──────────────────────
-  { step: 1, phase: 1, label: "Postal Address", path: "/projects/new", pathMatch: (p) => p === "/projects/new", href: (_id) => `/projects/new` },
+  { step: 1, phase: 1, label: "Localisation", path: "/projects/new", pathMatch: (p) => p === "/projects/new", href: (_id) => `/projects/new` },
   { step: 2, phase: 1, label: "Authorization", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/authorization$/.test(p), href: (id) => `/projects/${id}/authorization` },
-  { step: 3, phase: 1, label: "Payment", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/payment$/.test(p), href: (id) => `/projects/${id}/payment` },
+  { step: 3, phase: 1, label: "Documents", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/documents$/.test(p), href: (id) => `/projects/${id}/documents` },
+  { step: 4, phase: 1, label: "Payment", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/payment$/.test(p), href: (id) => `/projects/${id}/payment` },
 
   // ── Phase 2 – Project Dashboard / Production (after payment) ─────────
-  { step: 4, phase: 2, label: "Overview", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+$/.test(p) && p !== "/projects/new", href: (id) => `/projects/${id}` },
-  { step: 5, phase: 2, label: "Description", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/description$/.test(p), href: (id) => `/projects/${id}/description` },
-  { step: 6, phase: 2, label: "Location Plan", path: "/location-plan", pathMatch: (p) => p === "/location-plan" || p.startsWith("/location-plan/"), href: (id) => `/location-plan?project=${id}` },
-  { step: 7, phase: 2, label: "Site Plan", path: "/site-plan", pathMatch: (p) => p === "/site-plan" || p.startsWith("/site-plan/") || p === "/editor" || p.startsWith("/editor/"), href: (id) => `/site-plan?project=${id}` },
-  { step: 8, phase: 2, label: "Statement", path: "/statement", pathMatch: (p) => p === "/statement" || p.startsWith("/statement/"), href: (id) => `/statement?project=${id}` },
-  { step: 9, phase: 2, label: "Export", path: "/export", pathMatch: (p) => p === "/export" || p.startsWith("/export/"), href: (id) => `/export?project=${id}` },
+  { step: 5, phase: 2, label: "Overview", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+$/.test(p) && p !== "/projects/new", href: (id) => `/projects/${id}` },
+  { step: 6, phase: 2, label: "Description", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/description$/.test(p), href: (id) => `/projects/${id}/description` },
+  { step: 7, phase: 2, label: "Location Plan", path: "/location-plan", pathMatch: (p) => p === "/location-plan" || p.startsWith("/location-plan/"), href: (id) => `/location-plan?project=${id}` },
+  { step: 8, phase: 2, label: "Site Plan", path: "/site-plan", pathMatch: (p) => p === "/site-plan" || p.startsWith("/site-plan/") || p === "/editor" || p.startsWith("/editor/"), href: (id) => `/site-plan?project=${id}` },
+  { step: 9, phase: 2, label: "Statement", path: "/statement", pathMatch: (p) => p === "/statement" || p.startsWith("/statement/"), href: (id) => `/statement?project=${id}` },
+  { step: 10, phase: 2, label: "Export", path: "/export", pathMatch: (p) => p === "/export" || p.startsWith("/export/"), href: (id) => `/export?project=${id}` },
 ] as const;
 
 /** Return only the steps that belong to a given phase */
@@ -44,8 +45,8 @@ const PROJECT_QUERY_PATHS = ["/plu-analysis", "/site-plan", "/editor", "/locatio
 export function getProjectIdFromRoute(pathname: string, projectParam: string | null): string | null {
   // /projects/new is step 1 — no project ID yet
   if (pathname === "/projects/new") return projectParam || null;
-  // Match /projects/[id] or /projects/[id]/authorization or /projects/[id]/payment or /projects/[id]/description
-  const match = pathname.match(/^\/projects\/([^/]+)(?:\/(?:authorization|payment|description))?$/);
+  // Match /projects/[id] or /projects/[id]/authorization or /projects/[id]/payment or /projects/[id]/description or /projects/[id]/documents
+  const match = pathname.match(/^\/projects\/([^/]+)(?:\/(?:authorization|payment|description|documents))?$/);
   if (match && match[1] !== "new") return match[1];
   if (projectParam && PROJECT_QUERY_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     return projectParam;

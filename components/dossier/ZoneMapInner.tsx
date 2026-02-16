@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -110,6 +110,7 @@ export interface ParcelWithGeometry {
   area: number;
   geometry?: unknown;
   coordinates?: number[];
+  commune?: string;
 }
 
 /** Only real cadastral Polygon/MultiPolygon from IGN — no fake squares or tile-like shapes. */
@@ -137,6 +138,80 @@ function getParcelCenter(parcel: ParcelWithGeometry): [number, number] | null {
     const lat = Number(coords[1]);
     if (Number.isFinite(lng) && Number.isFinite(lat)) return [lat, lng];
   }
+  return null;
+}
+
+/** Minimum zoom to auto-fetch surrounding parcels as skeleton outlines */
+const VIEWPORT_MIN_ZOOM = 16;
+const VIEWPORT_DEBOUNCE_MS = 600;
+
+/**
+ * Auto-loads surrounding parcel outlines as skeleton shapes when the user pans/zooms.
+ * These are displayed on the map but NOT added to the sidebar. Sidebar addition
+ * happens only when the user clicks a skeleton parcel (handled in the GeoJSON layer).
+ */
+function ViewportParcelsLoader({
+  onLoaded,
+  existingIds,
+}: {
+  onLoaded: (parcels: ParcelWithGeometry[]) => void;
+  existingIds: Set<string>;
+}) {
+  const map = useMap();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const lastBboxRef = useRef<string>("");
+
+  const fetchForBounds = useCallback(() => {
+    const zoom = map.getZoom();
+    if (zoom < VIEWPORT_MIN_ZOOM) return;
+
+    const bounds = map.getBounds();
+    const west = bounds.getWest();
+    const south = bounds.getSouth();
+    const east = bounds.getEast();
+    const north = bounds.getNorth();
+
+    const key = `${west.toFixed(5)},${south.toFixed(5)},${east.toFixed(5)},${north.toFixed(5)}`;
+    if (key === lastBboxRef.current) return;
+    lastBboxRef.current = key;
+
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    fetch("/api/cadastre/viewport", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bbox: [west, south, east, north] }),
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const raw: ParcelWithGeometry[] = data?.parcels ?? [];
+        const newParcels = raw.filter((p) => !existingIds.has(p.id));
+        if (newParcels.length > 0) onLoaded(newParcels);
+      })
+      .catch(() => { });
+  }, [map, onLoaded, existingIds]);
+
+  useMapEvents({
+    moveend: () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(fetchForBounds, VIEWPORT_DEBOUNCE_MS);
+    },
+    zoomend: () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(fetchForBounds, VIEWPORT_DEBOUNCE_MS);
+    },
+  });
+
+  useEffect(() => {
+    const t = setTimeout(fetchForBounds, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return null;
 }
 
@@ -209,6 +284,7 @@ export function ZoneMapInner({
   parcels = [],
   selectedParcelIds = [],
   onParcelSelect,
+  onViewportParcelsLoaded,
   zoneFeatures = [],
   pluZone,
   pluName,
@@ -220,6 +296,7 @@ export function ZoneMapInner({
   parcels?: ParcelWithGeometry[];
   selectedParcelIds?: string[];
   onParcelSelect?: (ids: string[]) => void;
+  onViewportParcelsLoaded?: (parcels: ParcelWithGeometry[]) => void;
   zoneFeatures?: unknown[];
   pluZone: string | null;
   pluName: string | null;
@@ -229,6 +306,37 @@ export function ZoneMapInner({
 }) {
   const [zoom, setZoom] = React.useState(17);
   const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("cadastre");
+
+  // ── Viewport-loaded parcels (surrounding plots) ────────────────────
+  const [viewportParcels, setViewportParcels] = useState<ParcelWithGeometry[]>([]);
+
+  // Merge prop parcels + viewport parcels, deduplicating by id
+  const allParcels = useMemo(() => {
+    const map = new Map<string, ParcelWithGeometry>();
+    // Prop parcels take priority (they have the initial selection info)
+    for (const p of parcels) map.set(p.id, p);
+    for (const p of viewportParcels) {
+      if (!map.has(p.id)) map.set(p.id, p);
+    }
+    return Array.from(map.values());
+  }, [parcels, viewportParcels]);
+
+  const existingParcelIds = useMemo(() => new Set(allParcels.map((p) => p.id)), [allParcels]);
+
+  // Auto-load surrounding parcels as skeletons (map display only, NOT sidebar)
+  const handleViewportParcels = useCallback(
+    (newParcels: ParcelWithGeometry[]) => {
+      setViewportParcels((prev) => {
+        const ids = new Set(prev.map((p) => p.id));
+        const toAdd = newParcels.filter((p) => !ids.has(p.id));
+        if (toAdd.length === 0) return prev;
+        return [...prev, ...toAdd];
+      });
+      // NOTE: Do NOT call onViewportParcelsLoaded here — sidebar addition
+      // only happens when user clicks a skeleton parcel (in the GeoJSON layer)
+    },
+    []
+  );
 
   const handleParcelClick = useCallback(
     (id: string) => {
@@ -251,7 +359,7 @@ export function ZoneMapInner({
     return { type: "FeatureCollection", features };
   }, [zoneFeatures]);
 
-  /** Only real cadastral polygons — no fake rectangles or tile-like shapes. */
+  /** Only real cadastral polygons from INITIAL parcels — these get full labels + styling. */
   const parcelCollection = useMemo((): FeatureCollection | null => {
     const features: Feature[] = [];
     for (const p of parcels) {
@@ -266,6 +374,7 @@ export function ZoneMapInner({
           section: p.section,
           number: p.number,
           area: p.area,
+          commune: p.commune || "",
           selected: selectedParcelIds.includes(p.id),
         },
       });
@@ -274,7 +383,33 @@ export function ZoneMapInner({
     return { type: "FeatureCollection", features };
   }, [parcels, selectedParcelIds]);
 
-  /** Parcel labels (section + number) at centroid for each parcel with real geometry. */
+  /** Viewport-only parcels — skeleton outlines, no labels. Excludes parcels already in the initial set. */
+  const viewportParcelCollection = useMemo((): FeatureCollection | null => {
+    const initialIds = new Set(parcels.map((p) => p.id));
+    const features: Feature[] = [];
+    for (const p of viewportParcels) {
+      if (initialIds.has(p.id)) continue; // skip duplicates from initial
+      if (!hasRealParcelGeometry(p)) continue;
+      const geom = getParcelGeometry(p);
+      if (!geom) continue;
+      features.push({
+        type: "Feature",
+        geometry: geom,
+        properties: {
+          id: p.id,
+          section: p.section,
+          number: p.number,
+          area: p.area,
+          commune: p.commune || "",
+          selected: selectedParcelIds.includes(p.id),
+        },
+      });
+    }
+    if (features.length === 0) return null;
+    return { type: "FeatureCollection", features };
+  }, [parcels, viewportParcels, selectedParcelIds]);
+
+  /** Parcel labels — ONLY for initial parcels, not viewport ones. */
   const parcelLabels = useMemo(() => {
     const out: { position: [number, number]; label: string }[] = [];
     for (const p of parcels) {
@@ -402,6 +537,7 @@ export function ZoneMapInner({
               />
             )}
             {center && <Marker position={[center.lat, center.lng]} />}
+            {/* === INITIAL PARCELS — full styling + labels === */}
             {parcelCollection && (
               <GeoJSON
                 key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
@@ -409,7 +545,6 @@ export function ZoneMapInner({
                 style={(feature) => {
                   const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
                   if (viewMode === "cadastre") {
-                    // In cadastre mode: subtle outline for unselected, bold highlight for selected
                     return {
                       color: selected ? "#b45309" : "#3b82f6",
                       weight: selected ? 3 : 1.5,
@@ -421,7 +556,6 @@ export function ZoneMapInner({
                       dashArray: selected ? undefined : "4 4",
                     };
                   }
-                  // Satellite mode: original cadastral-look styling
                   return {
                     color: selected ? "#b45309" : "#ffffff",
                     weight: selected ? 3 : 1.5,
@@ -448,19 +582,111 @@ export function ZoneMapInner({
                   const section = props?.section ?? "";
                   const number = props?.number ?? "";
                   const area = typeof props?.area === "number" ? props.area : 0;
+                  const commune = (props as Record<string, unknown>)?.commune ?? "";
                   const contenanceAres = (area / 100).toFixed(2);
+                  const communeLine = commune ? `<br/><span style="color:#64748b;font-size:11px">Commune: ${commune}</span>` : "";
                   layer.bindPopup(
-                    `<div class="text-sm"><strong>Parcelle ${section} N°${number}</strong><br/>Contenance ${area} m² (${contenanceAres} a)</div>`,
+                    `<div class="text-sm"><strong>Parcelle ${section} N°${number}</strong><br/>Contenance ${area} m² (${contenanceAres} a)${communeLine}</div>`,
                     { className: "parcel-popup" }
                   );
                 }}
               />
             )}
-            {/* Parcel labels: shown in all modes with section, number, and area */}
+            {/* === VIEWPORT PARCELS — skeleton outlines only, hover highlight, click to add === */}
+            {viewportParcelCollection && (
+              <GeoJSON
+                key={`vp-${viewportParcelCollection.features.length}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
+                data={viewportParcelCollection as GeoJsonObject}
+                style={(feature) => {
+                  const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
+                  if (selected) {
+                    // Selected viewport parcel — same highlight as initial parcels
+                    return {
+                      color: "#b45309",
+                      weight: 3,
+                      fillColor: "#eab308",
+                      fillOpacity: viewMode === "cadastre" ? 0.45 : 0.7,
+                      fill: true,
+                      fillRule: "nonzero" as const,
+                      opacity: 1,
+                    };
+                  }
+                  // Skeleton style — very light, thin border
+                  return {
+                    color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
+                    weight: 0.5,
+                    fillColor: "transparent",
+                    fillOpacity: 0,
+                    fill: true,
+                    fillRule: "nonzero" as const,
+                    opacity: 1,
+                  };
+                }}
+                onEachFeature={(feature, layer) => {
+                  const props = feature.properties as { id?: string; section?: string; number?: string; area?: number };
+                  const id = props?.id;
+                  const pathLayer = layer as L.Path & { _path?: HTMLElement };
+
+                  if (id && onParcelSelect) {
+                    // Click: add to selection + add to sidebar
+                    layer.on({
+                      click: (e: L.LeafletMouseEvent) => {
+                        L.DomEvent.stopPropagation(e);
+                        handleParcelClick(id);
+                        // Find the full parcel data and notify parent to add it to sidebar
+                        const vpParcel = viewportParcels.find((p) => p.id === id);
+                        if (vpParcel && onViewportParcelsLoaded) {
+                          onViewportParcelsLoaded([vpParcel]);
+                        }
+                      },
+                    });
+
+                    // Hover: highlight on mouseover
+                    layer.on({
+                      mouseover: () => {
+                        pathLayer.setStyle({
+                          color: viewMode === "cadastre" ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.4)",
+                          weight: 1.5,
+                          fillColor: viewMode === "cadastre" ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.08)",
+                          fillOpacity: 1,
+                        });
+                      },
+                      mouseout: () => {
+                        const sel = selectedParcelIds.includes(id);
+                        if (!sel) {
+                          pathLayer.setStyle({
+                            color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
+                            weight: 0.5,
+                            fillColor: "transparent",
+                            fillOpacity: 0,
+                          });
+                        }
+                      },
+                    });
+
+                    const el = pathLayer._path;
+                    if (el) el.style.cursor = "pointer";
+                  }
+
+                  // Popup on hover/click — shows parcel info
+                  const section = props?.section ?? "";
+                  const number = props?.number ?? "";
+                  const area = typeof props?.area === "number" ? props.area : 0;
+                  const contenanceHa = (area / 10000).toFixed(2);
+                  layer.bindPopup(
+                    `<div class="text-sm"><strong>Parcelle ${section} ${number}</strong><br/>Contenance ${contenanceHa} ha</div>`,
+                    { className: "parcel-popup" }
+                  );
+                }}
+              />
+            )}
+            {/* Parcel labels: ONLY for initial parcels */}
             {parcelLabels.map(({ position, label }, i) => (
               <Marker key={`label-${i}-${label}-${viewMode}`} position={position} icon={createParcelLabelIcon(label, viewMode)} zIndexOffset={400} />
             ))}
             <MapController center={center} zoom={zoom} onZoomChange={setZoom} />
+            {/* Auto-load surrounding parcel skeletons on pan/zoom */}
+            <ViewportParcelsLoader onLoaded={handleViewportParcels} existingIds={existingParcelIds} />
           </MapContainer>
         </div>
       </div>

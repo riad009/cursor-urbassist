@@ -23,6 +23,7 @@ export interface ZoneMapProps {
   parcels?: ParcelWithGeometry[];
   selectedParcelIds?: string[];
   onParcelSelect?: (ids: string[]) => void;
+  onViewportParcelsLoaded?: (parcels: ParcelWithGeometry[]) => void;
   zoneFeatures?: unknown[];
   pluZone: string | null;
   pluName: string | null;
