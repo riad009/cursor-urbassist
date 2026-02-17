@@ -337,10 +337,10 @@ export default function NewProjectPage() {
                                 )}
                             </div>
 
-                            {/* BOTTOM ROW: Regulation + Protected Areas side by side */}
-                            <div className="grid grid-cols-2 gap-2 shrink-0">
+                            {/* BOTTOM: Regulation + Protections & Servitudes stacked */}
+                            <div className="space-y-2 shrink-0">
 
-                                {/* REGULATION */}
+                                {/* REGULATION — compact row */}
                                 <div className="rounded-xl bg-white border border-slate-200 overflow-hidden shadow-sm">
                                     <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5">
                                         <Layers className="w-3.5 h-3.5 text-blue-500" />
@@ -371,39 +371,43 @@ export default function NewProjectPage() {
                                     </div>
                                 </div>
 
-                                {/* PROTECTED AREAS — Tiered Display */}
+                                {/* PROTECTIONS & SERVITUDES — with heritage status banner */}
                                 <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col shadow-sm">
                                     <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5 shrink-0">
                                         <Shield className="w-3.5 h-3.5 text-amber-500" />
-                                        <p className="text-sm font-semibold text-slate-900 flex-1 truncate">{t("newProj.protections")}</p>
+                                        <p className="text-sm font-semibold text-slate-900 flex-1 truncate">{t("newProj.protectionsServitudes")}</p>
                                         {selectedAddress && !loadingProtectedAreas && (classified.criticalItems.length + classified.secondaryItems.length) > 0 && (
                                             <span className={cn("text-[9px] font-semibold px-1.5 py-0.5 rounded-full", hasWarning ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400")}>
                                                 {classified.criticalItems.length + classified.secondaryItems.length}
                                             </span>
                                         )}
                                     </div>
-                                    <div className="p-2.5 overflow-y-auto max-h-[160px] scrollbar-thin">
+                                    <div className="p-2.5">
                                         {!selectedAddress || loadingProtectedAreas ? (
                                             <div className="space-y-1.5 animate-pulse">
                                                 <div className="h-3 bg-slate-200 rounded w-full" />
                                                 <div className="h-3 bg-slate-200 rounded w-2/3" />
                                             </div>
                                         ) : (classified.criticalItems.length + classified.secondaryItems.length) > 0 ? (
-                                            <div className="space-y-1">
-                                                {/* ABF warning banner */}
-                                                {classified.requiresABF && (
-                                                    <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-1.5 flex items-center gap-1.5 mb-1">
-                                                        <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />
-                                                        <p className="text-[9px] font-semibold text-red-700">{t("newProj.abfRequired")}</p>
-                                                    </div>
-                                                )}
-                                                {/* Critical constraints warning */}
-                                                {hasWarning && !classified.requiresABF && (
-                                                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-1.5 flex items-center gap-1.5 mb-1">
-                                                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                                        <p className="text-[9px] text-amber-700">{t("newProj.constraintsDetected")}</p>
-                                                    </div>
-                                                )}
+                                            <div className="space-y-1.5">
+
+                                                {/* ── Heritage / ABF status banner — prominent ── */}
+                                                {(() => {
+                                                    const hasHeritage = classified.criticalItems.some(
+                                                        (i) => i.type === "ABF" || i.type === "HERITAGE" ||
+                                                            ["AC1", "AC2", "AC4"].some((c) => (i.categorie ?? "").startsWith(c))
+                                                    );
+                                                    if (!hasHeritage) return null;
+                                                    return (
+                                                        <div className="rounded-lg bg-red-50 border border-red-200 p-2 space-y-1">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                                                <p className="text-xs font-bold text-red-700">{t("newProj.heritageProtected")}</p>
+                                                            </div>
+                                                            <p className="text-[10px] text-red-600 pl-5">{t("newProj.heritageAbfNote")}</p>
+                                                        </div>
+                                                    );
+                                                })()}
 
                                                 {/* ── CRITICAL ITEMS — always visible ── */}
                                                 {classified.criticalItems.map((item, idx) => {
@@ -426,7 +430,7 @@ export default function NewProjectPage() {
                                                             className="w-full flex items-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors border border-dashed border-slate-200 mt-0.5"
                                                         >
                                                             <ChevronDown className={cn("w-3 h-3 transition-transform", showSecondary && "rotate-180")} />
-                                                            <span>{showSecondary ? "Masquer" : "Voir"} {classified.secondaryItems.length} autre{classified.secondaryItems.length > 1 ? "s" : ""} servitude{classified.secondaryItems.length > 1 ? "s" : ""} technique{classified.secondaryItems.length > 1 ? "s" : ""}</span>
+                                                            <span>{showSecondary ? "Masquer" : "Voir"} {classified.secondaryItems.length} {t("newProj.secondaryServitudes")}</span>
                                                         </button>
                                                         {showSecondary && classified.secondaryItems.map((item, idx) => (
                                                             <div key={`sec-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
@@ -439,7 +443,10 @@ export default function NewProjectPage() {
                                                 )}
                                             </div>
                                         ) : (
-                                            <p className="text-[10px] text-slate-400">{t("newProj.noConstraint")}</p>
+                                            <div className="flex items-center gap-1.5 py-1">
+                                                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                                <p className="text-[11px] text-emerald-600 font-medium">{t("newProj.noHeritageConstraint")}</p>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

@@ -3,7 +3,24 @@ import { getSession, HARDCODED_USER_ID } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
+/** Derive the site origin from the incoming request so Stripe redirects work on any domain */
+function getSiteUrl(request: NextRequest): string {
+  // 1) Vercel / reverse-proxy sets x-forwarded-host + x-forwarded-proto
+  const fwdHost = request.headers.get("x-forwarded-host");
+  const fwdProto = request.headers.get("x-forwarded-proto") || "https";
+  if (fwdHost) return `${fwdProto}://${fwdHost}`;
+
+  // 2) Standard Host header
+  const host = request.headers.get("host");
+  if (host) {
+    const proto = host.startsWith("localhost") ? "http" : "https";
+    return `${proto}://${host}`;
+  }
+
+  // 3) Fallback
+  return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+}
 
 // Credit packages available for purchase
 const CREDIT_PACKAGES = [
@@ -60,8 +77,8 @@ export async function POST(request: NextRequest) {
             },
           ],
           mode: "payment",
-          success_url: `${SITE_URL}${successPath}`,
-          cancel_url: `${SITE_URL}${cancelPath}`,
+          success_url: `${getSiteUrl(request)}${successPath}`,
+          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
           metadata: {
             userId: user.id,
             type: "credits",
@@ -154,8 +171,8 @@ export async function POST(request: NextRequest) {
           payment_method_types: ["card"],
           line_items: [{ price: plan.stripePriceId, quantity: 1 }],
           mode: "subscription",
-          success_url: `${SITE_URL}/projects?session_id={CHECKOUT_SESSION_ID}&success=true`,
-          cancel_url: `${SITE_URL}/projects?cancelled=true`,
+          success_url: `${getSiteUrl(request)}/projects?session_id={CHECKOUT_SESSION_ID}&success=true`,
+          cancel_url: `${getSiteUrl(request)}/projects?cancelled=true`,
           metadata: {
             userId: user.id,
             type: "subscription",
