@@ -127,7 +127,17 @@ function calculateNewConstruction(input: DpPcInput): DpPcResult {
     };
   }
 
-  // > 20 m² → PC
+  // > 20 m² → PC (check 150 m² for architect requirement)
+  if (floorArea >= 150) {
+    return {
+      determination: "ARCHITECT_REQUIRED",
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (supérieure à 20 m²). Un permis de construire est nécessaire. De plus, la surface de plancher (${floorArea} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
+      detail: "new>20_architect",
+      architectRequired: true,
+      cannotOffer: true,
+    };
+  }
+
   const result: DpPcResult = {
     determination: "PC",
     explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (supérieure à 20 m²). Un permis de construire est nécessaire.`,
