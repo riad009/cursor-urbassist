@@ -21,7 +21,7 @@ interface ProtectedAreaResult {
 }
 
 const API_HEADERS = { "User-Agent": "UrbAssist/1.0 (urbanisme)" };
-const API_TIMEOUT = 6000; // Reduced from 12s → 6s for faster responses
+const API_TIMEOUT = 25000; // GPU API returns 8MB+ GeoJSON bodies that need time to download
 const APICARTO_GPU = "https://apicarto.ign.fr/api/gpu";
 
 /** Small GeoJSON Polygon buffer (~11m) for reliable intersection. */
@@ -54,11 +54,14 @@ async function fetchGpuByGeom(
       signal: AbortSignal.timeout(API_TIMEOUT),
     });
     if (res.ok) {
-      const data = await res.json();
+      // Read body as text first — the GPU API returns multi-MB GeoJSON
+      // and streaming JSON parse can be interrupted by the abort signal.
+      const text = await res.text();
+      const data = JSON.parse(text);
       return data?.features ?? [];
     }
   } catch {
-    // timeout or network error
+    // timeout or network error — silently return empty
   }
   return [];
 }
@@ -142,17 +145,17 @@ export async function POST(request: NextRequest) {
       fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/liste-des-immeubles-proteges-au-titre-des-monuments-historiques/records?where=within_distance(geolocalisation%2C%20geom'POINT(${lng}%20${lat})'%2C%20500m)&limit=10`,
         { signal: AbortSignal.timeout(API_TIMEOUT) }
-      ).then(r => r.ok ? r.json() : null).catch(() => null),
+      ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
       // Géorisques
       fetch(
         `https://georisques.gouv.fr/api/v1/resultats_rapport_risques?latlon=${lat},${lng}`,
         { signal: AbortSignal.timeout(API_TIMEOUT) }
-      ).then(r => r.ok ? r.json() : null).catch(() => null),
+      ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
       // Sites Patrimoniaux Remarquables
       fetch(
         `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/sites-patrimoniaux-remarquables/records?where=within_distance(geo_point_2d%2C%20geom'POINT(${lng}%20${lat})'%2C%201000m)&limit=5`,
         { signal: AbortSignal.timeout(API_TIMEOUT) }
-      ).then(r => r.ok ? r.json() : null).catch(() => null),
+      ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
     ]);
 
     // ── Process prescription results ──────────────────────────────────
