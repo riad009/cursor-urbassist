@@ -227,7 +227,7 @@ export default function NewProjectPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
 
                         {/* ── LEFT: Map (dominant) ── */}
-                        <div className="lg:col-span-8 xl:col-span-9 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex flex-col h-[520px] shadow-sm">
+                        <div className="lg:col-span-8 xl:col-span-9 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex flex-col h-[700px] shadow-sm">
                             <div className="flex-1 flex items-center justify-center">
                                 {!selectedAddress ? (
                                     <div className="flex flex-col items-center justify-center gap-3 text-slate-500 p-8">
@@ -269,7 +269,7 @@ export default function NewProjectPage() {
                         </div>
 
                         {/* ── RIGHT: Sidebar panel ── */}
-                        <div className="lg:col-span-4 xl:col-span-3 flex flex-col lg:h-[520px] gap-2">
+                        <div className="lg:col-span-4 xl:col-span-3 flex flex-col lg:h-[700px] gap-2">
 
                             {/* PARCELS — takes remaining space, scrollable internally */}
                             <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0 shadow-sm">

@@ -9,7 +9,7 @@ const ZoneMapInner = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="rounded-xl bg-slate-800/50 border border-white/10 flex items-center justify-center h-[320px] text-slate-500">
+      <div className="rounded-xl bg-slate-800/50 border border-white/10 flex items-center justify-center h-[500px] text-slate-500">
         Loading zone map…
       </div>
     ),

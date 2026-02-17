@@ -157,7 +157,7 @@ function getParcelCenter(parcel: ParcelWithGeometry): [number, number] | null {
 }
 
 /** Minimum zoom to auto-fetch surrounding parcels as skeleton outlines */
-const VIEWPORT_MIN_ZOOM = 16;
+const VIEWPORT_MIN_ZOOM = 13;
 const VIEWPORT_DEBOUNCE_MS = 600;
 
 /**
@@ -515,7 +515,16 @@ export function ZoneMapInner({
 
         {/* Map — full width when no sidebar, else 2/3 */}
         <div className={showRegulationSidebar ? "lg:col-span-2 order-1 lg:order-2 rounded-xl overflow-hidden border border-white/10 bg-slate-900" : "w-full h-full rounded-xl overflow-hidden border border-white/10 bg-slate-900"} style={{ position: "relative" }}>
-          <style>{`.parcel-label-marker { border: none !important; background: transparent !important; pointer-events: none !important; }`}</style>
+          <style>{`.parcel-label-marker { border: none !important; background: transparent !important; pointer-events: none !important; }
+.parcel-tooltip { background: rgba(15,23,42,0.92) !important; color: #fff !important; border: none !important; border-radius: 8px !important; padding: 6px 10px !important; font-size: 12px !important; line-height: 1.4 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important; outline: none !important; }
+.parcel-tooltip::before { display: none !important; }
+.parcel-tooltip .leaflet-tooltip-arrow { display: none !important; border: none !important; }
+.leaflet-tooltip.parcel-tooltip { border: none !important; }
+.parcel-tooltip strong { color: #93c5fd; }
+.leaflet-container:focus { outline: none !important; box-shadow: none !important; border-color: transparent !important; }
+.leaflet-container *:focus { outline: none !important; }
+.leaflet-interactive:focus { outline: none !important; }
+.leaflet-container { outline: none !important; }`}</style>
           <ViewToggle mode={viewMode} onChange={setViewMode} />
           <MapContainer
             center={center ? [center.lat, center.lng] : FRANCE_CENTER}
@@ -524,7 +533,7 @@ export function ZoneMapInner({
             maxZoom={21}
             className="w-full rounded-xl"
             zoomControl={false}
-            style={showRegulationSidebar ? { height: 320, minHeight: 320 } : { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+            style={showRegulationSidebar ? { height: 500, minHeight: 500 } : { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
           >
             <ZoomControl position="topright" />
             {/* Base layer: satellite or OSM plan */}
@@ -579,15 +588,23 @@ export function ZoneMapInner({
                 onEachFeature={(feature, layer) => {
                   const props = feature.properties as { id?: string; section?: string; number?: string; area?: number };
                   const id = props?.id;
+                  const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
+                  const pathLayer = layer as L.Path & { _path?: HTMLElement };
+
+                  // Bring selected parcels to front so they're always clickable on top
+                  if (selected) {
+                    setTimeout(() => { try { pathLayer.bringToFront(); } catch { } }, 0);
+                  }
+
                   if (id && onParcelSelect) {
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
                         parcelClickedRef.current = true;
-                        // Immediately reset visual style when deselecting so the user sees instant feedback
                         const wasSelected = selectedIdsRef.current.includes(id);
+                        // Forcefully clear all visual styling when deselecting
                         if (wasSelected) {
-                          (layer as L.Path).setStyle({
+                          pathLayer.setStyle({
                             color: viewMode === "cadastre" ? "#3b82f6" : "#ffffff",
                             weight: 1.5,
                             fillColor: "transparent",
@@ -595,22 +612,29 @@ export function ZoneMapInner({
                             opacity: viewMode === "cadastre" ? 0.5 : 0.95,
                             dashArray: viewMode === "cadastre" ? "4 4" : undefined,
                           });
+                          // Also force the DOM element to clear any lingering styles
+                          const el = pathLayer._path;
+                          if (el) {
+                            el.style.fill = "transparent";
+                            el.style.fillOpacity = "0";
+                            el.style.stroke = viewMode === "cadastre" ? "#3b82f6" : "#ffffff";
+                            el.style.strokeWidth = "1.5";
+                          }
                         }
                         handleParcelClick(id);
                       },
                     });
-                    const el = (layer as L.Path & { _path?: HTMLElement })._path;
+                    const el = pathLayer._path;
                     if (el) el.style.cursor = "pointer";
                   }
                   const section = props?.section ?? "";
                   const number = props?.number ?? "";
                   const area = typeof props?.area === "number" ? props.area : 0;
-                  const commune = (props as Record<string, unknown>)?.commune ?? "";
-                  const contenanceAres = (area / 100).toFixed(2);
-                  const communeLine = commune ? `<br/><span style="color:#64748b;font-size:11px">Commune: ${commune}</span>` : "";
-                  layer.bindPopup(
-                    `<div class="text-sm"><strong>Parcelle ${section} N°${number}</strong><br/>Contenance ${area} m² (${contenanceAres} a)${communeLine}</div>`,
-                    { className: "parcel-popup" }
+                  // Hover tooltip — shows parcel info on mouseover
+                  const areaDisplay = area >= 10000 ? `${(area / 10000).toFixed(2)} ha` : area >= 1000 ? `${(area / 1000).toFixed(1)} km²` : `${area} m²`;
+                  layer.bindTooltip(
+                    `<strong>${section} N°${number}</strong><br/>${areaDisplay}`,
+                    { sticky: true, direction: "top", offset: [0, -10], className: "parcel-tooltip" }
                   );
                 }}
               />
@@ -636,8 +660,8 @@ export function ZoneMapInner({
                   }
                   // Skeleton style — very light, thin border
                   return {
-                    color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
-                    weight: 0.5,
+                    color: viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)",
+                    weight: 1,
                     fillColor: "transparent",
                     fillOpacity: 0,
                     fill: true,
@@ -648,7 +672,13 @@ export function ZoneMapInner({
                 onEachFeature={(feature, layer) => {
                   const props = feature.properties as { id?: string; section?: string; number?: string; area?: number };
                   const id = props?.id;
+                  const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
                   const pathLayer = layer as L.Path & { _path?: HTMLElement };
+
+                  // Bring selected parcels to front so they're always clickable
+                  if (selected) {
+                    setTimeout(() => { try { pathLayer.bringToFront(); } catch { } }, 0);
+                  }
 
                   if (id && onParcelSelect) {
                     // Click: add to selection + add to sidebar
@@ -656,15 +686,22 @@ export function ZoneMapInner({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
                         parcelClickedRef.current = true;
-                        // Immediately reset visual style when deselecting
                         const wasSelected = selectedIdsRef.current.includes(id);
+                        // Forcefully clear all visual styling when deselecting
                         if (wasSelected) {
                           pathLayer.setStyle({
-                            color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
-                            weight: 0.5,
+                            color: viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)",
+                            weight: 1,
                             fillColor: "transparent",
                             fillOpacity: 0,
                           });
+                          const el = pathLayer._path;
+                          if (el) {
+                            el.style.fill = "transparent";
+                            el.style.fillOpacity = "0";
+                            el.style.stroke = viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)";
+                            el.style.strokeWidth = "1";
+                          }
                         }
                         handleParcelClick(id);
                         // Only add to sidebar when selecting (not deselecting)
@@ -691,8 +728,8 @@ export function ZoneMapInner({
                         const sel = selectedIdsRef.current.includes(id);
                         if (!sel) {
                           pathLayer.setStyle({
-                            color: viewMode === "cadastre" ? "rgba(148,163,184,0.25)" : "rgba(255,255,255,0.15)",
-                            weight: 0.5,
+                            color: viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)",
+                            weight: 1,
                             fillColor: "transparent",
                             fillOpacity: 0,
                           });
@@ -709,9 +746,11 @@ export function ZoneMapInner({
                   const number = props?.number ?? "";
                   const area = typeof props?.area === "number" ? props.area : 0;
                   const contenanceHa = (area / 10000).toFixed(2);
-                  layer.bindPopup(
-                    `<div class="text-sm"><strong>Parcelle ${section} ${number}</strong><br/>Contenance ${contenanceHa} ha</div>`,
-                    { className: "parcel-popup" }
+                  // Hover tooltip — shows parcel info on mouseover
+                  const areaDisplay = area >= 10000 ? `${(area / 10000).toFixed(2)} ha` : area >= 1000 ? `${(area / 1000).toFixed(1)} km²` : `${area} m²`;
+                  layer.bindTooltip(
+                    `<strong>${section} ${number}</strong><br/>${areaDisplay}`,
+                    { sticky: true, direction: "top", offset: [0, -10], className: "parcel-tooltip" }
                   );
                 }}
               />

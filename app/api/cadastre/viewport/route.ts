@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
  * Returns: { parcels: ParcelItem[] }
  */
 
-const MAX_BBOX_DEG = 0.015; // ~1.5 km — avoid enormous requests
+const MAX_BBOX_DEG = 0.05; // ~5 km — allow larger viewport fetches
 const APICARTO_TIMEOUT = 8000;
 
 interface ParcelFeature {
