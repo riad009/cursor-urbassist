@@ -22,14 +22,122 @@ import {
   Pencil,
   Box,
   PenTool,
+  Shield,
+  AlertTriangle,
+  ChevronDown,
+  Info,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { cn } from "@/lib/utils";
+import { processProtections } from "@/lib/sup-classification";
 
 type DocStatus = "not_started" | "in_progress" | "completed";
+
+/** Inline sub-component: Tiered Protected Areas display for project detail */
+function ProjectProtectedAreas({ classified, t }: { classified: ReturnType<typeof processProtections>; t: (key: string) => string }) {
+  const [showSecondary, setShowSecondary] = useState(false);
+  const isEn = t("auth.next") === "Next";
+  return (
+    <div className="mb-6 p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+      <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2 mb-2">
+        <Shield className="w-4 h-4 text-amber-600" />
+        {t("overview.protectedArea")}
+      </h3>
+
+      {/* ABF banner */}
+      {classified.requiresABF && (
+        <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs font-semibold text-red-700">
+            {isEn ? "ABF approval required — Heritage or monument constraint detected" : "Approbation ABF requise — Contrainte patrimoniale détectée"}
+          </p>
+        </div>
+      )}
+
+      {/* Critical items — always visible */}
+      {classified.criticalItems.map((item, i) => (
+        <div
+          key={`crit-${i}`}
+          className={cn(
+            "p-3 rounded-xl border text-sm",
+            item.severity === "high"
+              ? "bg-red-50 border-red-200"
+              : item.severity === "medium"
+                ? "bg-amber-50 border-amber-200"
+                : "bg-blue-50 border-blue-200"
+          )}
+        >
+          <div className="flex items-start gap-2">
+            {item.severity === "high" ? (
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="font-medium text-slate-900 text-xs">{item.label}</p>
+              {item.description && (
+                <p className="text-xs text-slate-400 mt-1">
+                  {(item.description ?? "").substring(0, 120)}…
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Secondary items — collapsed */}
+      {classified.secondaryItems.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowSecondary(!showSecondary)}
+            className="w-full flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors border border-slate-100"
+          >
+            <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showSecondary && "rotate-180")} />
+            <span>
+              {showSecondary
+                ? (isEn ? "Hide" : "Masquer")
+                : (isEn ? "See" : "Voir")}{" "}
+              {classified.secondaryItems.length}{" "}
+              {isEn
+                ? `other technical servitude${classified.secondaryItems.length > 1 ? "s" : ""}`
+                : `autre${classified.secondaryItems.length > 1 ? "s" : ""} servitude${classified.secondaryItems.length > 1 ? "s" : ""} technique${classified.secondaryItems.length > 1 ? "s" : ""}`}
+            </span>
+          </button>
+          {showSecondary && classified.secondaryItems.map((item, i) => (
+            <div
+              key={`sec-${i}`}
+              className="p-3 rounded-xl border text-sm bg-slate-50 border-slate-200"
+            >
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-slate-700 text-xs">{item.label}</p>
+                  {item.description && (
+                    <p className="text-xs text-slate-400 mt-1">
+                      {(item.description ?? "").substring(0, 100)}…
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* All clear if only secondary */}
+      {classified.criticalItems.length === 0 && classified.secondaryItems.length > 0 && (
+        <div className="flex items-center gap-2 text-sm text-emerald-600 mt-1">
+          <CheckCircle2 className="w-4 h-4" />
+          {isEn ? "No critical restrictions — only technical servitudes" : "Aucune restriction critique — servitudes techniques uniquement"}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProjectDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -59,7 +167,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     paidAt?: string | null;
     documents?: { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }[];
     regulatoryAnalysis?: { id: string } | null;
-    protectedAreas?: { type: string; name: string }[];
+    protectedAreas?: { type: string; name: string; description?: string; severity?: string; sourceUrl?: string | null; constraints?: string[] | unknown; categorie?: string }[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
@@ -219,16 +327,14 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           </div>
         )}
 
-        {Array.isArray(project.protectedAreas) && project.protectedAreas.length > 0 && (
-          <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
-            <h3 className="text-sm font-semibold text-amber-700 mb-2">{t("overview.protectedArea")}</h3>
-            <ul className="text-sm text-slate-600 space-y-1">
-              {project.protectedAreas.filter((a) => a.type !== "INFO").map((a, i) => (
-                <li key={i}>{a.name}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {Array.isArray(project.protectedAreas) && project.protectedAreas.length > 0 && (() => {
+          const classified = processProtections(project.protectedAreas);
+          const totalNonInfo = classified.criticalItems.length + classified.secondaryItems.length;
+          if (totalNonInfo === 0) return null;
+          return (
+            <ProjectProtectedAreas classified={classified} t={t} />
+          );
+        })()}
 
         {/* ── Documents / Sections to produce ── */}
         <h2 className="text-lg font-semibold text-slate-900 mb-2">{t("overview.docsToProduceFr")}</h2>

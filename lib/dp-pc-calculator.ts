@@ -191,7 +191,12 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
 
   // ── Extension ≤ threshold → DP (check 150 m² for architect) ──
   if (stricterArea <= dpThreshold) {
-    if (totalFloorAfterWork <= 150) {
+    // Extensions < 20 m² (both footprint AND floor area) are ALWAYS DP
+    // regardless of total floor area — the 150 m² architect rule does not override this.
+    // For non-urban zones where dpThreshold = 20, extensions exactly at 20 m² are also DP.
+    const alwaysDp = stricterArea < 20 || (dpThreshold === 20 && stricterArea <= 20);
+
+    if (alwaysDp || totalFloorAfterWork <= 150) {
       return {
         determination: "DP",
         explanation: inUrbanZone
@@ -200,7 +205,7 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
         detail: `ext<=${dpThreshold}`,
       };
     }
-    // Total floor area > 150 → PC + architect required
+    // Total floor area > 150 AND extension ≥ 20 m² → PC + architect required
     return {
       determination: "ARCHITECT_REQUIRED",
       explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²), mais la surface de plancher totale après travaux est de ${totalFloorAfterWork} m² (> 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,

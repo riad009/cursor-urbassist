@@ -14,7 +14,8 @@ import {
     Pencil,
     ArrowLeft,
     Layers,
-
+    ChevronDown,
+    Info,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
@@ -52,6 +53,7 @@ export default function NewProjectPage() {
     const [loadingPlu, setLoadingPlu] = useState(false);
     const [loadingProtectedAreas, setLoadingProtectedAreas] = useState(false);
     const [cadastreError, setCadastreError] = useState<string | null>(null);
+    const [showSecondary, setShowSecondary] = useState(false);
     const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
 
 
@@ -415,17 +417,26 @@ export default function NewProjectPage() {
                                                     );
                                                 })}
 
-                                                {/* ── SECONDARY ITEMS — always visible ── */}
-                                                {classified.secondaryItems.map((item, idx) => {
-                                                    const sevDot = item.severity === "high" ? "bg-red-400" : item.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
-                                                    return (
-                                                        <div key={`sec-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
-                                                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sevDot}`} />
-                                                            <p className="text-xs text-slate-600 truncate flex-1">{item.label}</p>
-                                                            <span className="text-[8px] text-slate-400 uppercase shrink-0">{item.categorie || item.type}</span>
-                                                        </div>
-                                                    );
-                                                })}
+                                                {/* ── SECONDARY ITEMS — collapsed by default ── */}
+                                                {classified.secondaryItems.length > 0 && (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowSecondary(!showSecondary); }}
+                                                            className="w-full flex items-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors border border-dashed border-slate-200 mt-0.5"
+                                                        >
+                                                            <ChevronDown className={cn("w-3 h-3 transition-transform", showSecondary && "rotate-180")} />
+                                                            <span>{showSecondary ? "Masquer" : "Voir"} {classified.secondaryItems.length} autre{classified.secondaryItems.length > 1 ? "s" : ""} servitude{classified.secondaryItems.length > 1 ? "s" : ""} technique{classified.secondaryItems.length > 1 ? "s" : ""}</span>
+                                                        </button>
+                                                        {showSecondary && classified.secondaryItems.map((item, idx) => (
+                                                            <div key={`sec-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                                                                <Info className="w-3 h-3 text-slate-400 shrink-0" />
+                                                                <p className="text-xs text-slate-600 truncate flex-1">{item.label}</p>
+                                                                <span className="text-[8px] text-slate-400 uppercase shrink-0">{item.categorie || item.type}</span>
+                                                            </div>
+                                                        ))}
+                                                    </>
+                                                )}
                                             </div>
                                         ) : (
                                             <p className="text-[10px] text-slate-400">{t("newProj.noConstraint")}</p>
