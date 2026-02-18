@@ -25,7 +25,7 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 const FRANCE_CENTER: [number, number] = [46.603354, 1.888334];
 
-/** Aerial/satellite base map — avoids OSM tile grid look; cadastral outlines overlay clearly */
+/** Aerial/satellite base map */
 const AERIAL_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const AERIAL_ATTRIBUTION = "Tiles © Esri, Maxar, Earthstar Geographics, and the GIS User Community";
 
@@ -178,36 +178,38 @@ function ViewportParcelsLoader({
   const lastBboxRef = useRef<string>("");
 
   const fetchForBounds = useCallback(() => {
-    const zoom = map.getZoom();
-    if (zoom < VIEWPORT_MIN_ZOOM) return;
+    try {
+      const zoom = map.getZoom();
+      if (zoom < VIEWPORT_MIN_ZOOM) return;
 
-    const bounds = map.getBounds();
-    const west = bounds.getWest();
-    const south = bounds.getSouth();
-    const east = bounds.getEast();
-    const north = bounds.getNorth();
+      const bounds = map.getBounds();
+      const west = bounds.getWest();
+      const south = bounds.getSouth();
+      const east = bounds.getEast();
+      const north = bounds.getNorth();
 
-    const key = `${west.toFixed(5)},${south.toFixed(5)},${east.toFixed(5)},${north.toFixed(5)}`;
-    if (key === lastBboxRef.current) return;
-    lastBboxRef.current = key;
+      const key = `${west.toFixed(5)},${south.toFixed(5)},${east.toFixed(5)},${north.toFixed(5)}`;
+      if (key === lastBboxRef.current) return;
+      lastBboxRef.current = key;
 
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    fetch("/api/cadastre/viewport", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bbox: [west, south, east, north] }),
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const raw: ParcelWithGeometry[] = data?.parcels ?? [];
-        const newParcels = raw.filter((p) => !existingIds.has(p.id));
-        if (newParcels.length > 0) onLoaded(newParcels);
+      fetch("/api/cadastre/viewport", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbox: [west, south, east, north] }),
+        signal: controller.signal,
       })
-      .catch(() => { });
+        .then((r) => r.json())
+        .then((data) => {
+          const raw: ParcelWithGeometry[] = data?.parcels ?? [];
+          const newParcels = raw.filter((p) => !existingIds.has(p.id));
+          if (newParcels.length > 0) onLoaded(newParcels);
+        })
+        .catch(() => { });
+    } catch { /* map container not ready yet — retry on next event */ }
   }, [map, onLoaded, existingIds]);
 
   useMapEvents({
@@ -320,7 +322,7 @@ export function ZoneMapInner({
   className?: string;
 }) {
   const [zoom, setZoom] = React.useState(17);
-  const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("cadastre");
+  const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("satellite");
 
   // Ref always mirrors selectedParcelIds so Leaflet event handlers read the latest value
   const selectedIdsRef = useRef(selectedParcelIds);
@@ -538,7 +540,7 @@ export function ZoneMapInner({
             <ZoomControl position="topright" />
             {/* Base layer: satellite or OSM plan */}
             {viewMode === "satellite" ? (
-              <TileLayer key="base-satellite" url={AERIAL_TILE_URL} attribution={AERIAL_ATTRIBUTION} maxNativeZoom={19} maxZoom={21} />
+              <TileLayer key="base-satellite" url={AERIAL_TILE_URL} attribution={AERIAL_ATTRIBUTION} maxNativeZoom={17} maxZoom={21} />
             ) : (
               <TileLayer key="base-osm" url={OSM_TILE_URL} attribution={OSM_ATTRIBUTION} maxNativeZoom={19} maxZoom={21} />
             )}
