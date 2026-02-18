@@ -101,6 +101,17 @@ export default function AuthorizationPage({
   const [step, setStep] = useState<WizardStep>("form");
   const [showCategoryCards, setShowCategoryCards] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoDetectModal, setAutoDetectModal] = useState<null | "documents" | "payment">(null);
+  const [autoDetectPaying, setAutoDetectPaying] = useState(false);
+  const [autoDetectError, setAutoDetectError] = useState<string | null>(null);
+  const [autoDetectCerfa, setAutoDetectCerfa] = useState(false);
+  const [autoDetectPlu, setAutoDetectPlu] = useState(false);
+  // Quick-action (DP / PC) modal
+  const [quickModal, setQuickModal] = useState<null | { step: "submitter" | "documents" | "payment" | "legal-entity"; type: "DP" | "PC" }>(null);
+  const [quickModalPaying, setQuickModalPaying] = useState(false);
+  const [quickModalError, setQuickModalError] = useState<string | null>(null);
+  const [quickModalCerfa, setQuickModalCerfa] = useState(false);
+  const [quickModalPlu, setQuickModalPlu] = useState(false);
 
   // Floor area manual edit mode
   const [editingFloorArea, setEditingFloorArea] = useState(false);
@@ -467,25 +478,23 @@ export default function AuthorizationPage({
                 <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
-                    onClick={() => handleQuickAction("DP")}
-                    disabled={saving}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-emerald-200 text-emerald-700 font-semibold text-sm hover:bg-emerald-50 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10 transition-all disabled:opacity-40"
+                    onClick={() => setQuickModal({ step: "documents", type: "DP" })}
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-emerald-200 text-emerald-700 font-semibold text-sm hover:bg-emerald-50 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10 transition-all"
                   >
                     <FileText className="w-4 h-4" />
                     {isEn ? "Preliminary Declaration" : "Déclaration Préalable"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleQuickAction("PC")}
-                    disabled={saving}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-purple-200 text-purple-700 font-semibold text-sm hover:bg-purple-50 hover:border-purple-300 hover:shadow-md hover:shadow-purple-500/10 transition-all disabled:opacity-40"
+                    onClick={() => setQuickModal({ step: "submitter", type: "PC" })}
+                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-purple-200 text-purple-700 font-semibold text-sm hover:bg-purple-50 hover:border-purple-300 hover:shadow-md hover:shadow-purple-500/10 transition-all"
                   >
                     <ClipboardCheck className="w-4 h-4" />
                     {isEn ? "Building Permit" : "Permis de Construire"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowCategoryCards(true)}
+                    onClick={() => setAutoDetectModal("documents")}
                     className="flex items-start gap-3 px-4 py-3 rounded-xl bg-white border-2 border-violet-200 text-left hover:bg-violet-50 hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/10 transition-all"
                   >
                     <span className="mt-0.5 w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
@@ -1326,11 +1335,569 @@ export default function AuthorizationPage({
 
         </div>{/* end max-w-7xl */}
       </div>
+
+      {/* ═══ Auto Detection Modal ═══ */}
+      {autoDetectModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setAutoDetectModal(null); }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+
+            {/* ── Step 1: Document List ── */}
+            {autoDetectModal === "documents" && (
+              <div className="p-6 space-y-5">
+                {/* Header */}
+                <div className="text-center space-y-2">
+                  <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                    <FileText className="w-7 h-7 text-violet-600" />
+                  </div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {isEn ? "Complete list of potential parts" : "Liste complète des pièces potentielles"}
+                  </h2>
+                  <p className="text-sm text-slate-500">
+                    {isEn
+                      ? "Here is the list of required parts. Select the additional options:"
+                      : "Voici la liste des pièces requises. Sélectionnez les options supplémentaires :"}
+                  </p>
+                </div>
+
+                {/* Documents — show all PC documents (most complete set) */}
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="grid grid-cols-2 gap-px bg-slate-100">
+                    {getDocumentsForType("PC").map((doc) => (
+                      <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                        <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                          <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Optional add-ons */}
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setAutoDetectCerfa(v => !v)}
+                    className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectCerfa ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectCerfa ? "border-violet-500 bg-violet-500" : "border-slate-300"
+                      }`}>
+                      {autoDetectCerfa && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {isEn ? "Pre-filled CERFA form" : "Formulaire CERFA pré-rempli"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {isEn ? "Save time: we automatically fill in the administrative fields." : "Gagnez du temps : nous remplissons automatiquement les champs administratifs."}
+                      </p>
+                    </div>
+                    <span className="text-sm font-bold text-violet-600">5€</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAutoDetectPlu(v => !v)}
+                    className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectPlu ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectPlu ? "border-violet-500 bg-violet-500" : "border-slate-300"
+                      }`}>
+                      {autoDetectPlu && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {isEn ? "Analysis of the regulations (PLU)" : "Analyse du règlement (PLU)"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet avec le règlement local."}
+                      </p>
+                    </div>
+                    <span className="text-sm font-bold text-violet-600">€15</span>
+                  </button>
+                </div>
+
+                {/* Note */}
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                  <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                    <Info className="w-3.5 h-3.5" />
+                    {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                  </p>
+                  <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                    <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                    <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                  </ul>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setAutoDetectModal(null)}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors"
+                  >
+                    {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAutoDetectModal("payment")}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-purple-500/20 transition-all"
+                  >
+                    {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Step 2: Payment ── */}
+            {autoDetectModal === "payment" && (
+              <div className="p-6 space-y-5">
+                {/* Header */}
+                <div className="text-center space-y-1">
+                  <h2 className="text-2xl font-bold text-slate-900">
+                    {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
+                  </h2>
+                  <p className="text-sm text-slate-500">{projectData?.name}</p>
+                </div>
+
+                {/* Package card */}
+                <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="bg-violet-50 px-5 py-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-violet-600" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-violet-700">
+                        {isEn ? "Complete Urban Planning File" : "Dossier Urbanisme Complet"}
+                      </p>
+                      <p className="text-xs text-violet-500">
+                        {isEn ? "Automatic DP or PC detection" : "Détection automatique DP ou PC"}
+                      </p>
+                    </div>
+                    <span className="text-lg font-bold text-violet-600">AUTO</span>
+                  </div>
+                  <div className="px-5 py-4 space-y-2 border-t border-slate-100">
+                    <div className="flex items-center gap-2 text-sm text-slate-700">
+                      <FileText className="w-4 h-4 text-violet-400" />
+                      <span>{isEn ? "7 regulatory documents" : "7 documents réglementaires"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                      <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                      <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                      <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                      <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-700">
+                      <Check className="w-4 h-4 text-violet-500" />
+                      <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-700">
+                      <Check className="w-4 h-4 text-violet-500" />
+                      <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-700">
+                      <Check className="w-4 h-4 text-violet-500" />
+                      <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Price */}
+                <div className="rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{isEn ? "Complete file" : "Dossier complet"}</p>
+                    <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
+                    <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
+                  </div>
+                </div>
+
+                {autoDetectError && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
+                    {autoDetectError}
+                  </div>
+                )}
+
+                {/* CTA */}
+                <button
+                  type="button"
+                  disabled={autoDetectPaying}
+                  onClick={async () => {
+                    setAutoDetectPaying(true);
+                    setAutoDetectError(null);
+                    try {
+                      const res = await fetch("/api/stripe/checkout", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) { setAutoDetectError(data.error || "Payment failed"); return; }
+                      if (data.url) window.location.href = data.url;
+                      else if (data.success) router.push(`/projects/${projectId}`);
+                    } catch { setAutoDetectError(isEn ? "Payment failed" : "Paiement échoué"); }
+                    finally { setAutoDetectPaying(false); }
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
+                >
+                  {autoDetectPaying ? (
+                    <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
+                  ) : (
+                    <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
+                  )}
+                </button>
+
+                <p className="text-center text-xs text-slate-400">
+                  {isEn ? "← Back" : "← Retour"}{" "}
+                  <button
+                    type="button"
+                    onClick={() => setAutoDetectModal("documents")}
+                    className="underline hover:text-slate-600"
+                  >
+                    {isEn ? "to document list" : "à la liste des documents"}
+                  </button>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+
+      {/* ═══ Quick-Action (DP / PC) Modal ═══ */}
+      {quickModal && (() => {
+        const isDP = quickModal.type === "DP";
+        const accent = isDP
+          ? { bg: "bg-emerald-50", icon: "bg-emerald-100 text-emerald-600", badge: "text-emerald-600", btn: "from-emerald-500 to-teal-500" }
+          : { bg: "bg-purple-50", icon: "bg-purple-100 text-purple-600", badge: "text-purple-600", btn: "from-purple-500 to-violet-600" };
+        const docs = getDocumentsForType(quickModal.type);
+        const typeLabel = isDP
+          ? (isEn ? "Preliminary Declaration" : "Déclaration Préalable")
+          : (isEn ? "Building Permit" : "Permis de Construire");
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setQuickModal(null); }}
+          >
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+
+              {/* ── Step 0: Who submits? (PC only) ── */}
+              {quickModal.step === "submitter" && (
+                <div className="p-8 space-y-6">
+                  <div className="space-y-1">
+                    <h2 className="text-2xl font-bold text-slate-900">
+                      {isEn ? "Who submits the application?" : "Qui dépose la demande ?"}
+                    </h2>
+                    <p className="text-sm text-slate-500">
+                      {isEn
+                        ? "This information determines whether an architect is required for a building permit."
+                        : "Cette information détermine si un architecte est requis pour un permis de construire."}
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
+                      className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-purple-300 bg-purple-50 text-left hover:bg-purple-100 transition-colors"
+                    >
+                      <span className="font-semibold text-slate-900">{isEn ? "Particular" : "Particulier"}</span>
+                      <div className="w-5 h-5 rounded-full border-2 border-purple-400 shrink-0" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal({ ...quickModal, step: "legal-entity" })}
+                      className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-slate-200 bg-white text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <span className="font-semibold text-slate-900 text-sm">
+                        {isEn
+                          ? "Legal entity (real estate investment company, corporation, etc.)"
+                          : "Personne morale (SCI, société, etc.)"}
+                      </span>
+                      <div className="w-5 h-5 rounded-full border-2 border-slate-300 shrink-0" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    <button type="button" onClick={() => setQuickModal(null)} className="underline hover:text-slate-600">
+                      {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {/* ── Legal entity warning ── */}
+              {quickModal.step === "legal-entity" && (
+                <div className="p-8 space-y-5 text-center">
+                  <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+                    <AlertTriangle className="w-8 h-8 text-red-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-xl font-bold text-red-600">
+                      {isEn ? "Mandatory Architect's Opinion" : "Avis d'architecte obligatoire"}
+                    </h2>
+                    <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 text-left">
+                      {isEn
+                        ? "Legal entities (SCI, companies, etc.) must use an architect for any Building Permit, regardless of the surface area."
+                        : "Les personnes morales (SCI, sociétés, etc.) doivent obligatoirement recourir à un architecte pour tout Permis de Construire, quelle que soit la surface."}
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 pt-1">
+                      {isEn
+                        ? "Our platform does not handle cases requiring the signature of an architect."
+                        : "Notre plateforme ne traite pas les cas nécessitant la signature d'un architecte."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuickModal(null)}
+                    className="px-8 py-3 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-700 transition-colors"
+                  >
+                    {isEn ? "Back to the simulator" : "Retour au simulateur"}
+                  </button>
+                </div>
+              )}
+
+              {/* ── Document list ── */}
+              {quickModal.step === "documents" && (
+                <div className="p-6 space-y-5">
+                  <div className="text-center space-y-2">
+                    <div className={`w-14 h-14 rounded-2xl ${accent.icon} flex items-center justify-center mx-auto`}>
+                      {isDP ? <FileText className="w-7 h-7" /> : <ClipboardCheck className="w-7 h-7" />}
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-900">
+                      {isEn ? `Generate my ${typeLabel}` : `Générer ma ${typeLabel}`}
+                    </h2>
+                    <p className="text-sm text-slate-500">
+                      {isEn
+                        ? "Here is the list of required parts. Select the additional options:"
+                        : "Voici la liste des pièces requises. Sélectionnez les options supplémentaires :"}
+                    </p>
+                  </div>
+
+                  {/* Documents grid */}
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="grid grid-cols-2 gap-px bg-slate-100">
+                      {docs.map((doc) => (
+                        <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                          <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                            <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Optional add-ons */}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuickModalCerfa(v => !v)}
+                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalCerfa ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                        }`}
+                    >
+                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalCerfa ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                        }`}>
+                        {quickModalCerfa && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {isEn ? "Pre-filled CERFA form" : "Formulaire CERFA pré-rempli"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {isEn ? "Save time: we automatically fill in the administrative fields." : "Gain de temps : nous remplissons automatiquement les champs administratifs."}
+                        </p>
+                      </div>
+                      <span className={`text-sm font-bold ${accent.badge}`}>5€</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickModalPlu(v => !v)}
+                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalPlu ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                        }`}
+                    >
+                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalPlu ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                        }`}>
+                        {quickModalPlu && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {isEn ? "Analysis of the regulations (PLU)" : "Analyse de la réglementation (PLU)"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet aux règles locales."}
+                        </p>
+                      </div>
+                      <span className={`text-sm font-bold ${accent.badge}`}>€15</span>
+                    </button>
+                  </div>
+
+                  {/* Note */}
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                      <Info className="w-3.5 h-3.5" />
+                      {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                    </p>
+                    <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                      <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                      <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                    </ul>
+                  </div>
+
+                  {/* CTA */}
+                  <button
+                    type="button"
+                    onClick={() => setQuickModal({ ...quickModal, step: "payment" })}
+                    className={`w-full py-3 rounded-xl bg-gradient-to-r ${accent.btn} text-white font-semibold hover:shadow-lg transition-all`}
+                  >
+                    {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
+                  </button>
+                  <p className="text-center text-xs text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal(isDP ? null : { ...quickModal, step: "submitter" })}
+                      className="underline hover:text-slate-600"
+                    >
+                      {isEn ? "← Back" : "← Retour"}
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {/* ── Payment ── */}
+              {quickModal.step === "payment" && (
+                <div className="p-6 space-y-5">
+                  <div className="text-center space-y-1">
+                    <h2 className="text-2xl font-bold text-slate-900">
+                      {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
+                    </h2>
+                    <p className="text-sm text-slate-500">{projectData?.name}</p>
+                  </div>
+
+                  {/* Package card */}
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className={`${accent.bg} px-5 py-4 flex items-center gap-3`}>
+                      <div className={`w-10 h-10 rounded-xl ${accent.icon} flex items-center justify-center`}>
+                        {isDP ? <FileText className="w-5 h-5" /> : <ClipboardCheck className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-slate-900">{typeLabel}</p>
+                        <p className={`text-xs ${accent.badge}`}>
+                          {isDP ? (isEn ? "Complete DP file" : "Dossier DP complet") : (isEn ? "Complete PC file" : "Dossier PC complet")}
+                        </p>
+                      </div>
+                      <span className={`text-lg font-bold ${accent.badge}`}>{quickModal.type}</span>
+                    </div>
+                    <div className="px-5 py-4 space-y-2 border-t border-slate-100">
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <FileText className={`w-4 h-4 ${accent.badge}`} />
+                        <span>{isDP ? "9" : "12"} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                        <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                        <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                        <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                        <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Price */}
+                  <div className="rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{isEn ? "Complete file" : "Dossier complet"}</p>
+                      <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
+                      <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
+                    </div>
+                  </div>
+
+                  {quickModalError && (
+                    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
+                      {quickModalError}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={quickModalPaying}
+                    onClick={async () => {
+                      setQuickModalPaying(true);
+                      setQuickModalError(null);
+                      try {
+                        const res = await fetch("/api/stripe/checkout", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) { setQuickModalError(data.error || "Payment failed"); return; }
+                        if (data.url) window.location.href = data.url;
+                        else if (data.success) router.push(`/projects/${projectId}`);
+                      } catch { setQuickModalError(isEn ? "Payment failed" : "Paiement échoué"); }
+                      finally { setQuickModalPaying(false); }
+                    }}
+                    className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
+                  >
+                    {quickModalPaying ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
+                    ) : (
+                      <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
+                    )}
+                  </button>
+
+                  <p className="text-center text-xs text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
+                      className="underline hover:text-slate-600"
+                    >
+                      {isEn ? "← Back to document list" : "← Retour à la liste des documents"}
+                    </button>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+
     </Navigation>
   );
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
+
 
 function BackButton({ onClick }: { onClick: () => void }) {
   const { t } = useLanguage();
