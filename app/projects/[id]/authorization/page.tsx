@@ -327,7 +327,7 @@ export default function AuthorizationPage({
     return strictest;
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     const tempResult = computeResult();
 
     // If result is PC, ask about submitter first
@@ -336,9 +336,10 @@ export default function AuthorizationPage({
       return;
     }
 
-    // Final result - recompute with submitter
-    setResult(computeResult());
-    setStep("result");
+    // Save and navigate directly to documents (result step removed)
+    const r = computeResult();
+    setResult(r);
+    await saveAndContinue(r);
   }
 
   async function handleSubmitterNext() {
@@ -1418,12 +1419,17 @@ export default function AuthorizationPage({
                         const res = await fetch("/api/stripe/checkout", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                          body: JSON.stringify({
+                            projectId,
+                            type: "credits",
+                            packageId: "credits-10",
+                            successUrl: `/projects/${projectId}/payment?success=true&returnTo=project-description`,
+                          }),
                         });
                         const data = await res.json();
                         if (!res.ok) { setAutoDetectError(data.error || "Payment failed"); return; }
                         if (data.url) window.location.href = data.url;
-                        else if (data.success) router.push(`/projects/${projectId}`);
+                        else if (data.success) router.push(`/projects/${projectId}/project-description`);
                       } catch { setAutoDetectError(isEn ? "Payment failed" : "Paiement échoué"); }
                       finally { setAutoDetectPaying(false); }
                     }}

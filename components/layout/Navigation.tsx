@@ -62,7 +62,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const showStepBar = !!projectId || isNewProjectPage;
   const currentStepIndex = showStepBar ? getStepIndex(pathname) : -1;
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [projectPaid, setProjectPaid] = useState<boolean>(false);
+  const [projectPaid, setProjectPaid] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!projectId) {
@@ -211,6 +211,8 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               )}
               <div className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
                 {(() => {
+                  // Don't render until we know paid status (avoids phase-1 flash)
+                  if (projectId && projectPaid === null) return null;
                   const currentPhase: StepPhase = projectPaid ? 2 : 1;
                   const phaseSteps = getPhaseSteps(currentPhase);
                   return phaseSteps.map((step) => {
