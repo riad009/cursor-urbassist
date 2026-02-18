@@ -776,8 +776,8 @@ export default function AuthorizationPage({
                         ))}
                       </div>
 
-                      {/* Current surface + Ground footprint — inline */}
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Current surface + Ground footprint + Estimated floor area — inline */}
+                      <div className="grid grid-cols-3 gap-3">
                         {/* Existing declared surface */}
                         <div className="space-y-1">
                           <label className="text-sm font-medium text-slate-700">
@@ -820,30 +820,42 @@ export default function AuthorizationPage({
                             ))}
                           </div>
                         </div>
+
+                        {/* Floor area estimated (read-only) */}
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                            {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
+                            <span className="text-slate-400">🧮</span>
+                          </label>
+                          <div className={cn(
+                            "w-full px-3 py-2.5 rounded-xl border-2 text-base font-bold transition-all",
+                            extensionFloorArea > 0
+                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                              : "bg-slate-50 border-slate-200 text-slate-400"
+                          )}>
+                            {extensionFloorArea > 0 ? `${extensionFloorArea.toFixed(2)}` : "—"}
+                          </div>
+                          {extensionFootprint > 0 ? (
+                            <p className="text-xs text-slate-400">
+                              {isEn
+                                ? `0.90 × ${extensionFootprint} × ${extensionLevels} levels`
+                                : `0.90 × ${extensionFootprint} × ${extensionLevels} niveaux`}
+                            </p>
+                          ) : existingArea > 0 ? (
+                            <p className="text-xs text-slate-400">
+                              {isEn ? "From declared surface" : "Depuis surface déclarée"}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
 
-                      {/* Floor area override (left) + Level selector (right) — inline */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium text-slate-700">
-                            {isEn ? "Floor area created / transformed (m²)" : "Surface de plancher créée / transformée (m²)"}
-                          </label>
-                          <input
-                            type="number"
-                            value={extensionFloorAreaOverride || ""}
-                            onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
-                            placeholder="Ex: 18"
-                            min={0}
-                          />
-                        </div>
-                        <LevelSelector
-                          label={isEn ? "Extension levels" : "Niveaux de l'extension"}
-                          levels={extensionLevels}
-                          setLevels={setExtensionLevels}
-                          isEn={isEn}
-                        />
-                      </div>
+                      {/* Level selector */}
+                      <LevelSelector
+                        label={isEn ? "Extension levels" : "Niveaux de l'extension"}
+                        levels={extensionLevels}
+                        setLevels={setExtensionLevels}
+                        isEn={isEn}
+                      />
 
                       {/* Add project button */}
                       <button
