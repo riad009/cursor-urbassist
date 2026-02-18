@@ -445,15 +445,15 @@ export default function AuthorizationPage({
         <div className="max-w-7xl mx-auto">
 
           {/* Header */}
-          <div className="text-center space-y-2 mb-6">
-            <h1 className="text-2xl font-bold text-slate-900">
+          <div className="text-center space-y-3 mb-8">
+            <h1 className="text-3xl font-semibold text-slate-900">
               {isEn ? "What is your project?" : "Quel est votre projet ?"}
             </h1>
-            <p className="text-sm text-slate-400">
+            <p className="text-base text-slate-500">
               {isEn ? "You can select multiple options." : "Vous pouvez cocher plusieurs options."}
             </p>
             {projectData?.zoneType && (
-              <span className="inline-block px-2 py-0.5 rounded-md bg-blue-100 text-blue-600 text-xs font-semibold">
+              <span className="inline-block px-3 py-1 rounded-md bg-blue-100 text-blue-600 text-sm font-semibold">
                 Zone {projectData.zoneType} {isEn ? "detected" : "détectée"}
               </span>
             )}
@@ -461,53 +461,61 @@ export default function AuthorizationPage({
 
           {/* ═══ Quick Action / Shortcut Section (always full width) ═══ */}
           {step === "form" && (
-            <div className="space-y-5 mb-5">
-              <div className="rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/30 border border-blue-200/60 p-5 space-y-3">
+            <div className="space-y-4 mb-5 max-w-2xl mx-auto">
+              <div className="rounded-2xl bg-gradient-to-br from-slate-50 to-blue-50/30 border border-blue-200/60 p-4 space-y-3">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-slate-800">
+                  <h3 className="text-base font-bold text-slate-800">
                     {isEn
                       ? "Already know what type of authorization you need?"
                       : "Vous savez déjà quel type d'autorisation vous avez besoin ?"}
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm text-slate-500">
                     {isEn
                       ? "Go directly to document generation"
                       : "Accédez directement à la génération de documents"}
                   </p>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
+                  {/* DP Card */}
                   <button
                     type="button"
                     onClick={() => setQuickModal({ step: "documents", type: "DP" })}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-emerald-200 text-emerald-700 font-semibold text-sm hover:bg-emerald-50 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-500/10 transition-all"
+                    className="group relative flex flex-row items-center gap-2.5 p-5 rounded-2xl bg-slate-100 border border-slate-200 text-left hover:bg-slate-50 hover:border-emerald-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                   >
-                    <FileText className="w-4 h-4" />
-                    {isEn ? "Preliminary Declaration" : "Déclaration Préalable"}
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-800 truncate">
+                      {isEn ? "Preliminary Declaration" : "Déclaration Préalable"}
+                    </p>
                   </button>
+
+                  {/* PC Card */}
                   <button
                     type="button"
                     onClick={() => setQuickModal({ step: "submitter", type: "PC" })}
-                    className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white border-2 border-purple-200 text-purple-700 font-semibold text-sm hover:bg-purple-50 hover:border-purple-300 hover:shadow-md hover:shadow-purple-500/10 transition-all"
+                    className="group relative flex flex-row items-center gap-2.5 p-5 rounded-2xl bg-slate-100 border border-slate-200 text-left hover:bg-slate-50 hover:border-purple-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                   >
-                    <ClipboardCheck className="w-4 h-4" />
-                    {isEn ? "Building Permit" : "Permis de Construire"}
+                    <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                      <ClipboardCheck className="w-4 h-4 text-purple-600" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-800 truncate">
+                      {isEn ? "Building Permit" : "Permis de Construire"}
+                    </p>
                   </button>
+
+                  {/* Auto-detect Card */}
                   <button
                     type="button"
                     onClick={() => setAutoDetectModal("documents")}
-                    className="flex items-start gap-3 px-4 py-3 rounded-xl bg-white border-2 border-violet-200 text-left hover:bg-violet-50 hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/10 transition-all"
+                    className="group relative flex flex-row items-center gap-2.5 p-5 rounded-2xl bg-slate-100 border border-slate-200 text-left hover:bg-slate-50 hover:border-slate-400 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
                   >
-                    <span className="mt-0.5 w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
-                      <Info className="w-4 h-4 text-violet-600" />
-                    </span>
-                    <span>
-                      <span className="block text-sm font-bold text-slate-800 leading-snug">
-                        {isEn ? "I don't know / Auto detection" : "Je ne sais pas / Détection auto"}
-                      </span>
-                      <span className="block text-xs text-slate-500 mt-0.5">
-                        {isEn ? "We will determine the case for you." : "Nous déterminons le cas pour vous."}
-                      </span>
-                    </span>
+                    <div className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center shrink-0">
+                      <Info className="w-4 h-4 text-slate-600" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-800 truncate">
+                      {isEn ? "I don't know" : "Je ne sais pas"}
+                    </p>
                   </button>
                 </div>
               </div>
@@ -515,20 +523,66 @@ export default function AuthorizationPage({
               {/* Separator */}
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px bg-slate-200" />
-                <span className="text-xs text-slate-400 uppercase tracking-wider font-medium">
+                <span className="text-sm text-slate-400 uppercase tracking-wider font-semibold">
                   {isEn ? "Or fill in your project" : "Ou renseignez votre projet"}
                 </span>
                 <div className="flex-1 h-px bg-slate-200" />
               </div>
 
               {/* Title */}
-              <div className="space-y-1">
-                <p className="text-sm text-slate-600">
+              <div className="space-y-1 text-center max-w-2xl mx-auto">
+                <p className="text-base text-slate-600 font-medium">
                   {isEn
                     ? "Fill in your project details so the system can determine the type of authorization"
                     : "Renseignez les détails de votre projet pour que le système détermine le type d'autorisation"}
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Smart guide banner — always above the two-column layout, always centered */}
+          {step === "form" && (
+            <div className="flex justify-center w-full mb-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCategoryCards((v) => {
+                    if (v) setSelectedCategories(new Set());
+                    return !v;
+                  });
+                }}
+                className="relative w-full max-w-2xl rounded-2xl overflow-hidden text-left group transition-all duration-300 hover:-translate-y-0.5"
+              >
+                {/* Background: gray when open, gradient when closed */}
+                <div className={`absolute inset-0 transition-all duration-300 ${showCategoryCards ? "bg-slate-100" : "bg-gradient-to-br from-violet-500 via-indigo-500 to-purple-600 group-hover:from-violet-600 group-hover:via-indigo-600 group-hover:to-purple-700"}`} />
+                {/* Decorative blobs */}
+                <div className="pointer-events-none absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
+                <div className="pointer-events-none absolute -bottom-4 -left-4 w-24 h-24 rounded-full bg-indigo-300/20 blur-xl" />
+                <div className="pointer-events-none absolute top-1/2 right-16 w-16 h-16 rounded-full bg-purple-300/15 blur-lg" />
+                {/* Content */}
+                <div className="relative flex items-center gap-4 p-4">
+                  <div className={`shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg border transition-all duration-300 ${showCategoryCards ? "bg-slate-200 border-slate-300 shadow-slate-200/50" : "bg-white/20 backdrop-blur-sm border-white/20 shadow-black/10"}`}>
+                    <ClipboardCheck className={`w-7 h-7 transition-colors duration-300 ${showCategoryCards ? "text-slate-600" : "text-white"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest border transition-all duration-300 ${showCategoryCards ? "bg-violet-100 border-violet-200 text-violet-600" : "bg-white/20 border-white/30 text-white"}`}>
+                        ✦ {isEn ? "Smart guide" : "Guide intelligent"}
+                      </span>
+                    </div>
+                    <p className={`text-lg font-bold leading-snug transition-colors duration-300 ${showCategoryCards ? "text-slate-800" : "text-white"}`}>
+                      {isEn ? "Describe your work or constructions" : "Décrivez vos travaux ou constructions"}
+                    </p>
+                    <p className={`text-sm mt-1 transition-colors duration-300 ${showCategoryCards ? "text-slate-500" : "text-white/70"}`}>
+                      {isEn ? "We'll identify the exact permit you need in seconds." : "Nous identifions l'autorisation exacte dont vous avez besoin."}
+                    </p>
+                  </div>
+                  <div className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border transition-all duration-200 shadow-md ${showCategoryCards ? "bg-white text-slate-600 border-slate-300 hover:bg-slate-50" : "bg-white/20 text-white border-white/30 group-hover:bg-white group-hover:text-violet-700 group-hover:border-white"}`}>
+                    {showCategoryCards ? (isEn ? "Close" : "Fermer") : (isEn ? "Start" : "Commencer")}
+                    <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${showCategoryCards ? "rotate-90" : "group-hover:translate-x-0.5"}`} />
+                  </div>
+                </div>
+              </button>
             </div>
           )}
 
@@ -541,52 +595,6 @@ export default function AuthorizationPage({
               {/* ═══ STEP: Main Form ═══ */}
               {step === "form" && (
                 <div className="space-y-5">
-
-                  {/* ── "Describe your work" banner card ── */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCategoryCards((v) => {
-                        if (v) setSelectedCategories(new Set()); // closing → collapse all cards
-                        return !v;
-                      });
-                    }}
-                    className="relative w-full rounded-2xl overflow-hidden bg-gradient-to-br from-slate-50 via-violet-50/40 to-indigo-50/30 border border-violet-200/60 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-500/10 p-6 flex items-center gap-5 text-left group transition-all duration-200"
-                  >
-                    {/* Soft gradient accent strip on left */}
-                    <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl bg-gradient-to-b from-violet-500 to-indigo-500" />
-
-                    {/* Soft background tint on hover */}
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-violet-50/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-
-                    {/* Icon */}
-                    <div className="relative shrink-0 w-13 h-13 w-[52px] h-[52px] rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md shadow-violet-400/30">
-                      <ClipboardCheck className="w-6 h-6 text-white" />
-                    </div>
-
-                    {/* Text */}
-                    <div className="relative flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 border border-violet-200 text-[10px] font-semibold text-violet-600 uppercase tracking-widest">
-                          ✦ {isEn ? "Smart guide" : "Guide intelligent"}
-                        </span>
-                      </div>
-                      <p className="text-sm font-bold text-slate-900 leading-snug">
-                        {isEn ? "Describe your work or constructions" : "Décrivez vos travaux ou constructions"}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                        {isEn
-                          ? "We'll identify the exact permit you need in seconds."
-                          : "Nous identifions l'autorisation exacte dont vous avez besoin."}
-                      </p>
-                    </div>
-
-                    {/* CTA pill */}
-                    <div className={`relative shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold border transition-all duration-200 ${showCategoryCards ? "bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-400/30" : "bg-white text-violet-600 border-violet-200 group-hover:bg-violet-600 group-hover:text-white group-hover:border-violet-600"}`}>
-                      {showCategoryCards ? (isEn ? "Close" : "Fermer") : (isEn ? "Start" : "Commencer")}
-                      <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-300 ${showCategoryCards ? "rotate-90" : ""}`} />
-                    </div>
-                  </button>
 
                   {/* ── Category multi-select cards (side by side) – shown after clicking banner ── */}
                   {showCategoryCards && (
@@ -618,27 +626,80 @@ export default function AuthorizationPage({
                     </div>
                   )}
 
+                  {/* ═══ Total Floor Area Banner — shown at top once data exists ═══ */}
+                  {showCategoryCards && (constructionFootprint > 0 || extensionFootprint > 0) && (
+                    <div className="rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase tracking-widest text-blue-600">
+                          {isEn ? "Total Floor Area Created" : "Surface de Plancher Totale Créée"}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          {!editingFloorArea && (
+                            <button
+                              type="button"
+                              onClick={() => { setEditingFloorArea(true); setManualTotalFloorArea(totalFloorArea); }}
+                              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 transition-all"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              {isEn ? "Edit" : "Modifier"}
+                            </button>
+                          )}
+                          <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 uppercase tracking-wide">
+                            {editingFloorArea ? (isEn ? "Manual" : "Manuel") : (isEn ? "Auto" : "Auto")}
+                          </span>
+                        </div>
+                      </div>
+                      {editingFloorArea ? (
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            value={manualTotalFloorArea || ""}
+                            onChange={(e) => setManualTotalFloorArea(Number(e.target.value))}
+                            className="w-32 px-3 py-2 rounded-lg bg-white border border-blue-300 text-slate-900 text-2xl font-semibold focus:ring-2 focus:ring-blue-500/20"
+                            placeholder="0"
+                            min={0}
+                            autoFocus
+                          />
+                          <span className="text-lg text-slate-500">m²</span>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingFloorArea(false); setManualTotalFloorArea(0); }}
+                            className="text-xs text-slate-400 hover:text-slate-600 underline"
+                          >
+                            {isEn ? "Reset to auto" : "Retour auto"}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-xl font-semibold text-slate-900">{totalFloorArea}</span>
+                          <span className="text-sm text-slate-500">m²</span>
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
                   {/* ═══ Construction Indépendante Section ═══ */}
                   {selectedCategories.has("new_construction") && (
-                    <div className="rounded-2xl bg-white border border-blue-200 p-5 space-y-4">
-                      <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    <div className="rounded-2xl bg-white border border-blue-200 p-6 space-y-5">
+                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                         <Building2 className="w-5 h-5 text-blue-600" />
                         {isEn ? "Independent Construction" : "Construction Indépendante"}
                       </h3>
 
                       {/* Ground footprint */}
                       <div className="space-y-2">
-                        <label className="text-sm text-slate-600">
+                        <label className="text-base font-medium text-slate-700">
                           {isEn ? "What is the ground footprint (m²)?" : "Quelle est la surface au sol créée (m²) ?"}
                         </label>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-sm text-slate-400">
                           {isEn ? "Outer contour of walls, not just interior" : "Contour extérieur des murs, pas uniquement l'intérieur"}
                         </p>
                         <input
                           type="number"
                           value={constructionFootprint || ""}
                           onChange={(e) => { setConstructionFootprint(Number(e.target.value)); setConstructionRange(null); }}
-                          className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
+                          className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
                           placeholder="Ex: 40"
                           min={0}
                         />
@@ -646,12 +707,12 @@ export default function AuthorizationPage({
                           {CONSTRUCTION_RANGES.map((r) => (
                             <button key={r.label} type="button"
                               onClick={() => { setConstructionRange(r); setConstructionFootprint(r.value); }}
-                              className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
+                              className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
                                 constructionRange?.label === r.label
-                                  ? "bg-blue-100 text-blue-600 border-blue-300 ring-2 ring-blue-500/20"
-                                  : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+                                  ? "bg-blue-100 text-blue-700 border-blue-300 ring-2 ring-blue-500/20"
+                                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                               )}>
-                              {r.label} <span className="text-slate-500">(ex: {r.value})</span>
+                              {r.label} <span className="text-slate-400 font-normal">(ex: {r.value})</span>
                             </button>
                           ))}
                         </div>
@@ -679,9 +740,9 @@ export default function AuthorizationPage({
                             inUrbanZone: isUrbanZone,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-5 h-5" />
                         {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
                       </button>
                     </div>
@@ -689,8 +750,8 @@ export default function AuthorizationPage({
 
                   {/* ═══ Travaux sur Existant Section ═══ */}
                   {selectedCategories.has("existing_extension") && (
-                    <div className="rounded-2xl bg-white border border-amber-200 p-5 space-y-4">
-                      <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    <div className="rounded-2xl bg-white border border-amber-200 p-4 space-y-3">
+                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                         <Hammer className="w-5 h-5 text-amber-600" />
                         {isEn ? "Works on Existing Building" : "Travaux sur Existant"}
                       </h3>
@@ -704,83 +765,83 @@ export default function AuthorizationPage({
                         ]).map((sub) => (
                           <button key={sub.value} type="button"
                             onClick={() => toggleExtensionSubType(sub.value)}
-                            className={cn("px-4 py-2.5 rounded-xl text-sm font-medium transition-all border text-left",
+                            className={cn("px-5 py-3 rounded-xl transition-all border text-left",
                               extensionSubTypes.has(sub.value)
                                 ? "bg-amber-500/15 text-amber-700 border-amber-500/40 ring-2 ring-amber-500/20"
                                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                             )}>
-                            <span className="block font-semibold">{sub.label}</span>
-                            <span className="block text-[11px] text-slate-500 mt-0.5">{sub.desc}</span>
+                            <span className="block font-medium text-base">{sub.label}</span>
+                            <span className="block text-sm text-slate-400 mt-0.5">{sub.desc}</span>
                           </button>
                         ))}
                       </div>
 
-                      {/* Existing declared surface */}
-                      <div className="space-y-1">
-                        <label className="text-sm text-slate-600 font-medium">
-                          {isEn ? "Current declared surface (m²)" : "Surface actuelle déclarée (m²)"}
-                        </label>
-                        <p className="text-[11px] text-slate-500 italic">
-                          {isEn ? "Available on impots.gouv.fr (My properties)" : "Disponible sur impots.gouv.fr (Mes biens immobiliers)"}
-                        </p>
-                        <input
-                          type="number"
-                          value={existingArea || ""}
-                          onChange={(e) => setExistingArea(Number(e.target.value))}
-                          className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
-                          placeholder="Ex: 110"
-                          min={0}
-                        />
-                      </div>
+                      {/* Current surface + Ground footprint — inline */}
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Existing declared surface */}
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-slate-700">
+                            {isEn ? "Current declared surface (m²)" : "Surface actuelle déclarée (m²)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={existingArea || ""}
+                            onChange={(e) => setExistingArea(Number(e.target.value))}
+                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
+                            placeholder="Ex: 110"
+                            min={0}
+                          />
+                        </div>
 
-                      {/* Ground footprint */}
-                      <div className="space-y-2">
-                        <label className="text-sm text-slate-600">
-                          {isEn ? "What is the ground footprint of the extension (m²)?" : "Quelle est la surface au sol créée par l'extension (m²) ?"}
-                        </label>
-                        <input
-                          type="number"
-                          value={extensionFootprint || ""}
-                          onChange={(e) => { setExtensionFootprint(Number(e.target.value)); setExtensionRange(null); }}
-                          className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
-                          placeholder="Ex: 50"
-                          min={0}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          {EXTENSION_RANGES.map((r) => (
-                            <button key={r.label} type="button"
-                              onClick={() => { setExtensionRange(r); setExtensionFootprint(r.value); }}
-                              className={cn("px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
-                                extensionRange?.label === r.label
-                                  ? "bg-amber-100 text-amber-600 border-amber-500/40 ring-2 ring-amber-500/20"
-                                  : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
-                              )}>
-                              {r.label} <span className="text-slate-500">(ex: {r.value})</span>
-                            </button>
-                          ))}
+                        {/* Ground footprint of extension */}
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-slate-700">
+                            {isEn ? "Ground footprint of extension (m²)" : "Surface au sol de l'extension (m²)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={extensionFootprint || ""}
+                            onChange={(e) => { setExtensionFootprint(Number(e.target.value)); setExtensionRange(null); }}
+                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
+                            placeholder="Ex: 50"
+                            min={0}
+                          />
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {EXTENSION_RANGES.map((r) => (
+                              <button key={r.label} type="button"
+                                onClick={() => { setExtensionRange(r); setExtensionFootprint(r.value); }}
+                                className={cn("px-3 py-1 rounded-lg text-xs font-semibold transition-all border",
+                                  extensionRange?.label === r.label
+                                    ? "bg-amber-100 text-amber-700 border-amber-500/40 ring-2 ring-amber-500/20"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                                )}>
+                                {r.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Level selector */}
-                      <LevelSelector
-                        label={isEn ? "Extension levels" : "Niveaux de l'extension"}
-                        levels={extensionLevels}
-                        setLevels={setExtensionLevels}
-                        isEn={isEn}
-                      />
-
-                      {/* Floor area override */}
-                      <div className="space-y-1">
-                        <label className="text-sm text-slate-600">
-                          {isEn ? "Floor area created / transformed (m²)" : "Surface de plancher créée / transformée (m²)"}
-                        </label>
-                        <input
-                          type="number"
-                          value={extensionFloorAreaOverride || ""}
-                          onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
-                          className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
-                          placeholder="Ex: 18"
-                          min={0}
+                      {/* Floor area override (left) + Level selector (right) — inline */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-slate-700">
+                            {isEn ? "Floor area created / transformed (m²)" : "Surface de plancher créée / transformée (m²)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={extensionFloorAreaOverride || ""}
+                            onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
+                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
+                            placeholder="Ex: 18"
+                            min={0}
+                          />
+                        </div>
+                        <LevelSelector
+                          label={isEn ? "Extension levels" : "Niveaux de l'extension"}
+                          levels={extensionLevels}
+                          setLevels={setExtensionLevels}
+                          isEn={isEn}
                         />
                       </div>
 
@@ -803,9 +864,9 @@ export default function AuthorizationPage({
                             inUrbanZone: isUrbanZone,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-5 h-5" />
                         {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
                       </button>
                     </div>
@@ -813,8 +874,8 @@ export default function AuthorizationPage({
 
                   {/* ═══ Aménagement Extérieur Section ═══ */}
                   {selectedCategories.has("outdoor") && (
-                    <div className="rounded-2xl bg-white border border-emerald-500/20 p-5 space-y-4">
-                      <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    <div className="rounded-2xl bg-white border border-emerald-500/20 p-6 space-y-5">
+                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                         <TreePine className="w-5 h-5 text-emerald-600" />
                         {isEn ? "Outdoor Development" : "Aménagement Extérieur"}
                       </h3>
@@ -843,7 +904,7 @@ export default function AuthorizationPage({
                         type="text"
                         value={outdoorFreeText}
                         onChange={(e) => setOutdoorFreeText(e.target.value)}
-                        className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
+                        className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
                         placeholder={isEn ? "Other (Carport, Wooden shed…)" : "Autre (Carport, Abri bois…)"}
                       />
 
@@ -893,15 +954,15 @@ export default function AuthorizationPage({
                       )}
 
                       {/* Total ground surface for outdoor */}
-                      <div className="space-y-1">
-                        <label className="text-sm text-slate-600">
+                      <div className="space-y-2">
+                        <label className="text-base font-medium text-slate-700">
                           {isEn ? "Total ground surface occupied (m²)" : "Surface totale occupée au sol (m²)"}
                         </label>
                         <input
                           type="number"
                           value={outdoorSurface || ""}
                           onChange={(e) => setOutdoorSurface(Number(e.target.value))}
-                          className="w-full px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
+                          className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
                           placeholder="Ex: 30"
                           min={0}
                         />
@@ -931,84 +992,15 @@ export default function AuthorizationPage({
                             inUrbanZone: isUrbanZone,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-5 h-5" />
                         {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
                       </button>
                     </div>
                   )}
 
-                  {/* ═══ Total Floor Area Banner ═══ */}
-                  {showCategoryCards && (constructionFootprint > 0 || extensionFootprint > 0) && (
-                    <div className="rounded-xl bg-gradient-to-r from-slate-50 to-white border border-blue-200 p-5 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                          {isEn ? "TOTAL FLOOR AREA CREATED" : "SURFACE DE PLANCHER TOTALE CRÉÉE"}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {!editingFloorArea && (
-                            <button
-                              type="button"
-                              onClick={() => { setEditingFloorArea(true); setManualTotalFloorArea(totalFloorArea); }}
-                              className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 transition-all"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              {isEn ? "Edit" : "Modifier"}
-                            </button>
-                          )}
-                          <span className="text-[10px] font-bold px-2.5 py-1 rounded-md bg-slate-200 text-slate-600 uppercase tracking-wide">
-                            {editingFloorArea ? (isEn ? "Manual" : "Manuel") : (isEn ? "Auto calc." : "Calcul auto")}
-                          </span>
-                        </div>
-                      </div>
-
-                      {editingFloorArea ? (
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="number"
-                            value={manualTotalFloorArea || ""}
-                            onChange={(e) => setManualTotalFloorArea(Number(e.target.value))}
-                            className="w-32 px-3 py-2 rounded-lg bg-white border border-blue-300 text-slate-900 text-2xl font-bold focus:ring-2 focus:ring-blue-500/20"
-                            placeholder="0"
-                            min={0}
-                            autoFocus
-                          />
-                          <span className="text-lg text-slate-600">m²</span>
-                          <button
-                            type="button"
-                            onClick={() => { setEditingFloorArea(false); setManualTotalFloorArea(0); }}
-                            className="text-xs text-slate-400 hover:text-slate-600 underline"
-                          >
-                            {isEn ? "Reset to auto" : "Retour auto"}
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-3xl font-bold text-slate-900">
-                            {totalFloorArea}
-                          </span>
-                          <span className="text-lg text-slate-600">m²</span>
-                        </div>
-                      )}
-
-                      {/* Breakdown */}
-                      {selectedCategories.size > 1 && !editingFloorArea && (
-                        <div className="text-[11px] text-slate-500 space-y-0.5 border-t border-slate-100 pt-2 mt-2">
-                          {constructionFloorArea > 0 && (
-                            <p>{isEn ? "Construction" : "Construction"}: {constructionFootprint} × 0.79 × {constructionLevels} = {constructionFloorArea} m²</p>
-                          )}
-                          {extensionFloorArea > 0 && (
-                            <p>{isEn ? "Extension" : "Extension"}: {extensionFloorAreaOverride > 0 ? `${extensionFloorAreaOverride} m² (manual)` : `${extensionFootprint} × 0.79 × ${extensionLevels} = ${extensionFloorArea} m²`}</p>
-                          )}
-                        </div>
-                      )}
-
-                      <p className="text-[11px] text-slate-500">
-                        Surface Plancher = {isEn ? "Footprint" : "Emprise"} × 0.79 × {isEn ? "Levels" : "Niveaux"}. {isEn ? "This value defines the file type." : "C'est cette valeur qui définit le type de dossier."}
-                      </p>
-                    </div>
-                  )}
+                  {/* ═══ Total Floor Area Banner — now shown at top, removed from here ═══ */}
 
                   {/* Continue button */}
                   {showCategoryCards && (
@@ -1016,9 +1008,9 @@ export default function AuthorizationPage({
                       type="button"
                       onClick={handleContinue}
                       disabled={!canContinue}
-                      className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
                     >
-                      {isEn ? "Next: List of documents" : "Suivant : Liste des documents"} <ChevronRight className="w-4 h-4" />
+                      {isEn ? "Next: List of documents" : "Suivant : Liste des documents"} <ChevronRight className="w-5 h-5" />
                     </button>
                   )}
                 </div>
@@ -1028,10 +1020,10 @@ export default function AuthorizationPage({
               {step === "check-submitter" && (
                 <div className="space-y-4">
                   <BackButton onClick={goBack} />
-                  <p className="text-center text-slate-600 text-sm">
+                  <p className="text-center text-slate-700 text-lg font-semibold">
                     {t("auth.submitterTitle")}
                   </p>
-                  <p className="text-center text-slate-500 text-xs">
+                  <p className="text-center text-slate-500 text-sm">
                     {isEn ? "Legal entities (companies) must use an architect" : "Les personnes morales (sociétés) doivent obligatoirement recourir à un architecte"}
                   </p>
                   <div className="grid gap-3">
@@ -1056,9 +1048,9 @@ export default function AuthorizationPage({
                     type="button"
                     onClick={handleSubmitterNext}
                     disabled={!submitterType}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-slate-900 font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
+                    className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
                   >
-                    {isEn ? "See result" : "Voir le résultat"} <ChevronRight className="w-4 h-4" />
+                    {isEn ? "See result" : "Voir le résultat"} <ChevronRight className="w-5 h-5" />
                   </button>
                 </div>
               )}
@@ -1179,10 +1171,10 @@ export default function AuthorizationPage({
                       type="button"
                       onClick={saveAndContinue}
                       disabled={saving}
-                      className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2 text-base"
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
                     >
                       {saving ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> {isEn ? "Saving…" : "Enregistrement…"}</>
+                        <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Saving…" : "Enregistrement…"}</>
                       ) : (
                         <>{isEn ? "Next: List of documents" : "Suivant : Liste des documents"} <ChevronRight className="w-5 h-5" /></>
                       )}
@@ -1199,7 +1191,7 @@ export default function AuthorizationPage({
 
             {/* RIGHT COLUMN — Live Analysis Panel (only shown on form step when banner is expanded) */}
             {step === "form" && showCategoryCards && (
-              <div className="w-[420px] shrink-0 sticky top-6 self-start">
+              <div className="w-[480px] shrink-0 sticky top-6 self-start">
                 <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
                   {/* Panel header */}
                   <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
@@ -1940,22 +1932,22 @@ function CategoryCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative flex flex-col items-center gap-2 p-4 rounded-xl border transition-all text-center",
+        "relative flex flex-col items-center gap-3 p-5 rounded-xl border transition-all text-center",
         selected
           ? `${c.bg} ${c.border} ring-2 ${c.ring}`
           : `bg-white border-slate-200 hover:${c.bg} hover:${c.border}`
       )}
     >
       {selected && (
-        <div className={cn("absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center", c.check)}>
-          <Check className="w-3 h-3" />
+        <div className={cn("absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center", c.check)}>
+          <Check className="w-3.5 h-3.5" />
         </div>
       )}
-      <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center", c.bg, c.icon)}>
+      <div className={cn("w-14 h-14 rounded-xl flex items-center justify-center", c.bg, c.icon)}>
         {icon}
       </div>
-      <p className="text-sm font-semibold text-slate-900 leading-tight">{title}</p>
-      <p className="text-[11px] text-slate-400">{description}</p>
+      <p className="text-base font-medium text-slate-900 leading-tight">{title}</p>
+      <p className="text-sm text-slate-400">{description}</p>
     </button>
   );
 }
@@ -1972,22 +1964,22 @@ function LevelSelector({
   isEn: boolean;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm text-slate-600 font-medium">{label}</label>
-      <div className="grid grid-cols-3 gap-2">
+    <div className="space-y-1">
+      <label className="text-sm font-medium text-slate-700">{label}</label>
+      <div className="flex gap-2 h-[42px]">
         {[
-          { value: 1, label: isEn ? "Ground floor" : "Rez-de-chaussée" },
-          { value: 2, label: isEn ? "R+1 (1 Floor)" : "R+1 (Étage)" },
-          { value: 3, label: isEn ? "R+2 (2 Floors)" : "R+2 (2 Étages)" },
+          { value: 1, label: isEn ? "Ground floor" : "RDC" },
+          { value: 2, label: isEn ? "R+1" : "R+1" },
+          { value: 3, label: isEn ? "R+2" : "R+2" },
         ].map((lvl) => (
           <button
             key={lvl.value}
             type="button"
             onClick={() => setLevels(lvl.value)}
             className={cn(
-              "py-2.5 px-3 rounded-xl text-sm font-medium transition-all border text-center",
+              "flex-1 rounded-xl text-xs font-semibold transition-all border text-center",
               levels === lvl.value
-                ? "bg-blue-100 text-blue-600 border-blue-300 ring-2 ring-blue-500/20"
+                ? "bg-blue-100 text-blue-700 border-blue-300 ring-2 ring-blue-500/20"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
             )}
           >
