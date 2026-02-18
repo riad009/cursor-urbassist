@@ -273,71 +273,7 @@ export default function NewProjectPage() {
                         {/* ── RIGHT: Sidebar panel ── */}
                         <div className="lg:col-span-4 xl:col-span-3 flex flex-col lg:h-[700px] gap-2">
 
-                            {/* PARCELS — takes remaining space, scrollable internally */}
-                            <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0 shadow-sm">
-                                <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
-                                    <p className="text-sm font-semibold text-slate-900">{t("newProj.parcels")}</p>
-                                    {selectedAddress && !loadingCadastre && parcels.length > 0 && (
-                                        <span className="text-xs text-slate-600">{parcels.length} {t("newProj.found")}</span>
-                                    )}
-                                </div>
-                                <div className="p-2 flex-1 overflow-y-auto scrollbar-thin min-h-0">
-                                    {(!selectedAddress || loadingCadastre) ? (
-                                        <div className="space-y-1.5 animate-pulse">
-                                            {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-100">
-                                                    <div className="w-3 h-3 rounded bg-slate-200" />
-                                                    <div className="h-3 bg-slate-200 rounded flex-1" />
-                                                    <div className="h-3 bg-slate-200 rounded w-10" />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : parcels.length > 0 ? (
-                                        <>
-                                            <div className="flex gap-1.5 mb-1.5">
-                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds(parcels.map((p) => p.id)); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.all")}</button>
-                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds([]); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.none")}</button>
-                                            </div>
-                                            {cadastreError && <p className="text-[10px] text-amber-400 mb-1">{cadastreError}</p>}
-                                            <div className="space-y-0.5">
-                                                {parcels.map((p) => {
-                                                    const selected = selectedParcelIds.includes(p.id);
-                                                    const isMain = parcels[0]?.id === p.id;
-                                                    const toggle = () => setSelectedParcelIds((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]);
-                                                    return (
-                                                        <div key={p.id} role="button" tabIndex={0} aria-pressed={selected}
-                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
-                                                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
-                                                            className={cn(
-                                                                "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer border",
-                                                                selected ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:border-slate-200"
-                                                            )}
-                                                        >
-                                                            <span className={cn("w-3 h-3 rounded-sm border flex items-center justify-center shrink-0", selected ? "border-blue-500 bg-blue-100" : "border-slate-300")}>
-                                                                {selected && <Check className="w-2 h-2 text-blue-500" />}
-                                                            </span>
-                                                            <span className="px-1 py-0.5 rounded bg-slate-100 text-[8px] font-bold text-slate-500 uppercase shrink-0">{p.section}</span>
-                                                            <span className="font-medium text-slate-800 flex-1 truncate">{isMain ? "★ " : ""}N°{p.number}</span>
-                                                            <span className="tabular-nums text-slate-400 shrink-0">{p.area.toLocaleString()} m²</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <p className="text-[11px] text-slate-500 py-2 text-center">{t("newProj.noParcel")}</p>
-                                    )}
-                                </div>
-                                {/* Total surface — pinned at bottom of parcels */}
-                                {selectedParcelIds.length > 0 && (
-                                    <div className="px-3 py-2 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
-                                        <span className="text-xs text-slate-600">{selectedParcelIds.length} {t("newProj.selected")}{selectedParcelIds.length > 1 ? "s" : ""}</span>
-                                        <span className="text-base font-bold text-emerald-600 tabular-nums">{totalSelectedArea.toLocaleString()} m²</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* BOTTOM: Regulation + Protections & Servitudes stacked */}
+                            {/* TOP: Regulation + Protections & Servitudes stacked */}
                             <div className="space-y-2 shrink-0">
 
                                 {/* REGULATION — compact row */}
@@ -450,6 +386,70 @@ export default function NewProjectPage() {
                                         )}
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* PARCELS — takes remaining space, scrollable internally */}
+                            <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0 shadow-sm">
+                                <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
+                                    <p className="text-sm font-semibold text-slate-900">{t("newProj.parcels")}</p>
+                                    {selectedAddress && !loadingCadastre && parcels.length > 0 && (
+                                        <span className="text-xs text-slate-600">{parcels.length} {t("newProj.found")}</span>
+                                    )}
+                                </div>
+                                <div className="p-2 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+                                    {(!selectedAddress || loadingCadastre) ? (
+                                        <div className="space-y-1.5 animate-pulse">
+                                            {[1, 2, 3].map((i) => (
+                                                <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-100">
+                                                    <div className="w-3 h-3 rounded bg-slate-200" />
+                                                    <div className="h-3 bg-slate-200 rounded flex-1" />
+                                                    <div className="h-3 bg-slate-200 rounded w-10" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : parcels.length > 0 ? (
+                                        <>
+                                            <div className="flex gap-1.5 mb-1.5">
+                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds(parcels.map((p) => p.id)); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.all")}</button>
+                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds([]); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.none")}</button>
+                                            </div>
+                                            {cadastreError && <p className="text-[10px] text-amber-400 mb-1">{cadastreError}</p>}
+                                            <div className="space-y-0.5">
+                                                {parcels.map((p) => {
+                                                    const selected = selectedParcelIds.includes(p.id);
+                                                    const isMain = parcels[0]?.id === p.id;
+                                                    const toggle = () => setSelectedParcelIds((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]);
+                                                    return (
+                                                        <div key={p.id} role="button" tabIndex={0} aria-pressed={selected}
+                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
+                                                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+                                                            className={cn(
+                                                                "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer border",
+                                                                selected ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:border-slate-200"
+                                                            )}
+                                                        >
+                                                            <span className={cn("w-3 h-3 rounded-sm border flex items-center justify-center shrink-0", selected ? "border-blue-500 bg-blue-100" : "border-slate-300")}>
+                                                                {selected && <Check className="w-2 h-2 text-blue-500" />}
+                                                            </span>
+                                                            <span className="px-1 py-0.5 rounded bg-slate-100 text-[8px] font-bold text-slate-500 uppercase shrink-0">{p.section}</span>
+                                                            <span className="font-medium text-slate-800 flex-1 truncate">{isMain ? "★ " : ""}N°{p.number}</span>
+                                                            <span className="tabular-nums text-slate-400 shrink-0">{p.area.toLocaleString()} m²</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <p className="text-[11px] text-slate-500 py-2 text-center">{t("newProj.noParcel")}</p>
+                                    )}
+                                </div>
+                                {/* Total surface — pinned at bottom of parcels */}
+                                {selectedParcelIds.length > 0 && (
+                                    <div className="px-3 py-2 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
+                                        <span className="text-xs text-slate-600">{selectedParcelIds.length} {t("newProj.selected")}{selectedParcelIds.length > 1 ? "s" : ""}</span>
+                                        <span className="text-base font-bold text-emerald-600 tabular-nums">{totalSelectedArea.toLocaleString()} m²</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

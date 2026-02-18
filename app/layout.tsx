@@ -25,7 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-white text-slate-900`}>
+      <body suppressHydrationWarning className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased min-h-screen bg-white text-slate-900`}>
         <div className="relative">
           <Providers>{children}</Providers>
         </div>
