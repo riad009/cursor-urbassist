@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { type, packageId, planId, projectId } = await request.json();
+    const { type, packageId, planId, projectId, successUrl } = await request.json();
 
     if (type === "credits") {
       // One-time credit purchase
@@ -54,9 +54,12 @@ export async function POST(request: NextRequest) {
         const stripe = new Stripe(STRIPE_SECRET);
 
         // After payment, redirect back into the project flow
-        const successPath = projectId
-          ? `/projects/${encodeURIComponent(projectId)}/payment?success=true`
-          : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
+        // successUrl can be passed by the caller to override the default redirect
+        const successPath = successUrl
+          ? successUrl
+          : projectId
+            ? `/projects/${encodeURIComponent(projectId)}/payment?success=true`
+            : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
         const cancelPath = projectId
           ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
           : `/projects?cancelled=true`;

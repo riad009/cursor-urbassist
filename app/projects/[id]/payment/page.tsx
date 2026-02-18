@@ -48,6 +48,7 @@ export default function PaymentPage({
   const [error, setError] = useState<string | null>(null);
 
   const success = searchParams.get("success");
+  const returnTo = searchParams.get("returnTo");
 
   useEffect(() => {
     Promise.all([
@@ -67,10 +68,11 @@ export default function PaymentPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paidAt: new Date().toISOString() }),
       }).then(() => {
-        router.push(`/projects/${projectId}`);
+        // Always redirect to project-description after payment
+        router.push(`/projects/${projectId}/dashboard`);
       });
     }
-  }, [success, project, projectId, router]);
+  }, [success, project, projectId, router, returnTo]);
 
   async function handlePayment() {
     setPaying(true);
@@ -99,7 +101,7 @@ export default function PaymentPage({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paidAt: new Date().toISOString() }),
         });
-        router.push(`/projects/${projectId}`);
+        router.push(`/projects/${projectId}/dashboard`);
       }
     } catch (err) {
       console.error("Payment failed:", err);
@@ -113,6 +115,25 @@ export default function PaymentPage({
       <Navigation>
         <div className="min-h-screen flex items-center justify-center">
           <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        </div>
+      </Navigation>
+    );
+  }
+
+  // If Stripe returned ?success=true, show success screen immediately
+  // (don't show the payment form while we wait for paidAt to be set)
+  if (success === "true") {
+    return (
+      <Navigation>
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="max-w-md w-full text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+              <Check className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900">{t("pay.confirmed")}</h2>
+            <p className="text-sm text-slate-500">{t("pay.activeMessage")}</p>
+            <Loader2 className="w-5 h-5 animate-spin text-blue-400 mx-auto" />
+          </div>
         </div>
       </Navigation>
     );
@@ -137,7 +158,7 @@ export default function PaymentPage({
             <h2 className="text-xl font-bold text-slate-900">{t("pay.confirmed")}</h2>
             <p className="text-sm text-slate-500">{t("pay.activeMessage")}</p>
             <button
-              onClick={() => router.push(`/projects/${projectId}`)}
+              onClick={() => router.push(`/projects/${projectId}/dashboard`)}
               className="px-8 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 hover:shadow-lg transition-all"
             >
               {t("pay.continueDesc")}

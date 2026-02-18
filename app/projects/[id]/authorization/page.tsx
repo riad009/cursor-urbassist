@@ -327,7 +327,7 @@ export default function AuthorizationPage({
     return strictest;
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     const tempResult = computeResult();
 
     // If result is PC, ask about submitter first
@@ -336,43 +336,39 @@ export default function AuthorizationPage({
       return;
     }
 
-    // Final result - recompute with submitter
-    setResult(computeResult());
-    setStep("result");
+    // Save and navigate directly to documents (result step removed)
+    const r = computeResult();
+    setResult(r);
+    await saveAndContinue(r);
   }
 
-  function handleSubmitterNext() {
-    setResult(computeResult());
-    setStep("result");
+  async function handleSubmitterNext() {
+    const r = computeResult();
+    setResult(r);
+    await saveAndContinue(r);
   }
 
   function goBack() {
     if (step === "check-submitter") {
       setStep("form");
-    } else if (step === "result") {
-      setResult(null);
-      if (submitterType) {
-        setStep("check-submitter");
-      } else {
-        setStep("form");
-      }
     }
   }
 
   // ─── Save & Continue ────────────────────────────────────────────────
 
-  async function saveAndContinue() {
-    if (!result) return;
+  async function saveAndContinue(overrideResult?: typeof result) {
+    const r = overrideResult ?? result;
+    if (!r) return;
     setSaving(true);
     try {
-      const determination = result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination;
+      const determination = r.determination === "ARCHITECT_REQUIRED" ? "PC" : r.determination;
       const categories = Array.from(selectedCategories);
       await fetch(`/api/projects/${projectId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           authorizationType: determination,
-          authorizationExplanation: result.explanation,
+          authorizationExplanation: r.explanation,
           projectType: categories.length === 1
             ? (categories[0] === "new_construction" ? "construction"
               : categories[0] === "existing_extension" ? "extension"
@@ -393,7 +389,7 @@ export default function AuthorizationPage({
             outdoorSurface: outdoorSurface || undefined,
             totalFloorArea: totalFloorArea || undefined,
             submitterType,
-            architectRequired: result.architectRequired || false,
+            architectRequired: r.architectRequired || false,
             wantPluAnalysis,
             wantCerfa,
             isUrbanZone,
@@ -776,8 +772,8 @@ export default function AuthorizationPage({
                         ))}
                       </div>
 
-                      {/* Current surface + Ground footprint — inline */}
-                      <div className="grid grid-cols-2 gap-3">
+                      {/* Current surface + Ground footprint + Estimated floor area — inline */}
+                      <div className="grid grid-cols-3 gap-3">
                         {/* Existing declared surface */}
                         <div className="space-y-1">
                           <label className="text-sm font-medium text-slate-700">
@@ -820,30 +816,46 @@ export default function AuthorizationPage({
                             ))}
                           </div>
                         </div>
+
+                        {/* Floor area estimated (read-only) */}
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                            {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
+                            <span className="text-slate-400">🧮</span>
+                          </label>
+                          <div className={cn(
+                            "w-full px-3 py-2.5 rounded-xl border-2 text-base font-bold transition-all",
+                            extensionFloorArea > 0
+                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                              : "bg-slate-50 border-slate-200 text-slate-400"
+                          )}>
+                            {extensionFloorArea > 0 ? `${extensionFloorArea.toFixed(2)}` : "—"}
+                          </div>
+                          {extensionFootprint > 0 ? (
+                            <p className="text-xs text-slate-400">
+                              {(() => {
+                                const coeffs: Record<number, number> = { 1: 0.95, 2: 0.90, 3: 0.82 };
+                                const c = coeffs[extensionLevels] ?? 0.80;
+                                return isEn
+                                  ? `${c} × ${extensionFootprint} × ${extensionLevels} level${extensionLevels > 1 ? "s" : ""} (ht > 1.80m)`
+                                  : `${c} × ${extensionFootprint} × ${extensionLevels} niveau${extensionLevels > 1 ? "x" : ""} (ht > 1,80m)`;
+                              })()}
+                            </p>
+                          ) : existingArea > 0 ? (
+                            <p className="text-xs text-slate-400">
+                              {isEn ? "From declared surface" : "Depuis surface déclarée"}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
 
-                      {/* Floor area override (left) + Level selector (right) — inline */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium text-slate-700">
-                            {isEn ? "Floor area created / transformed (m²)" : "Surface de plancher créée / transformée (m²)"}
-                          </label>
-                          <input
-                            type="number"
-                            value={extensionFloorAreaOverride || ""}
-                            onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
-                            placeholder="Ex: 18"
-                            min={0}
-                          />
-                        </div>
-                        <LevelSelector
-                          label={isEn ? "Extension levels" : "Niveaux de l'extension"}
-                          levels={extensionLevels}
-                          setLevels={setExtensionLevels}
-                          isEn={isEn}
-                        />
-                      </div>
+                      {/* Level selector */}
+                      <LevelSelector
+                        label={isEn ? "Extension levels" : "Niveaux de l'extension"}
+                        levels={extensionLevels}
+                        setLevels={setExtensionLevels}
+                        isEn={isEn}
+                      />
 
                       {/* Add project button */}
                       <button
@@ -1050,142 +1062,16 @@ export default function AuthorizationPage({
                     disabled={!submitterType}
                     className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
                   >
-                    {isEn ? "See result" : "Voir le résultat"} <ChevronRight className="w-5 h-5" />
+                    {saving ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Saving…" : "Enregistrement…"}</>
+                    ) : (
+                      <>{isEn ? "Continue" : "Continuer"} <ChevronRight className="w-5 h-5" /></>
+                    )}
                   </button>
                 </div>
               )}
 
-              {/* ═══ STEP: Result ═══ */}
-              {step === "result" && result && (
-                <div className="space-y-4">
-                  <BackButton onClick={goBack} />
 
-                  {/* Determination badge */}
-                  <div className={cn(
-                    "rounded-2xl border p-6 text-center space-y-3",
-                    result.determination === "DP" ? "bg-emerald-50 border-emerald-200" :
-                      result.determination === "PC" ? "bg-purple-50 border-purple-200" :
-                        result.determination === "ARCHITECT_REQUIRED" ? "bg-amber-50 border-amber-200" :
-                          result.determination === "NONE" ? "bg-white border-slate-200" :
-                            "bg-blue-50 border-blue-200"
-                  )}>
-                    <div className={cn(
-                      "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-lg font-bold",
-                      result.determination === "DP" ? "bg-emerald-100 text-emerald-600" :
-                        result.determination === "PC" ? "bg-purple-100 text-purple-600" :
-                          result.determination === "ARCHITECT_REQUIRED" ? "bg-amber-100 text-amber-600" :
-                            result.determination === "NONE" ? "bg-slate-100 text-slate-600" :
-                              "bg-blue-100 text-blue-600"
-                    )}>
-                      {result.determination === "DP" && <FileText className="w-5 h-5" />}
-                      {result.determination === "PC" && <ClipboardCheck className="w-5 h-5" />}
-                      {result.determination === "ARCHITECT_REQUIRED" && <AlertTriangle className="w-5 h-5" />}
-                      {result.determination === "NONE" && <Check className="w-5 h-5" />}
-                      {result.determination === "REVIEW" && <Info className="w-5 h-5" />}
-                      {result.determination === "DP" ? t("auth.dp")
-                        : result.determination === "PC" ? t("auth.pc")
-                          : result.determination === "ARCHITECT_REQUIRED" ? (isEn ? "Architect Required" : "Architecte Obligatoire")
-                            : result.determination === "NONE" ? t("auth.none")
-                              : (isEn ? "Review Required" : "Vérification requise")}
-                    </div>
-                    <p className="text-sm text-slate-600 leading-relaxed max-w-lg mx-auto">
-                      {result.explanation}
-                    </p>
-                  </div>
-
-                  {/* Architect warning */}
-                  {result.architectRequired && (
-                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
-                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-semibold text-amber-700">{isEn ? "Architect required" : "Architecte obligatoire"}</p>
-                        <p className="text-xs text-amber-700 mt-1">
-                          {t("auth.architectWarning")}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Document list */}
-                  {(result.determination === "DP" || result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED") && (
-                    <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
-                      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-blue-600" />
-                        <span className="text-sm font-semibold text-slate-900">
-                          {t("auth.documentsProduced")}
-                        </span>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {getDocumentsForType(result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination).length} documents
-                        </span>
-                      </div>
-                      <div className="p-3 space-y-1 max-h-[240px] overflow-y-auto">
-                        {getDocumentsForType(result.determination === "ARCHITECT_REQUIRED" ? "PC" : result.determination).map((doc, i) => (
-                          <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 text-xs text-slate-600">
-                            <span className="w-5 h-5 rounded-md bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
-                              {i + 1}
-                            </span>
-                            <span className="flex-1">{doc.label}</span>
-                            <Check className="w-3.5 h-3.5 text-emerald-500/40" />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Optional features */}
-                  {(result.determination === "DP" || result.determination === "PC" || result.determination === "ARCHITECT_REQUIRED") && (
-                    <div className="rounded-xl bg-white border border-slate-200 p-4 space-y-3">
-                      <p className="text-sm font-semibold text-slate-900">{t("auth.additionalOptions")}</p>
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <input type="checkbox" checked={wantPluAnalysis} onChange={(e) => setWantPluAnalysis(e.target.checked)} className="sr-only" />
-                        <div className={cn("w-5 h-5 rounded-md border flex items-center justify-center transition-all",
-                          wantPluAnalysis ? "bg-blue-100 border-blue-500 text-blue-600" : "border-slate-600 group-hover:border-slate-500"
-                        )}>
-                          {wantPluAnalysis && <Check className="w-3 h-3" />}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-slate-700">{t("auth.pluAnalysis")}</p>
-                          <p className="text-[11px] text-slate-500">{t("auth.pluAnalysisDesc")}</p>
-                        </div>
-                        <Shield className="w-4 h-4 text-blue-600/40" />
-                      </label>
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <input type="checkbox" checked={wantCerfa} onChange={(e) => setWantCerfa(e.target.checked)} className="sr-only" />
-                        <div className={cn("w-5 h-5 rounded-md border flex items-center justify-center transition-all",
-                          wantCerfa ? "bg-blue-100 border-blue-500 text-blue-600" : "border-slate-600 group-hover:border-slate-500"
-                        )}>
-                          {wantCerfa && <Check className="w-3 h-3" />}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-slate-700">{t("auth.cerfaFill")}</p>
-                          <p className="text-[11px] text-slate-500">{t("auth.cerfaFillDesc")}</p>
-                        </div>
-                        <FileText className="w-4 h-4 text-blue-600/40" />
-                      </label>
-                    </div>
-                  )}
-
-                  {/* Continue to documents */}
-                  {result.determination !== "NONE" && (
-                    <button
-                      type="button"
-                      onClick={saveAndContinue}
-                      disabled={saving}
-                      className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
-                    >
-                      {saving ? (
-                        <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Saving…" : "Enregistrement…"}</>
-                      ) : (
-                        <>{isEn ? "Next: List of documents" : "Suivant : Liste des documents"} <ChevronRight className="w-5 h-5" /></>
-                      )}
-                    </button>
-                  )}
-
-                  {result.determination === "NONE" && (
-                    <NextStepButton canProceed={true} nextHref={`/projects/${projectId}`} nextLabel={isEn ? "Continue" : "Continuer"} />
-                  )}
-                </div>
-              )}
 
             </div>{/* end LEFT COLUMN */}
 
@@ -1326,347 +1212,27 @@ export default function AuthorizationPage({
           </div>{/* end two-column wrapper */}
 
         </div>{/* end max-w-7xl */}
-      </div>
+      </div >
 
       {/* ═══ Auto Detection Modal ═══ */}
-      {autoDetectModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-          onClick={(e) => { if (e.target === e.currentTarget) setAutoDetectModal(null); }}
-        >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-
-            {/* ── Step 1: Document List ── */}
-            {autoDetectModal === "documents" && (
-              <div className="p-6 space-y-5">
-                {/* Header */}
-                <div className="text-center space-y-2">
-                  <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
-                    <FileText className="w-7 h-7 text-violet-600" />
-                  </div>
-                  <h2 className="text-xl font-bold text-slate-900">
-                    {isEn ? "Complete list of potential parts" : "Liste complète des pièces potentielles"}
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    {isEn
-                      ? "Here is the list of required parts. Select the additional options:"
-                      : "Voici la liste des pièces requises. Sélectionnez les options supplémentaires :"}
-                  </p>
-                </div>
-
-                {/* Documents — show all PC documents (most complete set) */}
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="grid grid-cols-2 gap-px bg-slate-100">
-                    {getDocumentsForType("PC").map((doc) => (
-                      <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
-                        <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
-                          <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Optional add-ons */}
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setAutoDetectCerfa(v => !v)}
-                    className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectCerfa ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
-                      }`}
-                  >
-                    <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectCerfa ? "border-violet-500 bg-violet-500" : "border-slate-300"
-                      }`}>
-                      {autoDetectCerfa && <Check className="w-3 h-3 text-white" />}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-slate-800">
-                        {isEn ? "Pre-filled CERFA form" : "Formulaire CERFA pré-rempli"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {isEn ? "Save time: we automatically fill in the administrative fields." : "Gagnez du temps : nous remplissons automatiquement les champs administratifs."}
-                      </p>
-                    </div>
-                    <span className="text-sm font-bold text-violet-600">5€</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAutoDetectPlu(v => !v)}
-                    className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectPlu ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
-                      }`}
-                  >
-                    <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectPlu ? "border-violet-500 bg-violet-500" : "border-slate-300"
-                      }`}>
-                      {autoDetectPlu && <Check className="w-3 h-3 text-white" />}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-slate-800">
-                        {isEn ? "Analysis of the regulations (PLU)" : "Analyse du règlement (PLU)"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet avec le règlement local."}
-                      </p>
-                    </div>
-                    <span className="text-sm font-bold text-violet-600">€15</span>
-                  </button>
-                </div>
-
-                {/* Note */}
-                <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                  <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                    <Info className="w-3.5 h-3.5" />
-                    {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                  </p>
-                  <p className="text-xs text-amber-700">
-                    {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                  </p>
-                  <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                    <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                    <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                  </ul>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setAutoDetectModal(null)}
-                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors"
-                  >
-                    {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAutoDetectModal("payment")}
-                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-purple-500/20 transition-all"
-                  >
-                    {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ── Step 2: Payment ── */}
-            {autoDetectModal === "payment" && (
-              <div className="p-6 space-y-5">
-                {/* Header */}
-                <div className="text-center space-y-1">
-                  <h2 className="text-2xl font-bold text-slate-900">
-                    {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
-                  </h2>
-                  <p className="text-sm text-slate-500">{projectData?.name}</p>
-                </div>
-
-                {/* Package card */}
-                <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                  <div className="bg-violet-50 px-5 py-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-violet-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-bold text-violet-700">
-                        {isEn ? "Complete Urban Planning File" : "Dossier Urbanisme Complet"}
-                      </p>
-                      <p className="text-xs text-violet-500">
-                        {isEn ? "Automatic DP or PC detection" : "Détection automatique DP ou PC"}
-                      </p>
-                    </div>
-                    <span className="text-lg font-bold text-violet-600">AUTO</span>
-                  </div>
-                  <div className="px-5 py-4 space-y-2 border-t border-slate-100">
-                    <div className="flex items-center gap-2 text-sm text-slate-700">
-                      <FileText className="w-4 h-4 text-violet-400" />
-                      <span>{isEn ? "7 regulatory documents" : "7 documents réglementaires"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                      <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
-                      <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                      <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
-                      <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-700">
-                      <Check className="w-4 h-4 text-violet-500" />
-                      <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-700">
-                      <Check className="w-4 h-4 text-violet-500" />
-                      <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-slate-700">
-                      <Check className="w-4 h-4 text-violet-500" />
-                      <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Price */}
-                <div className="rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{isEn ? "Complete file" : "Dossier complet"}</p>
-                    <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
-                    <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
-                  </div>
-                </div>
-
-                {autoDetectError && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
-                    {autoDetectError}
-                  </div>
-                )}
-
-                {/* CTA */}
-                <button
-                  type="button"
-                  disabled={autoDetectPaying}
-                  onClick={async () => {
-                    setAutoDetectPaying(true);
-                    setAutoDetectError(null);
-                    try {
-                      const res = await fetch("/api/stripe/checkout", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) { setAutoDetectError(data.error || "Payment failed"); return; }
-                      if (data.url) window.location.href = data.url;
-                      else if (data.success) router.push(`/projects/${projectId}`);
-                    } catch { setAutoDetectError(isEn ? "Payment failed" : "Paiement échoué"); }
-                    finally { setAutoDetectPaying(false); }
-                  }}
-                  className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
-                >
-                  {autoDetectPaying ? (
-                    <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
-                  ) : (
-                    <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
-                  )}
-                </button>
-
-                <p className="text-center text-xs text-slate-400">
-                  {isEn ? "← Back" : "← Retour"}{" "}
-                  <button
-                    type="button"
-                    onClick={() => setAutoDetectModal("documents")}
-                    className="underline hover:text-slate-600"
-                  >
-                    {isEn ? "to document list" : "à la liste des documents"}
-                  </button>
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-
-      {/* ═══ Quick-Action (DP / PC) Modal ═══ */}
-      {quickModal && (() => {
-        const isDP = quickModal.type === "DP";
-        const accent = isDP
-          ? { bg: "bg-emerald-50", icon: "bg-emerald-100 text-emerald-600", badge: "text-emerald-600", btn: "from-emerald-500 to-teal-500" }
-          : { bg: "bg-purple-50", icon: "bg-purple-100 text-purple-600", badge: "text-purple-600", btn: "from-purple-500 to-violet-600" };
-        const docs = getDocumentsForType(quickModal.type);
-        const typeLabel = isDP
-          ? (isEn ? "Preliminary Declaration" : "Déclaration Préalable")
-          : (isEn ? "Building Permit" : "Permis de Construire");
-        return (
+      {
+        autoDetectModal && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={(e) => { if (e.target === e.currentTarget) setQuickModal(null); }}
+            onClick={(e) => { if (e.target === e.currentTarget) setAutoDetectModal(null); }}
           >
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
 
-              {/* ── Step 0: Who submits? (PC only) ── */}
-              {quickModal.step === "submitter" && (
-                <div className="p-8 space-y-6">
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-bold text-slate-900">
-                      {isEn ? "Who submits the application?" : "Qui dépose la demande ?"}
-                    </h2>
-                    <p className="text-sm text-slate-500">
-                      {isEn
-                        ? "This information determines whether an architect is required for a building permit."
-                        : "Cette information détermine si un architecte est requis pour un permis de construire."}
-                    </p>
-                  </div>
-                  <div className="space-y-3">
-                    <button
-                      type="button"
-                      onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
-                      className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-purple-300 bg-purple-50 text-left hover:bg-purple-100 transition-colors"
-                    >
-                      <span className="font-semibold text-slate-900">{isEn ? "Particular" : "Particulier"}</span>
-                      <div className="w-5 h-5 rounded-full border-2 border-purple-400 shrink-0" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setQuickModal({ ...quickModal, step: "legal-entity" })}
-                      className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-slate-200 bg-white text-left hover:bg-slate-50 transition-colors"
-                    >
-                      <span className="font-semibold text-slate-900 text-sm">
-                        {isEn
-                          ? "Legal entity (real estate investment company, corporation, etc.)"
-                          : "Personne morale (SCI, société, etc.)"}
-                      </span>
-                      <div className="w-5 h-5 rounded-full border-2 border-slate-300 shrink-0" />
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    <button type="button" onClick={() => setQuickModal(null)} className="underline hover:text-slate-600">
-                      {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
-                    </button>
-                  </p>
-                </div>
-              )}
-
-              {/* ── Legal entity warning ── */}
-              {quickModal.step === "legal-entity" && (
-                <div className="p-8 space-y-5 text-center">
-                  <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
-                    <AlertTriangle className="w-8 h-8 text-red-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <h2 className="text-xl font-bold text-red-600">
-                      {isEn ? "Mandatory Architect's Opinion" : "Avis d'architecte obligatoire"}
-                    </h2>
-                    <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 text-left">
-                      {isEn
-                        ? "Legal entities (SCI, companies, etc.) must use an architect for any Building Permit, regardless of the surface area."
-                        : "Les personnes morales (SCI, sociétés, etc.) doivent obligatoirement recourir à un architecte pour tout Permis de Construire, quelle que soit la surface."}
-                    </div>
-                    <p className="text-sm font-bold text-slate-800 pt-1">
-                      {isEn
-                        ? "Our platform does not handle cases requiring the signature of an architect."
-                        : "Notre plateforme ne traite pas les cas nécessitant la signature d'un architecte."}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setQuickModal(null)}
-                    className="px-8 py-3 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-700 transition-colors"
-                  >
-                    {isEn ? "Back to the simulator" : "Retour au simulateur"}
-                  </button>
-                </div>
-              )}
-
-              {/* ── Document list ── */}
-              {quickModal.step === "documents" && (
+              {/* ── Step 1: Document List ── */}
+              {autoDetectModal === "documents" && (
                 <div className="p-6 space-y-5">
+                  {/* Header */}
                   <div className="text-center space-y-2">
-                    <div className={`w-14 h-14 rounded-2xl ${accent.icon} flex items-center justify-center mx-auto`}>
-                      {isDP ? <FileText className="w-7 h-7" /> : <ClipboardCheck className="w-7 h-7" />}
+                    <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                      <FileText className="w-7 h-7 text-violet-600" />
                     </div>
                     <h2 className="text-xl font-bold text-slate-900">
-                      {isEn ? `Generate my ${typeLabel}` : `Générer ma ${typeLabel}`}
+                      {isEn ? "Complete list of potential parts" : "Liste complète des pièces potentielles"}
                     </h2>
                     <p className="text-sm text-slate-500">
                       {isEn
@@ -1675,12 +1241,12 @@ export default function AuthorizationPage({
                     </p>
                   </div>
 
-                  {/* Documents grid */}
+                  {/* Documents — show all PC documents (most complete set) */}
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <div className="grid grid-cols-2 gap-px bg-slate-100">
-                      {docs.map((doc) => (
+                      {getDocumentsForType("PC").map((doc) => (
                         <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
-                          <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
+                          <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
                           <div>
                             <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
                             <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
@@ -1694,43 +1260,43 @@ export default function AuthorizationPage({
                   <div className="space-y-2">
                     <button
                       type="button"
-                      onClick={() => setQuickModalCerfa(v => !v)}
-                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalCerfa ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setAutoDetectCerfa(v => !v)}
+                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectCerfa ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
                         }`}
                     >
-                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalCerfa ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectCerfa ? "border-violet-500 bg-violet-500" : "border-slate-300"
                         }`}>
-                        {quickModalCerfa && <Check className="w-3 h-3 text-white" />}
+                        {autoDetectCerfa && <Check className="w-3 h-3 text-white" />}
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-slate-800">
                           {isEn ? "Pre-filled CERFA form" : "Formulaire CERFA pré-rempli"}
                         </p>
                         <p className="text-xs text-slate-500">
-                          {isEn ? "Save time: we automatically fill in the administrative fields." : "Gain de temps : nous remplissons automatiquement les champs administratifs."}
+                          {isEn ? "Save time: we automatically fill in the administrative fields." : "Gagnez du temps : nous remplissons automatiquement les champs administratifs."}
                         </p>
                       </div>
-                      <span className={`text-sm font-bold ${accent.badge}`}>5€</span>
+                      <span className="text-sm font-bold text-violet-600">5€</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => setQuickModalPlu(v => !v)}
-                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalPlu ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                      onClick={() => setAutoDetectPlu(v => !v)}
+                      className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${autoDetectPlu ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white hover:bg-slate-50"
                         }`}
                     >
-                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalPlu ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${autoDetectPlu ? "border-violet-500 bg-violet-500" : "border-slate-300"
                         }`}>
-                        {quickModalPlu && <Check className="w-3 h-3 text-white" />}
+                        {autoDetectPlu && <Check className="w-3 h-3 text-white" />}
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-slate-800">
-                          {isEn ? "Analysis of the regulations (PLU)" : "Analyse de la réglementation (PLU)"}
+                          {isEn ? "Analysis of the regulations (PLU)" : "Analyse du règlement (PLU)"}
                         </p>
                         <p className="text-xs text-slate-500">
-                          {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet aux règles locales."}
+                          {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet avec le règlement local."}
                         </p>
                       </div>
-                      <span className={`text-sm font-bold ${accent.badge}`}>€15</span>
+                      <span className="text-sm font-bold text-violet-600">€15</span>
                     </button>
                   </div>
 
@@ -1749,29 +1315,30 @@ export default function AuthorizationPage({
                     </ul>
                   </div>
 
-                  {/* CTA */}
-                  <button
-                    type="button"
-                    onClick={() => setQuickModal({ ...quickModal, step: "payment" })}
-                    className={`w-full py-3 rounded-xl bg-gradient-to-r ${accent.btn} text-white font-semibold hover:shadow-lg transition-all`}
-                  >
-                    {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
-                  </button>
-                  <p className="text-center text-xs text-slate-400">
+                  {/* Actions */}
+                  <div className="flex gap-3">
                     <button
                       type="button"
-                      onClick={() => setQuickModal(isDP ? null : { ...quickModal, step: "submitter" })}
-                      className="underline hover:text-slate-600"
+                      onClick={() => setAutoDetectModal(null)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors"
                     >
-                      {isEn ? "← Back" : "← Retour"}
+                      {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
                     </button>
-                  </p>
+                    <button
+                      type="button"
+                      onClick={() => setAutoDetectModal("payment")}
+                      className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-purple-500/20 transition-all"
+                    >
+                      {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* ── Payment ── */}
-              {quickModal.step === "payment" && (
+              {/* ── Step 2: Payment ── */}
+              {autoDetectModal === "payment" && (
                 <div className="p-6 space-y-5">
+                  {/* Header */}
                   <div className="text-center space-y-1">
                     <h2 className="text-2xl font-bold text-slate-900">
                       {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
@@ -1781,22 +1348,24 @@ export default function AuthorizationPage({
 
                   {/* Package card */}
                   <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                    <div className={`${accent.bg} px-5 py-4 flex items-center gap-3`}>
-                      <div className={`w-10 h-10 rounded-xl ${accent.icon} flex items-center justify-center`}>
-                        {isDP ? <FileText className="w-5 h-5" /> : <ClipboardCheck className="w-5 h-5" />}
+                    <div className="bg-violet-50 px-5 py-4 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+                        <FileText className="w-5 h-5 text-violet-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-bold text-slate-900">{typeLabel}</p>
-                        <p className={`text-xs ${accent.badge}`}>
-                          {isDP ? (isEn ? "Complete DP file" : "Dossier DP complet") : (isEn ? "Complete PC file" : "Dossier PC complet")}
+                        <p className="text-sm font-bold text-violet-700">
+                          {isEn ? "Complete Urban Planning File" : "Dossier Urbanisme Complet"}
+                        </p>
+                        <p className="text-xs text-violet-500">
+                          {isEn ? "Automatic DP or PC detection" : "Détection automatique DP ou PC"}
                         </p>
                       </div>
-                      <span className={`text-lg font-bold ${accent.badge}`}>{quickModal.type}</span>
+                      <span className="text-lg font-bold text-violet-600">AUTO</span>
                     </div>
                     <div className="px-5 py-4 space-y-2 border-t border-slate-100">
                       <div className="flex items-center gap-2 text-sm text-slate-700">
-                        <FileText className={`w-4 h-4 ${accent.badge}`} />
-                        <span>{isDP ? "9" : "12"} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
+                        <FileText className="w-4 h-4 text-violet-400" />
+                        <span>{isEn ? "7 regulatory documents" : "7 documents réglementaires"}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
                         <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
@@ -1807,15 +1376,15 @@ export default function AuthorizationPage({
                         <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-700">
-                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <Check className="w-4 h-4 text-violet-500" />
                         <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-700">
-                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <Check className="w-4 h-4 text-violet-500" />
                         <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-700">
-                        <Check className={`w-4 h-4 ${accent.badge}`} />
+                        <Check className="w-4 h-4 text-violet-500" />
                         <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
                       </div>
                     </div>
@@ -1833,34 +1402,40 @@ export default function AuthorizationPage({
                     </div>
                   </div>
 
-                  {quickModalError && (
+                  {autoDetectError && (
                     <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
-                      {quickModalError}
+                      {autoDetectError}
                     </div>
                   )}
 
+                  {/* CTA */}
                   <button
                     type="button"
-                    disabled={quickModalPaying}
+                    disabled={autoDetectPaying}
                     onClick={async () => {
-                      setQuickModalPaying(true);
-                      setQuickModalError(null);
+                      setAutoDetectPaying(true);
+                      setAutoDetectError(null);
                       try {
                         const res = await fetch("/api/stripe/checkout", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                          body: JSON.stringify({
+                            projectId,
+                            type: "credits",
+                            packageId: "credits-10",
+                            successUrl: `/projects/${projectId}/payment?success=true&returnTo=project-description`,
+                          }),
                         });
                         const data = await res.json();
-                        if (!res.ok) { setQuickModalError(data.error || "Payment failed"); return; }
+                        if (!res.ok) { setAutoDetectError(data.error || "Payment failed"); return; }
                         if (data.url) window.location.href = data.url;
-                        else if (data.success) router.push(`/projects/${projectId}`);
-                      } catch { setQuickModalError(isEn ? "Payment failed" : "Paiement échoué"); }
-                      finally { setQuickModalPaying(false); }
+                        else if (data.success) router.push(`/projects/${projectId}/project-description`);
+                      } catch { setAutoDetectError(isEn ? "Payment failed" : "Paiement échoué"); }
+                      finally { setAutoDetectPaying(false); }
                     }}
                     className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
                   >
-                    {quickModalPaying ? (
+                    {autoDetectPaying ? (
                       <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
                     ) : (
                       <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
@@ -1868,23 +1443,343 @@ export default function AuthorizationPage({
                   </button>
 
                   <p className="text-center text-xs text-slate-400">
+                    {isEn ? "← Back" : "← Retour"}{" "}
                     <button
                       type="button"
-                      onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
+                      onClick={() => setAutoDetectModal("documents")}
                       className="underline hover:text-slate-600"
                     >
-                      {isEn ? "← Back to document list" : "← Retour à la liste des documents"}
+                      {isEn ? "to document list" : "à la liste des documents"}
                     </button>
                   </p>
                 </div>
               )}
             </div>
           </div>
-        );
-      })()}
+        )
+      }
 
 
-    </Navigation>
+      {/* ═══ Quick-Action (DP / PC) Modal ═══ */}
+      {
+        quickModal && (() => {
+          const isDP = quickModal.type === "DP";
+          const accent = isDP
+            ? { bg: "bg-emerald-50", icon: "bg-emerald-100 text-emerald-600", badge: "text-emerald-600", btn: "from-emerald-500 to-teal-500" }
+            : { bg: "bg-purple-50", icon: "bg-purple-100 text-purple-600", badge: "text-purple-600", btn: "from-purple-500 to-violet-600" };
+          const docs = getDocumentsForType(quickModal.type);
+          const typeLabel = isDP
+            ? (isEn ? "Preliminary Declaration" : "Déclaration Préalable")
+            : (isEn ? "Building Permit" : "Permis de Construire");
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+              onClick={(e) => { if (e.target === e.currentTarget) setQuickModal(null); }}
+            >
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+
+                {/* ── Step 0: Who submits? (PC only) ── */}
+                {quickModal.step === "submitter" && (
+                  <div className="p-8 space-y-6">
+                    <div className="space-y-1">
+                      <h2 className="text-2xl font-bold text-slate-900">
+                        {isEn ? "Who submits the application?" : "Qui dépose la demande ?"}
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        {isEn
+                          ? "This information determines whether an architect is required for a building permit."
+                          : "Cette information détermine si un architecte est requis pour un permis de construire."}
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
+                        className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-purple-300 bg-purple-50 text-left hover:bg-purple-100 transition-colors"
+                      >
+                        <span className="font-semibold text-slate-900">{isEn ? "Particular" : "Particulier"}</span>
+                        <div className="w-5 h-5 rounded-full border-2 border-purple-400 shrink-0" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickModal({ ...quickModal, step: "legal-entity" })}
+                        className="w-full flex items-center justify-between px-5 py-4 rounded-xl border-2 border-slate-200 bg-white text-left hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="font-semibold text-slate-900 text-sm">
+                          {isEn
+                            ? "Legal entity (real estate investment company, corporation, etc.)"
+                            : "Personne morale (SCI, société, etc.)"}
+                        </span>
+                        <div className="w-5 h-5 rounded-full border-2 border-slate-300 shrink-0" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      <button type="button" onClick={() => setQuickModal(null)} className="underline hover:text-slate-600">
+                        {isEn ? "← Back to the simulator" : "← Retour au simulateur"}
+                      </button>
+                    </p>
+                  </div>
+                )}
+
+                {/* ── Legal entity warning ── */}
+                {quickModal.step === "legal-entity" && (
+                  <div className="p-8 space-y-5 text-center">
+                    <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+                      <AlertTriangle className="w-8 h-8 text-red-500" />
+                    </div>
+                    <div className="space-y-2">
+                      <h2 className="text-xl font-bold text-red-600">
+                        {isEn ? "Mandatory Architect's Opinion" : "Avis d'architecte obligatoire"}
+                      </h2>
+                      <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 text-left">
+                        {isEn
+                          ? "Legal entities (SCI, companies, etc.) must use an architect for any Building Permit, regardless of the surface area."
+                          : "Les personnes morales (SCI, sociétés, etc.) doivent obligatoirement recourir à un architecte pour tout Permis de Construire, quelle que soit la surface."}
+                      </div>
+                      <p className="text-sm font-bold text-slate-800 pt-1">
+                        {isEn
+                          ? "Our platform does not handle cases requiring the signature of an architect."
+                          : "Notre plateforme ne traite pas les cas nécessitant la signature d'un architecte."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal(null)}
+                      className="px-8 py-3 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-700 transition-colors"
+                    >
+                      {isEn ? "Back to the simulator" : "Retour au simulateur"}
+                    </button>
+                  </div>
+                )}
+
+                {/* ── Document list ── */}
+                {quickModal.step === "documents" && (
+                  <div className="p-6 space-y-5">
+                    <div className="text-center space-y-2">
+                      <div className={`w-14 h-14 rounded-2xl ${accent.icon} flex items-center justify-center mx-auto`}>
+                        {isDP ? <FileText className="w-7 h-7" /> : <ClipboardCheck className="w-7 h-7" />}
+                      </div>
+                      <h2 className="text-xl font-bold text-slate-900">
+                        {isEn ? `Generate my ${typeLabel}` : `Générer ma ${typeLabel}`}
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        {isEn
+                          ? "Here is the list of required parts. Select the additional options:"
+                          : "Voici la liste des pièces requises. Sélectionnez les options supplémentaires :"}
+                      </p>
+                    </div>
+
+                    {/* Documents grid */}
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="grid grid-cols-2 gap-px bg-slate-100">
+                        {docs.map((doc) => (
+                          <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                            <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
+                            <div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                              <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Optional add-ons */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setQuickModalCerfa(v => !v)}
+                        className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalCerfa ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalCerfa ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                          }`}>
+                          {quickModalCerfa && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-slate-800">
+                            {isEn ? "Pre-filled CERFA form" : "Formulaire CERFA pré-rempli"}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {isEn ? "Save time: we automatically fill in the administrative fields." : "Gain de temps : nous remplissons automatiquement les champs administratifs."}
+                          </p>
+                        </div>
+                        <span className={`text-sm font-bold ${accent.badge}`}>5€</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickModalPlu(v => !v)}
+                        className={`w-full rounded-xl border-2 px-4 py-3 flex items-center gap-3 text-left transition-colors ${quickModalPlu ? "border-purple-400 bg-purple-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${quickModalPlu ? "border-purple-500 bg-purple-500" : "border-slate-300"
+                          }`}>
+                          {quickModalPlu && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-slate-800">
+                            {isEn ? "Analysis of the regulations (PLU)" : "Analyse de la réglementation (PLU)"}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {isEn ? "Verification of your project's compliance with local regulations." : "Vérification de la conformité de votre projet aux règles locales."}
+                          </p>
+                        </div>
+                        <span className={`text-sm font-bold ${accent.badge}`}>€15</span>
+                      </button>
+                    </div>
+
+                    {/* Note */}
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                      <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                        <Info className="w-3.5 h-3.5" />
+                        {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                      </p>
+                      <p className="text-xs text-amber-700">
+                        {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                      </p>
+                      <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                        <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                        <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                      </ul>
+                    </div>
+
+                    {/* CTA */}
+                    <button
+                      type="button"
+                      onClick={() => setQuickModal({ ...quickModal, step: "payment" })}
+                      className={`w-full py-3 rounded-xl bg-gradient-to-r ${accent.btn} text-white font-semibold hover:shadow-lg transition-all`}
+                    >
+                      {isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}
+                    </button>
+                    <p className="text-center text-xs text-slate-400">
+                      <button
+                        type="button"
+                        onClick={() => setQuickModal(isDP ? null : { ...quickModal, step: "submitter" })}
+                        className="underline hover:text-slate-600"
+                      >
+                        {isEn ? "← Back" : "← Retour"}
+                      </button>
+                    </p>
+                  </div>
+                )}
+
+                {/* ── Payment ── */}
+                {quickModal.step === "payment" && (
+                  <div className="p-6 space-y-5">
+                    <div className="text-center space-y-1">
+                      <h2 className="text-2xl font-bold text-slate-900">
+                        {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
+                      </h2>
+                      <p className="text-sm text-slate-500">{projectData?.name}</p>
+                    </div>
+
+                    {/* Package card */}
+                    <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                      <div className={`${accent.bg} px-5 py-4 flex items-center gap-3`}>
+                        <div className={`w-10 h-10 rounded-xl ${accent.icon} flex items-center justify-center`}>
+                          {isDP ? <FileText className="w-5 h-5" /> : <ClipboardCheck className="w-5 h-5" />}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-slate-900">{typeLabel}</p>
+                          <p className={`text-xs ${accent.badge}`}>
+                            {isDP ? (isEn ? "Complete DP file" : "Dossier DP complet") : (isEn ? "Complete PC file" : "Dossier PC complet")}
+                          </p>
+                        </div>
+                        <span className={`text-lg font-bold ${accent.badge}`}>{quickModal.type}</span>
+                      </div>
+                      <div className="px-5 py-4 space-y-2 border-t border-slate-100">
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <FileText className={`w-4 h-4 ${accent.badge}`} />
+                          <span>{isDP ? "9" : "12"} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                          <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                          <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <Check className={`w-4 h-4 ${accent.badge}`} />
+                          <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <Check className={`w-4 h-4 ${accent.badge}`} />
+                          <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <Check className={`w-4 h-4 ${accent.badge}`} />
+                          <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Price */}
+                    <div className="rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{isEn ? "Complete file" : "Dossier complet"}</p>
+                        <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
+                        <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
+                      </div>
+                    </div>
+
+                    {quickModalError && (
+                      <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
+                        {quickModalError}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={quickModalPaying}
+                      onClick={async () => {
+                        setQuickModalPaying(true);
+                        setQuickModalError(null);
+                        try {
+                          const res = await fetch("/api/stripe/checkout", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) { setQuickModalError(data.error || "Payment failed"); return; }
+                          if (data.url) window.location.href = data.url;
+                          else if (data.success) router.push(`/projects/${projectId}`);
+                        } catch { setQuickModalError(isEn ? "Payment failed" : "Paiement échoué"); }
+                        finally { setQuickModalPaying(false); }
+                      }}
+                      className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
+                    >
+                      {quickModalPaying ? (
+                        <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
+                      ) : (
+                        <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
+                      )}
+                    </button>
+
+                    <p className="text-center text-xs text-slate-400">
+                      <button
+                        type="button"
+                        onClick={() => setQuickModal({ ...quickModal, step: "documents" })}
+                        className="underline hover:text-slate-600"
+                      >
+                        {isEn ? "← Back to document list" : "← Retour à la liste des documents"}
+                      </button>
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()
+      }
+
+
+    </Navigation >
   );
 }
 

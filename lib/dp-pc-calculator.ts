@@ -15,16 +15,51 @@ export type ProjectTypeChoice =
 
 export type SubmitterType = "individual" | "company";
 
-/** Floor area is estimated as: ground × levels × (1 - 0.21) ≈ ground × levels × 0.79 */
-export const FLOOR_AREA_COEFFICIENT = 0.79;
+/**
+ * Surface de Plancher coefficients per level type (French R.111-22 / Code de l'urbanisme).
+ *
+ * Based on legal definition:
+ *  - Only areas with ceiling height > 1.80m are counted
+ *  - Measured from interior faces of walls (~5% deduction for wall thickness)
+ *  - Garages, parking, technical rooms are EXCLUDED
+ *  - Attic (combles) with ceiling ≤ 1.80m are EXCLUDED
+ *  - Convertible attic (aménageable) with partial height > 1.80m: ~60% counted
+ *
+ * Coefficients represent: (usable floor area with ht > 1.80m) / (ground footprint)
+ *  - RDC (ground floor, 1 level): 0.95 — nearly full footprint, only wall deduction
+ *  - R+1 (2 levels): 0.90 per level — slight reduction for stairwell openings
+ *  - R+2+ (3 levels): 0.85 per level — attic/combles reduce effective area
+ */
+export const FLOOR_AREA_COEFFICIENTS: Record<number, number> = {
+  1: 0.95, // RDC only — full ceiling height, minimal exclusions
+  2: 0.90, // RDC + R+1 — stairwell opening deducted
+  3: 0.82, // RDC + R+1 + combles/R+2 — attic slopes reduce usable area
+};
+
+/** Default coefficient for levels beyond 3 */
+export const FLOOR_AREA_COEFFICIENT_DEFAULT = 0.80;
 
 /**
- * Estimate created floor area from ground area and number of levels.
- * Exclusions (heights < 1.80 m, stair openings) are approximated by ~21% reduction.
+ * Estimate created Surface de Plancher from ground footprint and number of levels.
+ *
+ * Legal basis (Art. R.111-22 Code de l'urbanisme):
+ *  - Sum of floor areas of all levels with ceiling height > 1.80m
+ *  - Measured from interior faces of walls
+ *  - Excludes: garages, parking, areas with ht ≤ 1.80m, technical rooms
+ *
+ * @param groundAreaM2 - Ground footprint (emprise au sol) in m²
+ * @param numberOfLevels - Number of levels (1 = RDC, 2 = RDC+R+1, 3 = RDC+R+1+combles)
+ * @param isGarage - If true, returns 0 (garages excluded from surface de plancher)
  */
-export function estimateFloorAreaCreated(groundAreaM2: number, numberOfLevels: number): number {
+export function estimateFloorAreaCreated(
+  groundAreaM2: number,
+  numberOfLevels: number,
+  isGarage = false
+): number {
   if (groundAreaM2 <= 0 || numberOfLevels < 1) return 0;
-  return Math.round(groundAreaM2 * numberOfLevels * FLOOR_AREA_COEFFICIENT);
+  if (isGarage) return 0; // Garages are excluded from surface de plancher
+  const coeff = FLOOR_AREA_COEFFICIENTS[numberOfLevels] ?? FLOOR_AREA_COEFFICIENT_DEFAULT;
+  return Math.round(groundAreaM2 * numberOfLevels * coeff);
 }
 
 export type DeterminationType = "NONE" | "DP" | "PC" | "ARCHITECT_REQUIRED" | "REVIEW";
