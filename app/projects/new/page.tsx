@@ -48,6 +48,11 @@ export default function NewProjectPage() {
     const [showManualPluEdit, setShowManualPluEdit] = useState(false);
     const [zoneFeatures, setZoneFeatures] = useState<unknown[]>([]);
     const [protectedAreas, setProtectedAreas] = useState<{ name: string; type: string }[]>([]);
+    const [heritageSummary, setHeritageSummary] = useState<{
+        inHeritageZone: boolean; requiresABF: boolean;
+        nearestMonument: { name: string; distance: number | null; type: "classé" | "inscrit" } | null;
+        heritageTypes: string[]; detectedZones: { type: string; name: string; distance: number | null }[];
+    } | null>(null);
     const [loadingAddress, setLoadingAddress] = useState(false);
     const [loadingCadastre, setLoadingCadastre] = useState(false);
     const [loadingPlu, setLoadingPlu] = useState(false);
@@ -116,7 +121,7 @@ export default function NewProjectPage() {
         setNewAddress(addr.label);
         setAddressSuggestions([]);
         setLoadingCadastre(true); setLoadingPlu(true); setLoadingProtectedAreas(true);
-        setCadastreError(null); setParcels([]); setPluInfo(null); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]);
+        setCadastreError(null); setParcels([]); setPluInfo(null); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]); setHeritageSummary(null);
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
@@ -132,7 +137,7 @@ export default function NewProjectPage() {
 
         // 3) PROTECTED AREAS
         fetch("/api/protected-areas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords }) })
-            .then(async (r) => { if (!r.ok) return; const d = await r.json(); setProtectedAreas(Array.isArray(d.areas) ? d.areas : []); })
+            .then(async (r) => { if (!r.ok) return; const d = await r.json(); setProtectedAreas(Array.isArray(d.areas) ? d.areas : []); if (d.heritageSummary) setHeritageSummary(d.heritageSummary); })
             .catch(() => { })
             .finally(() => setLoadingProtectedAreas(false));
     }, []);
@@ -334,13 +339,40 @@ export default function NewProjectPage() {
                                                             ["AC1", "AC2", "AC4"].some((c) => (i.categorie ?? "").startsWith(c))
                                                     );
                                                     if (!hasHeritage) return null;
+                                                    const nm = heritageSummary?.nearestMonument;
                                                     return (
                                                         <div className="rounded-lg bg-red-50 border border-red-200 p-2 space-y-1">
                                                             <div className="flex items-center gap-1.5">
                                                                 <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
                                                                 <p className="text-xs font-bold text-red-700">{t("newProj.heritageProtected")}</p>
                                                             </div>
+                                                            {nm && (
+                                                                <div className="pl-5 space-y-0.5">
+                                                                    <p className="text-[11px] text-red-700 font-semibold truncate">
+                                                                        🏛 {nm.name}
+                                                                    </p>
+                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                        {nm.distance != null && (
+                                                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">
+                                                                                à {nm.distance}m
+                                                                            </span>
+                                                                        )}
+                                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">
+                                                                            {nm.type === "classé" ? "Classé" : "Inscrit"}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                             <p className="text-[10px] text-red-600 pl-5">{t("newProj.heritageAbfNote")}</p>
+                                                            {heritageSummary && heritageSummary.heritageTypes.length > 0 && (
+                                                                <div className="flex gap-1 pl-5 flex-wrap mt-0.5">
+                                                                    {heritageSummary.heritageTypes.map((ht) => (
+                                                                        <span key={ht} className="text-[8px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-500 font-semibold">
+                                                                            {ht.replace(/_/g, " ")}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
                                                 })()}

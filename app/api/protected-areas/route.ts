@@ -69,9 +69,11 @@ async function fetchGpuByGeom(
 /** Determine if a SUP/prescription feature indicates ABF (e.g. AC1 = Monuments historiques). */
 function isAbfRelated(props: Record<string, unknown> | undefined): boolean {
   if (!props) return false;
-  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
-  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
-  if (cat.includes("AC1") || cat.includes("MONUMENT") || lib.includes("monument historique") || lib.includes("abf") || lib.includes("site classé") || lib.includes("secteur sauvegardé")) return true;
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.suptype ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nomsuplitt ?? props.nom ?? "").toLowerCase();
+  const typeass = String(props.typeass ?? "").toLowerCase();
+  if (cat.startsWith("AC1") || cat.includes("MONUMENT") || typeass.includes("abords")) return true;
+  if (lib.includes("monument historique") || lib.includes("abf") || lib.includes("site classé") || lib.includes("secteur sauvegardé")) return true;
   return false;
 }
 
@@ -90,11 +92,26 @@ function isRiskRelated(props: Record<string, unknown> | undefined): boolean {
 /** Detect heritage/patrimoine items that aren't caught by isAbfRelated */
 function isHeritageRelated(props: Record<string, unknown> | undefined): boolean {
   if (!props) return false;
-  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
-  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.suptype ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nomsuplitt ?? props.nom ?? "").toLowerCase();
+  const typeass = String(props.typeass ?? "").toLowerCase();
   if (cat.startsWith("AC2") || cat.startsWith("AC4")) return true;
+  if (typeass.includes("abords") || typeass.includes("patrimoin")) return true;
   if (lib.includes("patrimonial") || lib.includes("patrimoine") || lib.includes("site patrimonial") || lib.includes("site inscrit") || lib.includes("site classé") || lib.includes("périmètre de protection") || lib.includes("abords")) return true;
   return false;
+}
+
+/** Haversine distance in metres between two lat/lng points. */
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 export async function POST(request: NextRequest) {
@@ -120,8 +137,6 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Run ALL external API calls in PARALLEL ──────────────────────────
-    // Previously these ran sequentially (prescriptions loop, SUP loop, then
-    // Monuments, Géorisques, SPR one by one). Now they all fire at once.
     const [
       prescSurfResult,
       prescLinResult,
@@ -129,31 +144,19 @@ export async function POST(request: NextRequest) {
       supSResult,
       supLResult,
       supPResult,
-      mhResult,
       riskResult,
-      sprResult,
     ] = await Promise.allSettled([
       // GPU prescription layers
       fetchGpuByGeom("prescription-surf", lng, lat),
       fetchGpuByGeom("prescription-lin", lng, lat),
       fetchGpuByGeom("prescription-pct", lng, lat),
-      // GPU SUP layers
+      // GPU SUP layers — these contain AC1 (MH perimeters), AC2, AC4, PM1, etc.
       fetchGpuByGeom("assiette-sup-s", lng, lat),
       fetchGpuByGeom("assiette-sup-l", lng, lat),
       fetchGpuByGeom("assiette-sup-p", lng, lat),
-      // Monuments Historiques
-      fetch(
-        `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/liste-des-immeubles-proteges-au-titre-des-monuments-historiques/records?where=within_distance(geolocalisation%2C%20geom'POINT(${lng}%20${lat})'%2C%20500m)&limit=10`,
-        { signal: AbortSignal.timeout(API_TIMEOUT) }
-      ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
       // Géorisques
       fetch(
         `https://georisques.gouv.fr/api/v1/resultats_rapport_risques?latlon=${lat},${lng}`,
-        { signal: AbortSignal.timeout(API_TIMEOUT) }
-      ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
-      // Sites Patrimoniaux Remarquables
-      fetch(
-        `https://data.culture.gouv.fr/api/explore/v2.1/catalog/datasets/sites-patrimoniaux-remarquables/records?where=within_distance(geo_point_2d%2C%20geom'POINT(${lng}%20${lat})'%2C%201000m)&limit=5`,
         { signal: AbortSignal.timeout(API_TIMEOUT) }
       ).then(async r => r.ok ? JSON.parse(await r.text()) : null).catch(() => null),
     ]);
@@ -235,68 +238,25 @@ export async function POST(request: NextRequest) {
       const result = supResults[i];
       if (result.status !== "fulfilled") continue;
       const features = result.value as unknown[];
-      for (const f of features.slice(0, 10)) {
+      for (const f of features.slice(0, 15)) {
         const props = (f as { properties?: Record<string, unknown> })?.properties ?? {};
-        const name = (props.libelle ?? props.LIBELLE ?? props.nom ?? props.type_sup ?? supPaths[i]) as string;
-        if (!name) continue;
-        const supCat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase().trim();
-        if (isAbfRelated(props)) {
-          addArea({
-            type: "ABF",
-            name: `SUP – ${String(name)}`,
-            description: "Public utility easement (SUP) related to heritage or monuments. ABF approval may be required.",
-            distance: null,
-            constraints: ["ABF approval may be required", "SUP imposes constraints; verify with mairie"],
-            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-            severity: "high",
-            categorie: supCat || undefined,
-          });
-        } else if (isRiskRelated(props)) {
-          addArea({
-            type: "FLOOD_ZONE",
-            name: `SUP – ${String(name)}`,
-            description: "Servitude de risque naturel/technologique. Des contraintes spécifiques s'appliquent.",
-            distance: null,
-            constraints: ["Construction may be restricted", "Check PPRI/PPRT rules"],
-            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-            severity: "high",
-            categorie: supCat || undefined,
-          });
-        } else if (isHeritageRelated(props)) {
-          addArea({
-            type: "HERITAGE",
-            name: `SUP – ${String(name)}`,
-            description: "Servitude patrimoine. Des obligations spécifiques peuvent s'appliquer.",
-            distance: null,
-            constraints: ["Heritage protection constraints may apply", "Check with local authorities"],
-            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-            severity: "high",
-            categorie: supCat || undefined,
-          });
-        } else {
-          addArea({
-            type: "SUP",
-            name: String(name),
-            description: "Servitude d'utilité publique (SUP) applies to this parcel. Verify with your mairie.",
-            distance: null,
-            constraints: ["Check PLU document for specific rules", "SUP may impose additional constraints"],
-            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
-            severity: "medium",
-            categorie: supCat || undefined,
-          });
-        }
-      }
-    }
+        // GPU SUP fields: nomsuplitt = monument name, suptype = AC1/PM1/etc, typeass = perimeter type
+        const rawName = (props.libelle ?? props.LIBELLE ?? props.nomsuplitt ?? props.nom ?? props.type_sup ?? supPaths[i]) as string;
+        if (!rawName) continue;
+        const supCat = String(props.categorie ?? props.CATEGORIE ?? props.suptype ?? props.type_sup ?? "").toUpperCase().trim();
+        const monumentName = String(props.nomsuplitt ?? "").trim();
+        const typeass = String(props.typeass ?? "").toLowerCase();
 
-    // ── Process Monuments Historiques ──────────────────────────────────
-    if (mhResult.status === "fulfilled" && mhResult.value) {
-      const mhData = mhResult.value as { results?: Array<Record<string, unknown>> };
-      if (mhData.results && mhData.results.length > 0) {
-        for (const mh of mhData.results) {
-          areas.push({
+        if (isAbfRelated(props)) {
+          // AC1 = Monument Historique perimeter — use the actual monument name
+          const displayName = monumentName || rawName;
+          const isPerimetre = typeass.includes("abords") || typeass.includes("périmètre");
+          addArea({
             type: "ABF",
-            name: `Monument Historique: ${mh.tico || mh.appellation_courante || "Listed building"}`,
-            description: `Located within 500m of a listed historical monument. Approval from the Architecte des Bâtiments de France (ABF) is required.`,
+            name: `Monument Historique: ${displayName}`,
+            description: isPerimetre
+              ? `Périmètre des abords de ${displayName}. Approval from the Architecte des Bâtiments de France (ABF) is required for any modification.`
+              : `Monument Historique — ${displayName}. ABF approval required.`,
             distance: null,
             constraints: [
               "ABF approval required for any exterior modification",
@@ -307,6 +267,41 @@ export async function POST(request: NextRequest) {
             ],
             sourceUrl: "https://www.culture.gouv.fr/Thematiques/Monuments-Sites",
             severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else if (isRiskRelated(props)) {
+          addArea({
+            type: "FLOOD_ZONE",
+            name: `SUP – ${String(rawName)}`,
+            description: "Servitude de risque naturel/technologique. Des contraintes spécifiques s'appliquent.",
+            distance: null,
+            constraints: ["Construction may be restricted", "Check PPRI/PPRT rules"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else if (isHeritageRelated(props)) {
+          const displayName = monumentName || rawName;
+          addArea({
+            type: "HERITAGE",
+            name: `Patrimoine: ${displayName}`,
+            description: `Zone de patrimoine protégé — ${displayName}. Des obligations spécifiques peuvent s'appliquer.`,
+            distance: null,
+            constraints: ["Heritage protection constraints may apply", "Check with ABF or local authorities"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else {
+          addArea({
+            type: "SUP",
+            name: `SUP – ${String(rawName)}`,
+            description: "Servitude d'utilité publique. Des obligations spécifiques peuvent s'appliquer.",
+            distance: null,
+            constraints: ["Check with local authorities for specific requirements"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "medium",
+            categorie: supCat || undefined,
           });
         }
       }
@@ -344,31 +339,6 @@ export async function POST(request: NextRequest) {
             ],
             sourceUrl: "https://www.georisques.gouv.fr/",
             severity: "medium",
-          });
-        }
-      }
-    }
-
-    // ── Process Sites Patrimoniaux Remarquables ───────────────────────
-    if (sprResult.status === "fulfilled" && sprResult.value) {
-      const siteData = sprResult.value as { results?: Array<Record<string, unknown>> };
-      if (siteData.results && siteData.results.length > 0) {
-        for (const site of siteData.results) {
-          areas.push({
-            type: "HERITAGE",
-            name: `Site Patrimonial Remarquable: ${site.nom || "Heritage site"}`,
-            description:
-              "Located within or near a Site Patrimonial Remarquable (SPR). Enhanced architectural controls apply.",
-            distance: null,
-            constraints: [
-              "ABF approval required",
-              "Strict architectural guidelines apply",
-              "Material palette may be restricted",
-              "Demolition may require authorization",
-              "Specific urban planning rules (PVAP/PSMV) apply",
-            ],
-            sourceUrl: null,
-            severity: "high",
           });
         }
       }
@@ -421,9 +391,50 @@ export async function POST(request: NextRequest) {
       severity: "info",
     });
 
+    // ── Build heritage summary ─────────────────────────────────────────
+    const heritageAreas = areas.filter(
+      (a) => a.type === "ABF" || a.type === "HERITAGE"
+    );
+    // Find nearest monument — works for both MH API results and GPU AC1 SUPs
+    const nearestMH = heritageAreas
+      .filter((a) => a.type === "ABF" && a.name.startsWith("Monument Historique"))
+      .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))[0] ?? null;
+
+    const heritageTypes = [...new Set(heritageAreas.map((a) => {
+      const cat = (a.categorie ?? "").toUpperCase();
+      if (cat.startsWith("AC1") || a.name.includes("Monument Historique")) return "MH_PERIMETRE";
+      if (cat.startsWith("AC2")) return "SITE_CLASSE";
+      if (cat.startsWith("AC4")) return "ZPPA";
+      if (a.name.includes("Site Patrimonial Remarquable")) return "SPR";
+      if (a.name.includes("Site Classé")) return "SITE_CLASSE";
+      if (a.name.includes("Site Inscrit")) return "SITE_INSCRIT";
+      return a.type;
+    }))].filter(Boolean);
+
+    const heritageSummary = {
+      inHeritageZone: heritageAreas.length > 0,
+      requiresABF: heritageAreas.some(
+        (a) => a.type === "ABF" || a.name.includes("ABF") || a.name.includes("Monument Historique") || a.name.includes("Site Patrimonial")
+      ),
+      nearestMonument: nearestMH
+        ? {
+            name: nearestMH.name.replace(/^Monument Historique:\s*/, ""),
+            distance: nearestMH.distance,
+            type: "classé" as const,
+          }
+        : null,
+      heritageTypes,
+      detectedZones: heritageAreas.map((a) => ({
+        type: a.type,
+        name: a.name,
+        distance: a.distance,
+      })),
+    };
+
     return NextResponse.json({
       success: true,
       areas,
+      heritageSummary,
       coordinates: { lat, lng },
       citycode,
       totalProtections: areas.filter((a) => a.type !== "INFO").length,
