@@ -117,6 +117,8 @@ export interface ClassifiedProtection {
     label: string;
     /** Whether this was detected as critical */
     isCritical: boolean;
+    /** Number of duplicate items merged into this entry (≥ 1) */
+    count: number;
 }
 
 export interface ProcessedProtections {
@@ -134,6 +136,24 @@ function containsCriticalText(text: string): boolean {
     return CRITICAL_TEXT_PATTERNS.some((pattern) => lower.includes(pattern));
 }
 
+/**
+ * Deduplicate items that share the same label — keep the first occurrence
+ * but track a `count` field so the UI can show "×12" if needed.
+ */
+function deduplicateItems(items: ClassifiedProtection[]): ClassifiedProtection[] {
+    const seen = new Map<string, ClassifiedProtection>();
+    for (const item of items) {
+        const key = item.label;
+        const existing = seen.get(key);
+        if (existing) {
+            existing.count += 1;
+        } else {
+            seen.set(key, { ...item, count: 1 });
+        }
+    }
+    return Array.from(seen.values());
+}
+
 // ── Classification function ─────────────────────────────────────────────────
 export function processProtections(
     areas: Array<{
@@ -146,8 +166,8 @@ export function processProtections(
         categorie?: string;
     }>,
 ): ProcessedProtections {
-    const criticalItems: ClassifiedProtection[] = [];
-    const secondaryItems: ClassifiedProtection[] = [];
+    const rawCritical: ClassifiedProtection[] = [];
+    const rawSecondary: ClassifiedProtection[] = [];
 
     for (const area of areas) {
         // Skip INFO-type items (general construction regs, etc.)
@@ -177,20 +197,25 @@ export function processProtections(
             type: area.type,
             name: area.name,
             description: area.description,
-            severity: isCritical ? (area.severity === "high" ? "high" : "high") : area.severity,
+            severity: isCritical ? "high" : area.severity,
             sourceUrl: area.sourceUrl,
             constraints: area.constraints,
             categorie: code || undefined,
             label,
             isCritical,
+            count: 1,
         };
 
         if (isCritical) {
-            criticalItems.push(item);
+            rawCritical.push(item);
         } else {
-            secondaryItems.push(item);
+            rawSecondary.push(item);
         }
     }
+
+    // Deduplicate: merge items that share the same label
+    const criticalItems = deduplicateItems(rawCritical);
+    const secondaryItems = deduplicateItems(rawSecondary);
 
     const requiresABF = criticalItems.some(
         (i) =>
