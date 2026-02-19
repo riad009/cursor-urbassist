@@ -19,6 +19,7 @@ const STORAGE_KEY = "urbassist_locale";
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const [locale, setLocale] = useState<Locale>("fr");
+    const [mounted, setMounted] = useState(false);
 
     // Hydrate from localStorage on mount
     useEffect(() => {
@@ -30,6 +31,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         } catch {
             // SSR / incognito — ignore
         }
+        setMounted(true);
     }, []);
 
     const toggleLanguage = useCallback(() => {
@@ -48,6 +50,16 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         (key: string) => getTranslation(key, locale),
         [locale]
     );
+
+    // Prevent hydration mismatch: don't render locale-dependent content
+    // until we've read the real locale from localStorage on the client.
+    if (!mounted) {
+        return (
+            <LanguageContext.Provider value={{ locale, toggleLanguage, t }}>
+                <div style={{ visibility: "hidden" }}>{children}</div>
+            </LanguageContext.Provider>
+        );
+    }
 
     return (
         <LanguageContext.Provider value={{ locale, toggleLanguage, t }}>
