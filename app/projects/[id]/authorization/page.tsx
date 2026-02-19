@@ -144,6 +144,9 @@ export default function AuthorizationPage({
 
   // ── Zone detection (auto from address) ──
   const [isUrbanZone, setIsUrbanZone] = useState(true);
+  // API-derived DP threshold — overrides hardcoded inUrbanZone logic
+  const [dpThreshold, setDpThreshold] = useState<number>(40);
+  const [isRnu, setIsRnu] = useState(false);
 
   // ── Submitter ──
   const [submitterType, setSubmitterType] = useState<SubmitterType | null>(null);
@@ -176,6 +179,10 @@ export default function AuthorizationPage({
     name?: string;
     zoneType?: string;
     address?: string;
+    regulatoryType?: string;
+    isProtectedZone?: boolean;
+    coordinates?: [number, number];
+    citycode?: string;
   } | null>(null);
 
   // Load project data
@@ -184,17 +191,41 @@ export default function AuthorizationPage({
       .then((r) => r.json())
       .then((d) => {
         if (d.project) {
+          const proj = d.project;
+          // Parse coordinates if stored as JSON string
+          let coords: [number, number] | undefined;
+          if (proj.coordinates) {
+            try {
+              const parsed = typeof proj.coordinates === "string" ? JSON.parse(proj.coordinates) : proj.coordinates;
+              if (parsed.lng && parsed.lat) coords = [parsed.lng, parsed.lat];
+            } catch { /* */ }
+          }
           setProjectData({
-            name: d.project.name,
-            zoneType: d.project.zoneType,
-            address: d.project.address,
+            name: proj.name,
+            zoneType: proj.zoneType,
+            address: proj.address,
+            regulatoryType: proj.regulatoryType,
+            isProtectedZone: proj.protectedAreas?.length > 0,
+            coordinates: coords,
+            citycode: proj.citycode,
           });
           // Auto-detect urban zone from PLU zone
-          const zone = (d.project.zoneType || "").toUpperCase();
+          const zone = (proj.zoneType || "").toUpperCase();
           if (zone.startsWith("U") || zone.startsWith("AU")) {
             setIsUrbanZone(true);
+            setDpThreshold(40);
           } else if (zone === "RNU" || zone.startsWith("A") || zone.startsWith("N")) {
             setIsUrbanZone(false);
+            setDpThreshold(20);
+            setIsRnu(zone === "RNU" || !proj.zoneType);
+          }
+          // Use stored dpThreshold if available from previous decision
+          const desc = proj.projectDescription;
+          if (desc?.dpThreshold) {
+            setDpThreshold(desc.dpThreshold);
+          }
+          if (desc?.isRnu !== undefined) {
+            setIsRnu(desc.isRnu);
           }
         }
       })
@@ -269,6 +300,7 @@ export default function AuthorizationPage({
         floorAreaCreated: constructionFloorArea,
         footprintCreated: constructionFootprint,
         inUrbanZone: isUrbanZone,
+        dpThreshold,
         submitterType: submitterType || undefined,
       });
       if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
@@ -284,6 +316,7 @@ export default function AuthorizationPage({
         footprintCreated: extensionFootprint,
         existingFloorArea: existingArea || undefined,
         inUrbanZone: isUrbanZone,
+        dpThreshold,
         submitterType: submitterType || undefined,
       });
       if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
@@ -361,19 +394,61 @@ export default function AuthorizationPage({
     if (!r) return;
     setSaving(true);
     try {
-      const determination = r.determination === "ARCHITECT_REQUIRED" ? "PC" : r.determination;
       const categories = Array.from(selectedCategories);
+      const projectType = categories.length === 1
+        ? (categories[0] === "new_construction" ? "construction"
+          : categories[0] === "existing_extension" ? "extension"
+            : "outdoor")
+        : "mixed";
+
+      // ── Call server-side Decision API for authoritative result ──────
+      let serverDecision: {
+        determination: string;
+        explanation: string;
+        architectRequired: boolean;
+        dpThreshold: number;
+        isUrbanZone: boolean;
+        isRnu: boolean;
+        isProtectedZone: boolean;
+        requiresDpc11: boolean;
+        timelineAdjustmentMonths: number;
+      } | null = null;
+
+      try {
+        const decisionRes = await fetch("/api/decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            projectType: categories[0] ?? "new_construction",
+            floorAreaCreated: totalFloorArea,
+            footprintCreated: constructionFootprint || extensionFootprint,
+            existingFloorArea: existingArea || undefined,
+            coordinates: projectData?.coordinates,
+            citycode: projectData?.citycode,
+            submitterType,
+          }),
+        });
+        if (decisionRes.ok) {
+          serverDecision = await decisionRes.json();
+        }
+      } catch {
+        // Server decision failed — fall back to client-side result
+        console.warn("Server decision API unavailable, using client-side result");
+      }
+
+      // Prefer server decision, fall back to client preview
+      const finalDetermination = serverDecision?.determination
+        ?? (r.determination === "ARCHITECT_REQUIRED" ? "PC" : r.determination);
+      const finalExplanation = serverDecision?.explanation ?? r.explanation;
+
       await fetch(`/api/projects/${projectId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          authorizationType: determination,
-          authorizationExplanation: r.explanation,
-          projectType: categories.length === 1
-            ? (categories[0] === "new_construction" ? "construction"
-              : categories[0] === "existing_extension" ? "extension"
-                : "outdoor")
-            : "mixed",
+          authorizationType: finalDetermination === "ARCHITECT_REQUIRED" ? "PC" : finalDetermination,
+          authorizationExplanation: finalExplanation,
+          projectType,
           projectDescription: {
             categories,
             extensionSubTypes: Array.from(extensionSubTypes),
@@ -389,11 +464,17 @@ export default function AuthorizationPage({
             outdoorSurface: outdoorSurface || undefined,
             totalFloorArea: totalFloorArea || undefined,
             submitterType,
-            architectRequired: r.architectRequired || false,
+            architectRequired: serverDecision?.architectRequired ?? r.architectRequired ?? false,
             wantPluAnalysis,
             wantCerfa,
-            isUrbanZone,
+            isUrbanZone: serverDecision?.isUrbanZone ?? isUrbanZone,
+            dpThreshold: serverDecision?.dpThreshold ?? dpThreshold,
+            isRnu: serverDecision?.isRnu ?? isRnu,
+            isProtectedZone: serverDecision?.isProtectedZone ?? false,
+            requiresDpc11: serverDecision?.requiresDpc11 ?? false,
+            timelineAdjustmentMonths: serverDecision?.timelineAdjustmentMonths ?? 0,
             poolShelterHeight: poolShelterHeight || undefined,
+            decisionSource: serverDecision ? "server" : "client",
           },
         }),
       });
@@ -451,9 +532,27 @@ export default function AuthorizationPage({
             {projectData?.zoneType && (
               <span className="inline-block px-3 py-1 rounded-md bg-blue-100 text-blue-600 text-sm font-semibold">
                 Zone {projectData.zoneType} {isEn ? "detected" : "détectée"}
+                {dpThreshold && <span className="ml-1 text-xs opacity-70">(seuil DP : {dpThreshold} m²)</span>}
               </span>
             )}
           </div>
+
+          {/* ═══ RNU Warning Banner ═══ */}
+          {isRnu && (
+            <div className="max-w-2xl mx-auto mb-4 rounded-xl bg-amber-50 border border-amber-300 p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-amber-800">
+                  {isEn ? "Land subject to RNU" : "Terrain soumis au RNU"}
+                </p>
+                <p className="text-sm text-amber-700">
+                  {isEn
+                    ? "Buildability limited to urban continuity. The preliminary declaration threshold remains at 20 m²."
+                    : "Constructibilité limitée à la continuité de l'urbanisation. Le seuil de déclaration préalable reste à 20 m²."}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ═══ Quick Action / Shortcut Section (always full width) ═══ */}
           {step === "form" && (

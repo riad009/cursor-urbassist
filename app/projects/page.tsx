@@ -168,7 +168,7 @@ export default function ProjectsPage() {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
                     <Link
-                      href={`/projects/${project.id}`}
+                      href={`/projects/${project.id}/dashboard`}
                       className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-50 text-blue-600 font-medium hover:bg-blue-100"
                     >
                       {t("nav.dashboard")} <ArrowRight className="w-4 h-4" />

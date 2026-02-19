@@ -79,6 +79,12 @@ export interface DpPcInput {
   changeOfUseOrFacade?: boolean;
   /** Urban zone (PLU U, UD, AUD…) for extension rules */
   inUrbanZone?: boolean;
+  /**
+   * API-derived DP threshold in m² (overrides inUrbanZone logic).
+   * When provided by the GPU API / PLU detection, this takes priority
+   * over the default `inUrbanZone ? 40 : 20` calculation.
+   */
+  dpThreshold?: number;
   /** Submitter type — company always requires architect for PC */
   submitterType?: SubmitterType;
   /** Swimming pool: height of shelter/cover in meters (> 1.80m triggers PC) */
@@ -221,9 +227,9 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
   }
 
   // ── Threshold depends on zone type ──
-  // Urban zone (PLU/PLUi U-zones): up to 40 m² inclusive → DP
-  // Non-urban zone: up to 20 m² inclusive → DP
-  const dpThreshold = inUrbanZone ? 40 : 20;
+  // When dpThreshold is provided by the API (GPU/PLU detection), use it directly.
+  // Otherwise fall back to: Urban zone (PLU/PLUi U-zones) = 40 m², Non-urban = 20 m².
+  const dpThreshold = input.dpThreshold ?? (inUrbanZone ? 40 : 20);
 
   // ── Extension ≤ threshold → DP (check 150 m² for architect) ──
   if (stricterArea <= dpThreshold) {

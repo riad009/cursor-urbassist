@@ -298,10 +298,24 @@ export async function POST(request: NextRequest) {
 
     console.log(`[PLU] Result: zone=${pluInfo.zoneType} type=${pluInfo.pluType} status=${pluInfo.pluStatus}`);
 
+    // ── Derive decision-engine fields from zone detection ─────────────────
+    const zoneUpper = (pluInfo.zoneType ?? "").toUpperCase();
+    const isUrbanZone = zoneUpper.startsWith("U") || zoneUpper.startsWith("AU");
+    const isRnu = pluInfo.pluType === "RNU" || pluInfo.zoneType === "RNU";
+    const dpThreshold = isUrbanZone ? 40 : 20;
+    const rnuWarning = isRnu
+      ? "Terrain soumis au RNU : Constructibilité limitée à la continuité de l'urbanisation."
+      : null;
+
     return NextResponse.json({
       success: true,
       plu: pluInfo,
       zoneFeatures,
+      // Decision-engine fields (derived from API, not hardcoded on client)
+      isUrbanZone,
+      isRnu,
+      dpThreshold,
+      rnuWarning,
       source: pluInfo.zoneType
         ? pluInfo.pluStatus === "fallback" ? "fallback" : "gpu"
         : "none",

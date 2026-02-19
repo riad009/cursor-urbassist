@@ -276,61 +276,69 @@ export default function NewProjectPage() {
                         </div>
 
                         {/* ── RIGHT: Sidebar panel ── */}
-                        <div className="lg:col-span-4 xl:col-span-3 flex flex-col lg:h-[700px] gap-2">
+                        <div className="lg:col-span-4 xl:col-span-3 flex flex-col lg:h-[700px] gap-2.5">
 
                             {/* TOP: Regulation + Protections & Servitudes stacked */}
-                            <div className="space-y-2 shrink-0">
+                            <div className="space-y-2.5 shrink-0">
 
-                                {/* REGULATION — compact row */}
+                                {/* REGULATION — compact card */}
                                 <div className="rounded-xl bg-white border border-slate-200 overflow-hidden shadow-sm">
-                                    <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5">
-                                        <Layers className="w-3.5 h-3.5 text-blue-500" />
+                                    <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                                            <Layers className="w-3.5 h-3.5 text-blue-500" />
+                                        </div>
                                         <p className="text-sm font-semibold text-slate-900">{t("newProj.zonePlu")}</p>
                                     </div>
-                                    <div className="p-2.5">
-                                        {!selectedAddress || loadingPlu ? (
-                                            <div className="space-y-1.5 animate-pulse">
-                                                <div className="h-4 bg-slate-200 rounded w-2/3" />
-                                                <div className="h-3 bg-slate-200 rounded w-1/2" />
+                                    <div className="px-4 py-3">
+                                        {!selectedAddress ? (
+                                            <p className="text-xs text-slate-400 italic">Sélectionnez une adresse pour détecter la zone</p>
+                                        ) : loadingPlu ? (
+                                            <div className="space-y-2 animate-pulse">
+                                                <div className="h-5 bg-slate-100 rounded-md w-24" />
+                                                <div className="h-3 bg-slate-100 rounded w-16" />
                                             </div>
                                         ) : showManualPluEdit ? (
-                                            <div className="space-y-1.5">
-                                                <input type="text" value={manualPluZone} onChange={(e) => setManualPluZone(e.target.value)} placeholder="UB, UC, AU..." className="w-full px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-[11px] placeholder-slate-400" autoFocus />
-                                                <button type="button" onClick={() => { setShowManualPluEdit(false); if (manualPluZone.trim()) setPluInfo({ zoneType: manualPluZone.trim(), zoneName: manualPluZone.trim(), pluType: null }); }} className="text-[10px] text-blue-500 hover:text-blue-600">{t("newProj.savePlu")}</button>
+                                            <div className="space-y-2">
+                                                <input type="text" value={manualPluZone} onChange={(e) => setManualPluZone(e.target.value)} placeholder="UB, UC, AU..." className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder-slate-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 transition-all" autoFocus />
+                                                <button type="button" onClick={() => { setShowManualPluEdit(false); if (manualPluZone.trim()) setPluInfo({ zoneType: manualPluZone.trim(), zoneName: manualPluZone.trim(), pluType: null }); }} className="text-xs text-blue-500 hover:text-blue-600 font-medium">{t("newProj.savePlu")}</button>
                                             </div>
                                         ) : pluInfo?.zoneType || pluInfo?.zoneName || manualPluZone.trim() ? (
                                             <div>
-                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <span className="px-2 py-1 rounded-md bg-blue-100 text-blue-600 text-sm font-bold">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</span>
-                                                    <span className="text-[10px] text-slate-500">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : "PLU"}</span>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold border border-blue-100">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</span>
+                                                    <span className="text-xs text-slate-500 font-medium">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : "PLU"}</span>
                                                 </div>
-                                                <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[10px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1"><Pencil className="w-2.5 h-2.5" /> {t("newProj.modify")}</button>
+                                                <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[11px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1.5 transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.modify")}</button>
                                             </div>
                                         ) : (
-                                            <p className="text-[11px] text-slate-400">{t("newProj.notDetected")}</p>
+                                            <p className="text-xs text-slate-400 italic">{t("newProj.notDetected")}</p>
                                         )}
                                     </div>
                                 </div>
 
-                                {/* PROTECTIONS & SERVITUDES — with heritage status banner */}
-                                <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col shadow-sm">
-                                    <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5 shrink-0">
-                                        <Shield className="w-3.5 h-3.5 text-amber-500" />
+                                {/* PROTECTIONS & SERVITUDES */}
+                                <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col shadow-sm max-h-[280px]">
+                                    <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 shrink-0">
+                                        <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                                            <Shield className="w-3.5 h-3.5 text-amber-500" />
+                                        </div>
                                         <p className="text-sm font-semibold text-slate-900 flex-1 truncate">{t("newProj.protectionsServitudes")}</p>
                                         {selectedAddress && !loadingProtectedAreas && (classified.criticalItems.length + classified.secondaryItems.length) > 0 && (
-                                            <span className={cn("text-[9px] font-semibold px-1.5 py-0.5 rounded-full", hasWarning ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400")}>
-                                                {classified.criticalItems.length + classified.secondaryItems.length}
+                                            <span className={cn("text-[10px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full", hasWarning ? "bg-amber-100 text-amber-600" : "bg-blue-100 text-blue-600")}>
+                                                {classified.criticalItems.reduce((s, i) => s + i.count, 0) + classified.secondaryItems.reduce((s, i) => s + i.count, 0)}
                                             </span>
                                         )}
                                     </div>
-                                    <div className="p-2.5">
-                                        {!selectedAddress || loadingProtectedAreas ? (
-                                            <div className="space-y-1.5 animate-pulse">
-                                                <div className="h-3 bg-slate-200 rounded w-full" />
-                                                <div className="h-3 bg-slate-200 rounded w-2/3" />
+                                    <div className="px-4 py-3 overflow-y-auto flex-1 min-h-0">
+                                        {!selectedAddress ? (
+                                            <p className="text-xs text-slate-400 italic">Sélectionnez une adresse pour analyser les servitudes</p>
+                                        ) : loadingProtectedAreas ? (
+                                            <div className="space-y-2 animate-pulse">
+                                                <div className="h-4 bg-slate-100 rounded-md w-full" />
+                                                <div className="h-4 bg-slate-100 rounded-md w-3/4" />
                                             </div>
                                         ) : (classified.criticalItems.length + classified.secondaryItems.length) > 0 ? (
-                                            <div className="space-y-1.5">
+                                            <div className="space-y-2">
 
                                                 {/* ── Heritage / ABF status banner — prominent ── */}
                                                 {(() => {
@@ -341,33 +349,33 @@ export default function NewProjectPage() {
                                                     if (!hasHeritage) return null;
                                                     const nm = heritageSummary?.nearestMonument;
                                                     return (
-                                                        <div className="rounded-lg bg-red-50 border border-red-200 p-2 space-y-1">
+                                                        <div className="rounded-lg bg-gradient-to-br from-red-50 to-orange-50 border border-red-200/60 p-2.5 space-y-1.5">
                                                             <div className="flex items-center gap-1.5">
                                                                 <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
                                                                 <p className="text-xs font-bold text-red-700">{t("newProj.heritageProtected")}</p>
                                                             </div>
                                                             {nm && (
-                                                                <div className="pl-5 space-y-0.5">
+                                                                <div className="pl-5 space-y-1">
                                                                     <p className="text-[11px] text-red-700 font-semibold truncate">
                                                                         🏛 {nm.name}
                                                                     </p>
                                                                     <div className="flex items-center gap-1.5 flex-wrap">
                                                                         {nm.distance != null && (
-                                                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">
+                                                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-red-100/80 text-red-600 font-medium">
                                                                                 à {nm.distance}m
                                                                             </span>
                                                                         )}
-                                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">
+                                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-red-100/80 text-red-600 font-medium">
                                                                             {nm.type === "classé" ? "Classé" : "Inscrit"}
                                                                         </span>
                                                                     </div>
                                                                 </div>
                                                             )}
-                                                            <p className="text-[10px] text-red-600 pl-5">{t("newProj.heritageAbfNote")}</p>
+                                                            <p className="text-[10px] text-red-500 pl-5 leading-relaxed">{t("newProj.heritageAbfNote")}</p>
                                                             {heritageSummary && heritageSummary.heritageTypes.length > 0 && (
                                                                 <div className="flex gap-1 pl-5 flex-wrap mt-0.5">
                                                                     {heritageSummary.heritageTypes.map((ht) => (
-                                                                        <span key={ht} className="text-[8px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-500 font-semibold">
+                                                                        <span key={ht} className="text-[8px] px-1.5 py-0.5 rounded-full bg-red-100/80 text-red-500 font-semibold">
                                                                             {ht.replace(/_/g, " ")}
                                                                         </span>
                                                                     ))}
@@ -379,12 +387,14 @@ export default function NewProjectPage() {
 
                                                 {/* ── CRITICAL ITEMS — always visible ── */}
                                                 {classified.criticalItems.map((item, idx) => {
-                                                    const sevDot = item.severity === "high" ? "bg-red-400" : item.severity === "medium" ? "bg-amber-400" : "bg-blue-400";
+                                                    const typeColor = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-red-400" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-400" : "bg-blue-400";
+                                                    const typeBadgeBg = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-red-50 text-red-500 border-red-100" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-50 text-amber-500 border-amber-100" : "bg-blue-50 text-blue-500 border-blue-100";
                                                     return (
-                                                        <div key={`crit-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg bg-amber-50/50 border border-amber-100 transition-colors">
-                                                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sevDot}`} />
-                                                            <p className="text-xs text-slate-800 font-medium truncate flex-1">{item.label}</p>
-                                                            <span className="text-[8px] text-amber-500 uppercase shrink-0 font-semibold">{item.type === "ABF" ? "ABF" : item.type === "FLOOD_ZONE" ? "RISQUE" : item.type === "HERITAGE" ? "PATRI" : item.categorie || item.type}</span>
+                                                        <div key={`crit-${idx}`} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-50/80 border border-slate-100 transition-colors">
+                                                            <span className={`w-2 h-2 rounded-full shrink-0 ${typeColor}`} />
+                                                            <p className="text-xs text-slate-700 font-medium truncate flex-1">{item.label}</p>
+                                                            {item.count > 1 && <span className="text-[9px] text-slate-400 font-medium shrink-0">×{item.count}</span>}
+                                                            <span className={`text-[8px] uppercase shrink-0 font-bold px-1.5 py-0.5 rounded-md border ${typeBadgeBg}`}>{item.type === "ABF" ? "ABF" : item.type === "FLOOD_ZONE" ? "RISQUE" : item.type === "HERITAGE" ? "PATRI" : item.categorie || item.type}</span>
                                                         </div>
                                                     );
                                                 })}
@@ -395,25 +405,28 @@ export default function NewProjectPage() {
                                                         <button
                                                             type="button"
                                                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowSecondary(!showSecondary); }}
-                                                            className="w-full flex items-center gap-1.5 py-1.5 px-2 rounded-lg text-[10px] text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors border border-dashed border-slate-200 mt-0.5"
+                                                            className="w-full flex items-center gap-1.5 py-1.5 px-2.5 rounded-lg text-[11px] text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors border border-dashed border-slate-200 mt-0.5"
                                                         >
                                                             <ChevronDown className={cn("w-3 h-3 transition-transform", showSecondary && "rotate-180")} />
-                                                            <span>{showSecondary ? "Masquer" : "Voir"} {classified.secondaryItems.length} {t("newProj.secondaryServitudes")}</span>
+                                                            <span className="font-medium">{showSecondary ? "Masquer" : "Voir"} {classified.secondaryItems.reduce((s, i) => s + i.count, 0)} {t("newProj.secondaryServitudes")}</span>
                                                         </button>
                                                         {showSecondary && classified.secondaryItems.map((item, idx) => (
-                                                            <div key={`sec-${idx}`} className="flex items-center gap-1.5 py-1 px-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                                                            <div key={`sec-${idx}`} className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-slate-50 transition-colors">
                                                                 <Info className="w-3 h-3 text-slate-400 shrink-0" />
                                                                 <p className="text-xs text-slate-600 truncate flex-1">{item.label}</p>
-                                                                <span className="text-[8px] text-slate-400 uppercase shrink-0">{item.categorie || item.type}</span>
+                                                                {item.count > 1 && <span className="text-[9px] text-slate-400 shrink-0">×{item.count}</span>}
+                                                                <span className="text-[8px] text-slate-400 uppercase shrink-0 font-medium">{item.categorie || item.type}</span>
                                                             </div>
                                                         ))}
                                                     </>
                                                 )}
                                             </div>
                                         ) : (
-                                            <div className="flex items-center gap-1.5 py-1">
-                                                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                                <p className="text-[11px] text-emerald-600 font-medium">{t("newProj.noHeritageConstraint")}</p>
+                                            <div className="flex items-center gap-2 py-1">
+                                                <div className="w-5 h-5 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
+                                                    <Check className="w-3 h-3 text-emerald-500" />
+                                                </div>
+                                                <p className="text-xs text-emerald-600 font-medium">{t("newProj.noHeritageConstraint")}</p>
                                             </div>
                                         )}
                                     </div>
@@ -422,30 +435,37 @@ export default function NewProjectPage() {
 
                             {/* PARCELS — takes remaining space, scrollable internally */}
                             <div className="rounded-xl bg-white border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-0 shadow-sm">
-                                <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
-                                    <p className="text-sm font-semibold text-slate-900">{t("newProj.parcels")}</p>
+                                <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between shrink-0">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-lg bg-slate-50 flex items-center justify-center shrink-0">
+                                            <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                                        </div>
+                                        <p className="text-sm font-semibold text-slate-900">{t("newProj.parcels")}</p>
+                                    </div>
                                     {selectedAddress && !loadingCadastre && parcels.length > 0 && (
-                                        <span className="text-xs text-slate-600">{parcels.length} {t("newProj.found")}</span>
+                                        <span className="text-xs text-slate-500 font-medium bg-slate-50 px-2.5 py-0.5 rounded-full">{parcels.length} {t("newProj.found")}</span>
                                     )}
                                 </div>
                                 <div className="p-2 flex-1 overflow-y-auto scrollbar-thin min-h-0">
-                                    {(!selectedAddress || loadingCadastre) ? (
-                                        <div className="space-y-1.5 animate-pulse">
+                                    {!selectedAddress ? (
+                                        <p className="text-xs text-slate-400 italic px-2 py-3">Sélectionnez une adresse pour charger les parcelles</p>
+                                    ) : loadingCadastre ? (
+                                        <div className="space-y-1.5 animate-pulse px-1">
                                             {[1, 2, 3].map((i) => (
-                                                <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-100">
-                                                    <div className="w-3 h-3 rounded bg-slate-200" />
-                                                    <div className="h-3 bg-slate-200 rounded flex-1" />
-                                                    <div className="h-3 bg-slate-200 rounded w-10" />
+                                                <div key={i} className="flex items-center gap-2 py-2 px-2.5 rounded-lg bg-slate-50">
+                                                    <div className="w-3.5 h-3.5 rounded bg-slate-200" />
+                                                    <div className="h-3.5 bg-slate-200 rounded flex-1" />
+                                                    <div className="h-3.5 bg-slate-200 rounded w-12" />
                                                 </div>
                                             ))}
                                         </div>
                                     ) : parcels.length > 0 ? (
                                         <>
-                                            <div className="flex gap-1.5 mb-1.5">
-                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds(parcels.map((p) => p.id)); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.all")}</button>
-                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds([]); }} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">{t("newProj.none")}</button>
+                                            <div className="flex gap-1.5 mb-2 px-1">
+                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds(parcels.map((p) => p.id)); }} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 font-medium transition-colors">{t("newProj.all")}</button>
+                                                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedParcelIds([]); }} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 font-medium transition-colors">{t("newProj.none")}</button>
                                             </div>
-                                            {cadastreError && <p className="text-[10px] text-amber-400 mb-1">{cadastreError}</p>}
+                                            {cadastreError && <p className="text-[10px] text-amber-500 mb-1.5 px-2 font-medium">{cadastreError}</p>}
                                             <div className="space-y-0.5">
                                                 {parcels.map((p) => {
                                                     const selected = selectedParcelIds.includes(p.id);
@@ -456,29 +476,29 @@ export default function NewProjectPage() {
                                                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
                                                             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                                                             className={cn(
-                                                                "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer border",
-                                                                selected ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:border-slate-200"
+                                                                "flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-all cursor-pointer border",
+                                                                selected ? "bg-blue-50/80 text-blue-700 border-blue-200" : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:border-slate-200"
                                                             )}
                                                         >
-                                                            <span className={cn("w-3 h-3 rounded-sm border flex items-center justify-center shrink-0", selected ? "border-blue-500 bg-blue-100" : "border-slate-300")}>
-                                                                {selected && <Check className="w-2 h-2 text-blue-500" />}
+                                                            <span className={cn("w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors", selected ? "border-blue-500 bg-blue-500" : "border-slate-300")}>
+                                                                {selected && <Check className="w-2.5 h-2.5 text-white" />}
                                                             </span>
-                                                            <span className="px-1 py-0.5 rounded bg-slate-100 text-[8px] font-bold text-slate-500 uppercase shrink-0">{p.section}</span>
+                                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold text-slate-500 uppercase shrink-0 min-w-[28px] text-center">{p.section}</span>
                                                             <span className="font-medium text-slate-800 flex-1 truncate">{isMain ? "★ " : ""}N°{p.number}</span>
-                                                            <span className="tabular-nums text-slate-400 shrink-0">{p.area.toLocaleString()} m²</span>
+                                                            <span className="tabular-nums text-slate-400 shrink-0 font-medium">{p.area.toLocaleString()} m²</span>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
                                         </>
                                     ) : (
-                                        <p className="text-[11px] text-slate-500 py-2 text-center">{t("newProj.noParcel")}</p>
+                                        <p className="text-xs text-slate-400 py-3 text-center italic">{t("newProj.noParcel")}</p>
                                     )}
                                 </div>
                                 {/* Total surface — pinned at bottom of parcels */}
                                 {selectedParcelIds.length > 0 && (
-                                    <div className="px-3 py-2 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
-                                        <span className="text-xs text-slate-600">{selectedParcelIds.length} {t("newProj.selected")}{selectedParcelIds.length > 1 ? "s" : ""}</span>
+                                    <div className="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between shrink-0 bg-gradient-to-r from-slate-50 to-white">
+                                        <span className="text-xs text-slate-500 font-medium">{selectedParcelIds.length} {t("newProj.selected")}{selectedParcelIds.length > 1 ? "s" : ""}</span>
                                         <span className="text-base font-bold text-emerald-600 tabular-nums">{totalSelectedArea.toLocaleString()} m²</span>
                                     </div>
                                 )}
@@ -500,9 +520,9 @@ export default function NewProjectPage() {
                         <button
                             type="submit"
                             disabled={creating || !newName.trim() || (parcels.length > 0 && selectedParcelIds.length === 0)}
-                            className="px-8 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all text-base"
+                            className="flex-1 max-w-md py-3.5 rounded-full bg-indigo-600 text-white font-semibold disabled:opacity-40 hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-500/30 transition-all text-base tracking-wide"
                         >
-                            {creating ? <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {t("newProj.creating")}</span> : (t("newProj.createProject") === "Create Project" ? "Next: What is your project?" : "Suivant : Quel est votre projet ?")}
+                            {creating ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {t("newProj.creating")}</span> : (t("newProj.createProject") === "Create Project" ? "Next: What is your project?" : "Suivant : Quel est votre projet ?")}
                         </button>
                     </div>
                 </div>
