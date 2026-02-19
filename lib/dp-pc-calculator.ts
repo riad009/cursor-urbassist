@@ -58,8 +58,9 @@ export function estimateFloorAreaCreated(
 ): number {
   if (groundAreaM2 <= 0 || numberOfLevels < 1) return 0;
   if (isGarage) return 0; // Garages are excluded from surface de plancher
-  const coeff = FLOOR_AREA_COEFFICIENTS[numberOfLevels] ?? FLOOR_AREA_COEFFICIENT_DEFAULT;
-  return Math.round(groundAreaM2 * numberOfLevels * coeff);
+  // Formula: 0.90 × Footprint × Levels (simplified per Art. R.111-22)
+  // Returns decimal for display precision (e.g. 19.80 instead of 20)
+  return parseFloat((groundAreaM2 * numberOfLevels * 0.90).toFixed(2));
 }
 
 export type DeterminationType = "NONE" | "DP" | "PC" | "ARCHITECT_REQUIRED" | "REVIEW";
