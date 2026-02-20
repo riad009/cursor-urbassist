@@ -67,6 +67,7 @@ import {
   createBuildingFromOSM,
 } from "@/components/site-plan/BuildingDetailPanel";
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
+import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
 import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
@@ -89,7 +90,9 @@ type Tool =
   | "parcel"
   | "vrd"
   | "elevation"
-  | "section";
+  | "section"
+  | "vegetation"
+  | "viewpoint";
 
 type ViewMode = "2d" | "3d";
 
@@ -142,6 +145,8 @@ const tools = [
   { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
   { id: "elevation", label: "Elevation", icon: Ruler, shortcut: "E", tooltip: "Click to place elevation point (m)" },
   { id: "section", label: "Section line", icon: Minus, shortcut: "S", tooltip: "Draw section cut line" },
+  { id: "vegetation", label: "Vegetation", icon: Trees, shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
+  { id: "viewpoint", label: "Viewpoint", icon: Eye, shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
   { id: "text", label: "Text", icon: Type, shortcut: "T", tooltip: "Add text labels" },
   { id: "pan", label: "Pan", icon: Move, shortcut: "H", tooltip: "Pan the canvas" },
 ];
@@ -157,12 +162,38 @@ const templatesList = [
 ];
 
 const SURFACE_TYPES = [
-  { id: "green", label: "Green", color: "#22c55e", fill: "rgba(34, 197, 94, 0.4)", tooltip: "Permeable: lawn, planting" },
-  { id: "gravel", label: "Gravel", color: "#a8a29e", fill: "rgba(168, 162, 158, 0.5)", tooltip: "Semi-permeable: gravel, pavers" },
-  { id: "concrete", label: "Concrete", color: "#78716c", fill: "rgba(120, 113, 108, 0.5)", tooltip: "Impermeable: concrete slab" },
+  // Permeable
+  { id: "natural_green", label: "Natural Green", color: "#22c55e", fill: "rgba(34, 197, 94, 0.4)", tooltip: "Permeable: natural lawn, planting areas" },
+  // Semi-permeable
+  { id: "gravel", label: "Gravel", color: "#a8a29e", fill: "rgba(168, 162, 158, 0.5)", tooltip: "Semi-permeable: gravel, stabilized surfaces" },
+  { id: "evergreen_system", label: "Evergreen", color: "#65a30d", fill: "rgba(101, 163, 13, 0.35)", tooltip: "Semi-permeable: evergreen system" },
+  { id: "pavers_pedestals", label: "Pavers/Pedestals", color: "#d4d4d4", fill: "rgba(212, 212, 212, 0.45)", tooltip: "Semi-permeable: pavers on pedestals" },
+  { id: "drainage_pavement", label: "Drainage Paving", color: "#94a3b8", fill: "rgba(148, 163, 184, 0.45)", tooltip: "Semi-permeable: drainage pavement" },
+  { id: "vegetated_flat_roof", label: "Vegetated Roof", color: "#4ade80", fill: "rgba(74, 222, 128, 0.35)", tooltip: "Semi-permeable: vegetated flat roof" },
+  // Impermeable
   { id: "asphalt", label: "Asphalt", color: "#44403c", fill: "rgba(68, 64, 60, 0.6)", tooltip: "Impermeable: driveway, parking" },
-  { id: "building", label: "Building", color: "#3b82f6", fill: "rgba(59, 130, 246, 0.3)", tooltip: "Building footprint" },
+  { id: "bitumen", label: "Bitumen", color: "#292524", fill: "rgba(41, 37, 36, 0.55)", tooltip: "Impermeable: bituminous surface" },
+  { id: "concrete", label: "Concrete", color: "#78716c", fill: "rgba(120, 113, 108, 0.5)", tooltip: "Impermeable: concrete slab" },
+  { id: "standard_roof", label: "Standard Roof", color: "#b45309", fill: "rgba(180, 83, 9, 0.35)", tooltip: "Impermeable: pitched roof (2-slope, 4-slope)" },
+  { id: "building", label: "Building", color: "#3b82f6", fill: "rgba(59, 130, 246, 0.3)", tooltip: "Impermeable: building footprint" },
 ];
+
+const SURFACE_CLASSIFICATION: Record<string, "permeable" | "semi-permeable" | "impermeable"> = {
+  natural_green: "permeable",
+  gravel: "semi-permeable",
+  evergreen_system: "semi-permeable",
+  pavers_pedestals: "semi-permeable",
+  drainage_pavement: "semi-permeable",
+  vegetated_flat_roof: "semi-permeable",
+  asphalt: "impermeable",
+  bitumen: "impermeable",
+  concrete: "impermeable",
+  standard_roof: "impermeable",
+  building: "impermeable",
+};
+
+// Backward compatibility alias for old "green" surface type
+const SURFACE_ID_COMPAT: Record<string, string> = { green: "natural_green" };
 
 const VRD_TYPES = [
   { id: "electricity", label: "Electricity", color: "#fbbf24" },
@@ -191,7 +222,7 @@ function SitePlanContent() {
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
   const measurementLabelsRef = useRef<Map<string, fabric.FabricObject[]>>(new Map());
-  const placeGuidedBuildingAtRef = useRef<(x: number, y: number) => void>(() => {});
+  const placeGuidedBuildingAtRef = useRef<(x: number, y: number) => void>(() => { });
   const projectDataRef = useRef<ProjectData | null>(null);
   const parcelsDrawnFromGeometryRef = useRef<string | null>(null);
 
@@ -251,6 +282,7 @@ function SitePlanContent() {
 
   // Full-screen mode & paper size (Step 2 spec: full-screen, A4/A3 validation)
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
   const [paperSize, setPaperSize] = useState<"A4" | "A3">("A3");
 
   // Elevation points (spec 2.5): click to place, value in m (e.g. 0.00 / -0.20 / +1.50)
@@ -1185,6 +1217,81 @@ function SitePlanContent() {
         pushUndoState();
         return;
       }
+      if (activeTool === "vegetation") {
+        const treeType = window.prompt("Tree type (deciduous / coniferous / shrub):", "deciduous") || "deciduous";
+        const treeId = `tree-${Date.now()}`;
+        const r = 12;
+        const colors: Record<string, string> = { deciduous: "#22c55e", coniferous: "#15803d", shrub: "#65a30d" };
+        const fillColors: Record<string, string> = { deciduous: "rgba(34,197,94,0.5)", coniferous: "rgba(21,128,61,0.5)", shrub: "rgba(101,163,13,0.5)" };
+        const treeColor = colors[treeType] || "#22c55e";
+        const treeFill = fillColors[treeType] || "rgba(34,197,94,0.5)";
+        const circle = new fabric.Circle({
+          left: pointer.x - r, top: pointer.y - r, radius: r,
+          fill: treeFill, stroke: treeColor, strokeWidth: 2,
+        });
+        (circle as any).id = treeId;
+        (circle as any).elementName = `${treeType.charAt(0).toUpperCase() + treeType.slice(1)} tree`;
+        (circle as any).isVegetation = true;
+        (circle as any).vegetationType = treeType;
+        (circle as any).excludeFromExport = false;
+        canvas.add(circle);
+        const label = new fabric.Text(treeType.charAt(0).toUpperCase() + treeType.slice(1), {
+          left: pointer.x, top: pointer.y + r + 4, fontSize: 9, fontFamily: "monospace",
+          fill: treeColor, originX: "center", originY: "top", selectable: false, evented: false,
+        });
+        (label as any).isMeasurement = true;
+        (label as any).parentId = treeId;
+        canvas.add(label);
+        canvas.renderAll();
+        updateLayers(canvas);
+        pushUndoState();
+        return;
+      }
+      if (activeTool === "viewpoint") {
+        const vpName = window.prompt("Viewpoint name (e.g. PC7, PC8):", "PC7") || "PC7";
+        const vpId = `vp-${Date.now()}`;
+        // Camera icon: small square
+        const camSize = 14;
+        const cam = new fabric.Rect({
+          left: pointer.x - camSize / 2, top: pointer.y - camSize / 2,
+          width: camSize, height: camSize,
+          fill: "#6366f1", stroke: "#4f46e5", strokeWidth: 1.5, rx: 3, ry: 3,
+        });
+        (cam as any).id = vpId;
+        (cam as any).elementName = vpName;
+        (cam as any).isViewpoint = true;
+        (cam as any).excludeFromExport = false;
+        canvas.add(cam);
+        // Direction arrow
+        const arrowLen = 40;
+        const arrow = new fabric.Line([pointer.x, pointer.y, pointer.x + arrowLen, pointer.y], {
+          stroke: "#6366f1", strokeWidth: 2.5,
+        });
+        (arrow as any).isMeasurement = true;
+        (arrow as any).parentId = vpId;
+        canvas.add(arrow);
+        // Arrowhead
+        const ah = new fabric.Polygon([
+          { x: pointer.x + arrowLen, y: pointer.y },
+          { x: pointer.x + arrowLen - 8, y: pointer.y - 5 },
+          { x: pointer.x + arrowLen - 8, y: pointer.y + 5 },
+        ], { fill: "#6366f1", selectable: false, evented: false });
+        (ah as any).isMeasurement = true;
+        (ah as any).parentId = vpId;
+        canvas.add(ah);
+        // Label
+        const vpLabel = new fabric.Text(vpName, {
+          left: pointer.x, top: pointer.y - camSize - 10, fontSize: 10, fontFamily: "monospace",
+          fill: "#6366f1", fontWeight: "bold", originX: "center", selectable: false, evented: false,
+        });
+        (vpLabel as any).isMeasurement = true;
+        (vpLabel as any).parentId = vpId;
+        canvas.add(vpLabel);
+        canvas.renderAll();
+        updateLayers(canvas);
+        pushUndoState();
+        return;
+      }
       if (activeTool === "polygon" || activeTool === "parcel") {
         setPolygonPoints((prev) => [...prev, { x: pointer.x, y: pointer.y }]);
         return;
@@ -1217,6 +1324,55 @@ function SitePlanContent() {
         (line as any).isSectionLine = true;
         canvas.add(line);
         addLineMeasurement(line, shapeId);
+
+        // Archicad-style section markers at endpoints
+        const dx = pointer.x - drawingStart.x;
+        const dy = pointer.y - drawingStart.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len > 10) {
+          const nx = -dy / len; // normal direction (viewing direction)
+          const ny = dx / len;
+          const ms = 10; // marker size
+
+          // Start marker (A) - triangle pointing in viewing direction
+          const mkA = new fabric.Polygon([
+            { x: drawingStart.x + nx * ms, y: drawingStart.y + ny * ms },
+            { x: drawingStart.x - nx * ms * 0.3 - (dx / len) * ms * 0.5, y: drawingStart.y - ny * ms * 0.3 - (dy / len) * ms * 0.5 },
+            { x: drawingStart.x - nx * ms * 0.3 + (dx / len) * ms * 0.5, y: drawingStart.y - ny * ms * 0.3 + (dy / len) * ms * 0.5 },
+          ], { fill: "#ec4899", selectable: false, evented: false });
+          (mkA as any).isMeasurement = true;
+          (mkA as any).parentId = shapeId;
+          canvas.add(mkA);
+
+          // End marker (B) - triangle
+          const mkB = new fabric.Polygon([
+            { x: pointer.x + nx * ms, y: pointer.y + ny * ms },
+            { x: pointer.x - nx * ms * 0.3 - (dx / len) * ms * 0.5, y: pointer.y - ny * ms * 0.3 - (dy / len) * ms * 0.5 },
+            { x: pointer.x - nx * ms * 0.3 + (dx / len) * ms * 0.5, y: pointer.y - ny * ms * 0.3 + (dy / len) * ms * 0.5 },
+          ], { fill: "#ec4899", selectable: false, evented: false });
+          (mkB as any).isMeasurement = true;
+          (mkB as any).parentId = shapeId;
+          canvas.add(mkB);
+
+          // Labels A and B
+          const lblA = new fabric.Text("A", {
+            left: drawingStart.x + nx * ms * 1.5, top: drawingStart.y + ny * ms * 1.5,
+            fontSize: 12, fontFamily: "sans-serif", fontWeight: "bold", fill: "#ec4899",
+            originX: "center", originY: "center", selectable: false, evented: false,
+          });
+          (lblA as any).isMeasurement = true;
+          (lblA as any).parentId = shapeId;
+          canvas.add(lblA);
+
+          const lblB = new fabric.Text("B", {
+            left: pointer.x + nx * ms * 1.5, top: pointer.y + ny * ms * 1.5,
+            fontSize: 12, fontFamily: "sans-serif", fontWeight: "bold", fill: "#ec4899",
+            originX: "center", originY: "center", selectable: false, evented: false,
+          });
+          (lblB as any).isMeasurement = true;
+          (lblB as any).parentId = shapeId;
+          canvas.add(lblB);
+        }
       } else if (activeTool === "vrd") {
         const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
           stroke: activeVrdType.color, strokeWidth, strokeDashArray: [8, 4],
@@ -1410,6 +1566,7 @@ function SitePlanContent() {
       left: center.x - wPx / 2, top: center.y - hPx / 2,
       width: wPx, height: hPx,
       fill: template.color + "20", stroke: template.color, strokeWidth: 2,
+      ...(templateId === "parking" ? { strokeDashArray: [6, 3] } : {}),
     });
     (rect as any).id = shapeId;
     (rect as any).templateType = templateId;
@@ -1487,27 +1644,134 @@ function SitePlanContent() {
   const addNorthArrow = () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const center = canvas.getCenterPoint();
-    const arrowId = `north-arrow-${Date.now()}`;
+    const arrowId = `compass-${Date.now()}`;
     const northAngle = projectData?.northAngle ?? 0;
-    const size = metersToPixels(2);
+    const s = metersToPixels(2);
+    // Position compass at top-right of the canvas
+    const cx = canvasSize.width - s * 2;
+    const cy = s * 2;
+
+    // North arrow (main pointer)
     const points = [
-      { x: 0, y: -size }, { x: -size * 0.4, y: size * 0.6 },
-      { x: 0, y: size * 0.3 }, { x: size * 0.4, y: size * 0.6 },
+      { x: 0, y: -s }, { x: -s * 0.3, y: s * 0.15 },
+      { x: 0, y: -s * 0.1 }, { x: s * 0.3, y: s * 0.15 },
     ];
     const arrow = new fabric.Polygon(points, {
-      left: center.x - size * 0.5, top: center.y - size * 1.2,
+      left: cx, top: cy, originX: "center", originY: "center",
       fill: "#1e293b", stroke: "#64748b", strokeWidth: 1,
     });
     (arrow as any).id = arrowId;
+    (arrow as any).elementName = "Compass";
     arrow.set({ angle: -northAngle });
-    const label = new fabric.Text("N", {
-      left: center.x - 6, top: center.y - size * 1.5,
-      fontSize: 18, fontFamily: "sans-serif", fontWeight: "bold", fill: "#1e293b",
+    canvas.add(arrow);
+
+    // Compass circle
+    const compassCircle = new fabric.Circle({
+      left: cx - s * 0.9, top: cy - s * 0.9,
+      radius: s * 0.9, fill: "transparent", stroke: "#94a3b8", strokeWidth: 1,
+      selectable: false, evented: false,
     });
-    (label as any).isMeasurement = true;
-    (label as any).parentId = arrowId;
-    canvas.add(arrow, label);
+    (compassCircle as any).isMeasurement = true;
+    (compassCircle as any).parentId = arrowId;
+    canvas.add(compassCircle);
+
+    // Cardinal labels N/S/E/W
+    const labels = [
+      { text: "N", x: cx, y: cy - s * 1.15, weight: "bold" as const },
+      { text: "S", x: cx, y: cy + s * 1.0, weight: "normal" as const },
+      { text: "E", x: cx + s * 1.05, y: cy - 4, weight: "normal" as const },
+      { text: "W", x: cx - s * 1.1, y: cy - 4, weight: "normal" as const },
+    ];
+    labels.forEach(({ text, x, y, weight }) => {
+      const lbl = new fabric.Text(text, {
+        left: x, top: y, fontSize: text === "N" ? 14 : 10, fontFamily: "sans-serif",
+        fontWeight: weight, fill: text === "N" ? "#1e293b" : "#94a3b8",
+        originX: "center", originY: "center",
+        selectable: false, evented: false,
+      });
+      (lbl as any).isMeasurement = true;
+      (lbl as any).parentId = arrowId;
+      canvas.add(lbl);
+    });
+
+    canvas.renderAll();
+  };
+
+  /** Auto-add dimension lines from each building to nearest parcel boundary edges */
+  const autoAddBoundaryDimensions = () => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const ppm = currentScale.pixelsPerMeter;
+
+    // Find parcel polygon(s)
+    const parcels = canvas.getObjects().filter((o: any) => o.isParcel);
+    if (parcels.length === 0) { alert("No parcel boundary found. Draw a parcel first."); return; }
+
+    // Find buildings
+    const buildings = canvas.getObjects().filter((o: any) =>
+      (o as any).templateType || (o as any).surfaceType === "building"
+    );
+    if (buildings.length === 0) { alert("No buildings found on the plan."); return; }
+
+    // Remove existing boundary dimensions
+    canvas.getObjects().filter((o: any) => o.isBoundaryDimension).forEach(o => canvas.remove(o));
+
+    parcels.forEach((parcel: any) => {
+      // Get parcel edge segments
+      const points = parcel.points || [];
+      if (points.length < 3) return;
+      const mat = parcel.calcTransformMatrix();
+      const worldPts = points.map((p: { x: number; y: number }) => {
+        const pt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), mat);
+        return { x: pt.x, y: pt.y };
+      });
+
+      buildings.forEach((bldg: any) => {
+        const bc = (bldg as fabric.Object).getCenterPoint();
+        let minDist = Infinity;
+        let closestPt = { x: 0, y: 0 };
+
+        // Find closest point on parcel boundary to building center
+        for (let i = 0; i < worldPts.length; i++) {
+          const a = worldPts[i];
+          const b = worldPts[(i + 1) % worldPts.length];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const lenSq = dx * dx + dy * dy;
+          let t = lenSq > 0 ? ((bc.x - a.x) * dx + (bc.y - a.y) * dy) / lenSq : 0;
+          t = Math.max(0, Math.min(1, t));
+          const proj = { x: a.x + t * dx, y: a.y + t * dy };
+          const d = Math.sqrt((bc.x - proj.x) ** 2 + (bc.y - proj.y) ** 2);
+          if (d < minDist) { minDist = d; closestPt = proj; }
+        }
+
+        const distM = minDist / ppm;
+        const dimId = `bdim-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        // Dimension line
+        const dimLine = new fabric.Line([bc.x, bc.y, closestPt.x, closestPt.y], {
+          stroke: "#f97316", strokeWidth: 1.5, strokeDashArray: [4, 3],
+          selectable: false, evented: false,
+        });
+        (dimLine as any).isBoundaryDimension = true;
+        (dimLine as any).isMeasurement = true;
+        (dimLine as any).parentId = dimId;
+        canvas.add(dimLine);
+
+        // Label
+        const mx = (bc.x + closestPt.x) / 2, my = (bc.y + closestPt.y) / 2;
+        const label = new fabric.Text(`${distM.toFixed(2)} m`, {
+          left: mx, top: my - 10, fontSize: 10, fontFamily: "monospace",
+          fill: "#f97316", backgroundColor: "rgba(255,255,255,0.85)", padding: 2,
+          originX: "center", originY: "bottom",
+          selectable: false, evented: false,
+        });
+        (label as any).isBoundaryDimension = true;
+        (label as any).isMeasurement = true;
+        (label as any).parentId = dimId;
+        canvas.add(label);
+      });
+    });
+
     canvas.renderAll();
   };
 
@@ -1534,14 +1798,18 @@ function SitePlanContent() {
 
   // ─── Computed values ───────────────────────────────────────────────────────
 
-  const BUILDING_TEMPLATES = ["house", "garage", "terrace"];
+  const BUILDING_TEMPLATES = ["house", "garage", "terrace", "pool"];
 
   const computeFootprintData = (): FootprintData => {
     const canvas = fabricRef.current;
     const ppm = currentScale.pixelsPerMeter;
     const pToM = (p: number) => p / ppm;
     let existingFootprint = 0, projectedFootprint = 0;
-    const surfacesByType: Record<string, number> = { green: 0, gravel: 0, concrete: 0, asphalt: 0, building: 0 };
+    const surfacesByType: Record<string, number> = {
+      natural_green: 0, gravel: 0, evergreen_system: 0, pavers_pedestals: 0,
+      drainage_pavement: 0, vegetated_flat_roof: 0, asphalt: 0, bitumen: 0,
+      concrete: 0, standard_roof: 0, building: 0,
+    };
 
     if (canvas) {
       canvas.getObjects().forEach((obj: any) => {
@@ -1555,8 +1823,10 @@ function SitePlanContent() {
           for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
           area = Math.abs(a) / 2 / (ppm * ppm);
         }
-        const st = obj.surfaceType || "building";
+        const rawSt = obj.surfaceType || "building";
+        const st = SURFACE_ID_COMPAT[rawSt] ?? rawSt;
         if (st in surfacesByType) surfacesByType[st] += area;
+        else surfacesByType[st] = area; // handle unknown types
         if ((obj.templateType && BUILDING_TEMPLATES.includes(obj.templateType)) || st === "building") {
           if (obj.isExistingBuilding) existingFootprint += area;
           else projectedFootprint += area;
@@ -1578,7 +1848,7 @@ function SitePlanContent() {
       roofOverhang: totalOverhang,
       includeOverhangInFootprint: projectData?.includeOverhangInFootprint ?? false,
       totalSiteArea: parcelArea,
-      greenSpaceArea: surfacesByType.green || 0,
+      greenSpaceArea: surfacesByType.natural_green || 0,
       requiredGreenPct: projectData?.minGreenPct ?? 20,
       maxCoverageRatio: maxCov,
       surfacesByType,
@@ -1839,6 +2109,12 @@ function SitePlanContent() {
             <button onClick={addNorthArrow} className="w-12 h-10 rounded-xl flex items-center justify-center text-sky-400 hover:bg-sky-500/20 transition-all" title="North Arrow">
               <Compass className="w-4 h-4" />
             </button>
+            <button onClick={() => setShowLegend(v => !v)} className={cn("w-12 h-10 rounded-xl flex items-center justify-center transition-all", showLegend ? "bg-violet-100 text-violet-600" : "text-violet-400 hover:bg-violet-500/20")} title="Legend">
+              <FileText className="w-4 h-4" />
+            </button>
+            <button onClick={autoAddBoundaryDimensions} className="w-12 h-10 rounded-xl flex items-center justify-center text-orange-400 hover:bg-orange-500/20 transition-all" title="Auto Boundary Dimensions">
+              <Ruler className="w-4 h-4" />
+            </button>
             {currentProjectId && (
               <Link href={`/building-3d?project=${currentProjectId}`} className="w-12 h-10 rounded-xl flex items-center justify-center text-violet-400 hover:bg-violet-500/20 transition-all" title="Full 3D Editor">
                 <Box className="w-4 h-4" />
@@ -1908,6 +2184,43 @@ function SitePlanContent() {
               <div className="absolute inset-0 flex items-center justify-center bg-white">
                 <canvas ref={canvasRef} className="shadow-2xl" />
               </div>
+              <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
+              {/* Floating Real-Time Summary Panel */}
+              {(() => {
+                const fd = computeFootprintData();
+                const totalFp = fd.existingFootprint + (fd.includeOverhangInFootprint ? fd.projectedFootprint + fd.roofOverhang : fd.projectedFootprint);
+                const cesVal = fd.totalSiteArea > 0 ? (totalFp / fd.totalSiteArea * 100) : 0;
+                const greenVal = fd.totalSiteArea > 0 ? (fd.greenSpaceArea / fd.totalSiteArea * 100) : 0;
+                const cesOk = cesVal <= fd.maxCoverageRatio * 100;
+                const greenOk = greenVal >= fd.requiredGreenPct;
+                // 3-tier totals
+                let perm = 0, semi = 0, imp = 0;
+                Object.entries(fd.surfacesByType).forEach(([k, v]) => {
+                  const cl = SURFACE_CLASSIFICATION[k];
+                  if (cl === "permeable") perm += v;
+                  else if (cl === "semi-permeable") semi += v;
+                  else imp += v;
+                });
+                return (
+                  <div className="absolute top-4 right-4 z-20 w-52 bg-white/95 backdrop-blur-sm rounded-xl border border-slate-200 shadow-lg p-3 space-y-2">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Real-Time Summary</h4>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-600">CES</span>
+                      <span className={cn("font-mono font-semibold", cesOk ? "text-emerald-600" : "text-red-500")}>{cesVal.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-600">Green space</span>
+                      <span className={cn("font-mono font-semibold", greenOk ? "text-emerald-600" : "text-amber-500")}>{greenVal.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-px bg-slate-200" />
+                    <div className="space-y-1 text-[11px]">
+                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Permeable</span><span className="font-mono">{perm.toFixed(1)} m²</span></div>
+                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" />Semi-Perm.</span><span className="font-mono">{semi.toFixed(1)} m²</span></div>
+                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />Imperméable</span><span className="font-mono">{imp.toFixed(1)} m²</span></div>
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           ) : (
             <div className="absolute inset-0 bg-white">
@@ -1945,12 +2258,12 @@ function SitePlanContent() {
                   const next = prev.map((bd) =>
                     bd.id === buildingId
                       ? {
-                          ...bd,
-                          ...(patch.width != null && { width: patch.width }),
-                          ...(patch.depth != null && { depth: patch.depth }),
-                          ...(patch.wallHeights != null && { wallHeights: patch.wallHeights }),
-                          ...(patch.altitudeM !== undefined && { altitudeM: patch.altitudeM }),
-                        }
+                        ...bd,
+                        ...(patch.width != null && { width: patch.width }),
+                        ...(patch.depth != null && { depth: patch.depth }),
+                        ...(patch.wallHeights != null && { wallHeights: patch.wallHeights }),
+                        ...(patch.altitudeM !== undefined && { altitudeM: patch.altitudeM }),
+                      }
                       : bd
                   );
                   const updated = next.find((b) => b.id === buildingId);
@@ -1992,216 +2305,216 @@ function SitePlanContent() {
             />
           ) : (
             <>
-          <div className="flex border-b border-slate-200">
-            {([
-              { id: "layers" as const, label: "Layers", icon: Layers },
-              { id: "buildings" as const, label: "Buildings", icon: Building2 },
-              { id: "footprint" as const, label: "Footprint", icon: LayoutGrid },
-            ]).map((tab) => (
-              <button key={tab.id} onClick={() => setRightTab(tab.id)}
-                className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors",
-                  rightTab === tab.id ? "text-slate-900 border-b-2 border-blue-500 bg-white" : "text-slate-400 hover:text-slate-900"
-                )}>
-                <tab.icon className="w-3.5 h-3.5" />{tab.label}
-              </button>
-            ))}
-          </div>
+              <div className="flex border-b border-slate-200">
+                {([
+                  { id: "layers" as const, label: "Layers", icon: Layers },
+                  { id: "buildings" as const, label: "Buildings", icon: Building2 },
+                  { id: "footprint" as const, label: "Footprint", icon: LayoutGrid },
+                ]).map((tab) => (
+                  <button key={tab.id} onClick={() => setRightTab(tab.id)}
+                    className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors",
+                      rightTab === tab.id ? "text-slate-900 border-b-2 border-blue-500 bg-white" : "text-slate-400 hover:text-slate-900"
+                    )}>
+                    <tab.icon className="w-3.5 h-3.5" />{tab.label}
+                  </button>
+                ))}
+              </div>
 
-          {/* Compliance */}
-          {currentProjectId && (
-            <div className="border-b border-slate-200">
-              <button onClick={() => setShowCompliance(!showCompliance)} className="w-full flex items-center justify-between p-3 text-left hover:bg-white">
-                <span className="text-sm font-medium text-slate-900 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Compliance</span>
-                <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
-              </button>
-              {showCompliance && complianceChecks.length > 0 && (
-                <div className="p-3 pt-0 max-h-32 overflow-y-auto space-y-1.5">
-                  {complianceChecks.map((c, i) => (
-                    <div key={i} className={cn("p-2 rounded-lg text-xs",
-                      c.status === "compliant" && "bg-emerald-50 text-emerald-600",
-                      c.status === "warning" && "bg-amber-50 text-amber-600",
-                      c.status === "violation" && "bg-red-50 text-red-600"
-                    )}><span className="font-medium">{c.rule}</span>: {c.message}</div>
-                  ))}
+              {/* Compliance */}
+              {currentProjectId && (
+                <div className="border-b border-slate-200">
+                  <button onClick={() => setShowCompliance(!showCompliance)} className="w-full flex items-center justify-between p-3 text-left hover:bg-white">
+                    <span className="text-sm font-medium text-slate-900 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Compliance</span>
+                    <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
+                  </button>
+                  {showCompliance && complianceChecks.length > 0 && (
+                    <div className="p-3 pt-0 max-h-32 overflow-y-auto space-y-1.5">
+                      {complianceChecks.map((c, i) => (
+                        <div key={i} className={cn("p-2 rounded-lg text-xs",
+                          c.status === "compliant" && "bg-emerald-50 text-emerald-600",
+                          c.status === "warning" && "bg-amber-50 text-amber-600",
+                          c.status === "violation" && "bg-red-50 text-red-600"
+                        )}><span className="font-medium">{c.rule}</span>: {c.message}</div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
 
-          {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto">
-            {rightTab === "layers" && (
-              <div className="p-3">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Layers className="w-4 h-4" />Layers</h3>
-                  <span className="text-xs text-slate-500">{layers.length}</span>
-                </div>
-                {layers.length === 0 ? (
-                  <p className="text-center py-6 text-slate-500 text-sm">No objects yet. Draw shapes or add buildings.</p>
-                ) : (
-                  <div className="space-y-1">
-                    {layers.map((layer) => (
-                      <div key={layer.id} className="flex items-center gap-2 p-2 rounded-lg bg-white hover:bg-slate-100">
-                        <div className={cn("w-7 h-7 rounded flex items-center justify-center",
-                          layer.name === "Land Parcel" ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600"
-                        )}>
-                          {layer.name === "Land Parcel" ? <MapPin className="w-3 h-3" /> :
-                            layer.type === "rect" ? <Square className="w-3 h-3" /> :
-                            layer.type === "circle" ? <Circle className="w-3 h-3" /> :
-                            layer.type === "line" ? <Minus className="w-3 h-3" /> :
-                            <Pentagon className="w-3 h-3" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-slate-900 truncate capitalize">{layer.name}</p>
-                          <p className="text-[10px] text-slate-500">{layer.type}</p>
-                        </div>
-                        <button className="p-1 text-slate-400 hover:text-slate-900">
-                          {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                        </button>
+              {/* Tab Content */}
+              <div className="flex-1 overflow-y-auto">
+                {rightTab === "layers" && (
+                  <div className="p-3">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Layers className="w-4 h-4" />Layers</h3>
+                      <span className="text-xs text-slate-500">{layers.length}</span>
+                    </div>
+                    {layers.length === 0 ? (
+                      <p className="text-center py-6 text-slate-500 text-sm">No objects yet. Draw shapes or add buildings.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {layers.map((layer) => (
+                          <div key={layer.id} className="flex items-center gap-2 p-2 rounded-lg bg-white hover:bg-slate-100">
+                            <div className={cn("w-7 h-7 rounded flex items-center justify-center",
+                              layer.name === "Land Parcel" ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600"
+                            )}>
+                              {layer.name === "Land Parcel" ? <MapPin className="w-3 h-3" /> :
+                                layer.type === "rect" ? <Square className="w-3 h-3" /> :
+                                  layer.type === "circle" ? <Circle className="w-3 h-3" /> :
+                                    layer.type === "line" ? <Minus className="w-3 h-3" /> :
+                                      <Pentagon className="w-3 h-3" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-slate-900 truncate capitalize">{layer.name}</p>
+                              <p className="text-[10px] text-slate-500">{layer.type}</p>
+                            </div>
+                            <button className="p-1 text-slate-400 hover:text-slate-900">
+                              {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+                  </div>
+                )}
+
+                {rightTab === "buildings" && (
+                  <div className="p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-slate-900">Building Details</h3>
+                      <span className="text-xs text-slate-500">{buildingDetails.length}</span>
+                    </div>
+                    {buildingDetails.length === 0 ? (
+                      <div className="text-center py-6 space-y-3">
+                        <p className="text-sm text-slate-500">No buildings yet.</p>
+                        <div className="flex flex-col gap-2">
+                          <button onClick={addExistingBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
+                            <Building2 className="w-3 h-3" />Add Existing Building
+                          </button>
+                          <button onClick={addNewBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
+                            <Plus className="w-3 h-3" />Add New Construction
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {buildingDetails.map((b) => (
+                          <BuildingDetailPanel
+                            key={b.id}
+                            building={b}
+                            highlight={viewMode === "3d" && selectedBuildingId3d === b.id}
+                            onChange={(updated) => {
+                              setBuildingDetails((prev) => prev.map((bd) => (bd.id === updated.id ? updated : bd)));
+                              const canvas = fabricRef.current;
+                              if (canvas) {
+                                const obj = canvas.getObjects().find((o: any) => o.id === updated.id);
+                                if (obj && obj.type === "rect") {
+                                  const wPx = metersToPixels(updated.width), dPx = metersToPixels(updated.depth);
+                                  obj.set({ width: wPx, height: dPx });
+                                  (obj as any).elementName = updated.name;
+                                  removeMeasurements(updated.id);
+                                  addRectMeasurements(obj as fabric.Rect, updated.id);
+                                  canvas.renderAll();
+                                  updateLayers(canvas);
+                                }
+                              }
+                            }}
+                            onRemove={() => {
+                              setBuildingDetails((prev) => prev.filter((bd) => bd.id !== b.id));
+                              const canvas = fabricRef.current;
+                              if (canvas) {
+                                const obj = canvas.getObjects().find((o: any) => o.id === b.id);
+                                if (obj) { removeMeasurements(b.id); canvas.remove(obj); canvas.renderAll(); }
+                              }
+                            }}
+                          />
+                        ))}
+                        <div className="flex gap-2">
+                          <button onClick={addExistingBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
+                            <Building2 className="w-3 h-3" />Existing
+                          </button>
+                          <button onClick={addNewBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
+                            <Plus className="w-3 h-3" />New
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {rightTab === "footprint" && (
+                  <div className="p-3">
+                    <FootprintTable data={footprintData} />
                   </div>
                 )}
               </div>
-            )}
 
-            {rightTab === "buildings" && (
-              <div className="p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-900">Building Details</h3>
-                  <span className="text-xs text-slate-500">{buildingDetails.length}</span>
-                </div>
-                {buildingDetails.length === 0 ? (
-                  <div className="text-center py-6 space-y-3">
-                    <p className="text-sm text-slate-500">No buildings yet.</p>
-                    <div className="flex flex-col gap-2">
-                      <button onClick={addExistingBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
-                        <Building2 className="w-3 h-3" />Add Existing Building
-                      </button>
-                      <button onClick={addNewBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
-                        <Plus className="w-3 h-3" />Add New Construction
-                      </button>
+              {/* Bottom Properties */}
+              <div className="border-t border-slate-200 p-3">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2 flex items-center gap-2"><Settings className="w-4 h-4" />Properties</h3>
+                {selectedObject ? (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Name</label>
+                      <input type="text" value={String((selectedObject as any).elementName ?? (selectedObject as any).name ?? "")}
+                        onChange={(e) => {
+                          (selectedObject as any).elementName = e.target.value;
+                          (selectedObject as any).name = e.target.value;
+                          fabricRef.current?.requestRenderAll();
+                          updateLayers(fabricRef.current!);
+                        }}
+                        placeholder="e.g. Main building"
+                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {selectedObject.width != null && (
+                        <div><span className="text-slate-500">Width: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}</span></div>
+                      )}
+                      {selectedObject.height != null && (
+                        <div><span className="text-slate-500">Height: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}</span></div>
+                      )}
                     </div>
                   </div>
                 ) : (
-                  <>
-                    {buildingDetails.map((b) => (
-                      <BuildingDetailPanel
-                        key={b.id}
-                        building={b}
-                        highlight={viewMode === "3d" && selectedBuildingId3d === b.id}
-                        onChange={(updated) => {
-                          setBuildingDetails((prev) => prev.map((bd) => (bd.id === updated.id ? updated : bd)));
-                          const canvas = fabricRef.current;
-                          if (canvas) {
-                            const obj = canvas.getObjects().find((o: any) => o.id === updated.id);
-                            if (obj && obj.type === "rect") {
-                              const wPx = metersToPixels(updated.width), dPx = metersToPixels(updated.depth);
-                              obj.set({ width: wPx, height: dPx });
-                              (obj as any).elementName = updated.name;
-                              removeMeasurements(updated.id);
-                              addRectMeasurements(obj as fabric.Rect, updated.id);
-                              canvas.renderAll();
-                              updateLayers(canvas);
-                            }
-                          }
-                        }}
-                        onRemove={() => {
-                          setBuildingDetails((prev) => prev.filter((bd) => bd.id !== b.id));
-                          const canvas = fabricRef.current;
-                          if (canvas) {
-                            const obj = canvas.getObjects().find((o: any) => o.id === b.id);
-                            if (obj) { removeMeasurements(b.id); canvas.remove(obj); canvas.renderAll(); }
-                          }
-                        }}
-                      />
-                    ))}
-                    <div className="flex gap-2">
-                      <button onClick={addExistingBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
-                        <Building2 className="w-3 h-3" />Existing
-                      </button>
-                      <button onClick={addNewBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
-                        <Plus className="w-3 h-3" />New
-                      </button>
-                    </div>
-                  </>
+                  <p className="text-xs text-slate-500">Select an object</p>
                 )}
-              </div>
-            )}
-
-            {rightTab === "footprint" && (
-              <div className="p-3">
-                <FootprintTable data={footprintData} />
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Properties */}
-          <div className="border-t border-slate-200 p-3">
-            <h3 className="text-sm font-semibold text-slate-900 mb-2 flex items-center gap-2"><Settings className="w-4 h-4" />Properties</h3>
-            {selectedObject ? (
-              <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">Name</label>
-                  <input type="text" value={String((selectedObject as any).elementName ?? (selectedObject as any).name ?? "")}
-                    onChange={(e) => {
-                      (selectedObject as any).elementName = e.target.value;
-                      (selectedObject as any).name = e.target.value;
-                      fabricRef.current?.requestRenderAll();
-                      updateLayers(fabricRef.current!);
-                    }}
-                    placeholder="e.g. Main building"
-                    className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm" />
+                <div className="mt-3">
+                  <label className="text-xs text-slate-500 block mb-1.5">Surface</label>
+                  <div className="flex flex-wrap gap-1">
+                    {SURFACE_TYPES.map((st) => (
+                      <button key={st.id} onClick={() => setActiveSurfaceType(st)}
+                        className={cn("px-2 py-0.5 rounded text-[10px] font-medium", activeSurfaceType.id === st.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
+                        style={{ backgroundColor: st.color + "40", color: st.color }}
+                        title={(st as { tooltip?: string }).tooltip || st.label}>{st.label}</button>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  {selectedObject.width != null && (
-                    <div><span className="text-slate-500">Width: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}</span></div>
-                  )}
-                  {selectedObject.height != null && (
-                    <div><span className="text-slate-500">Height: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}</span></div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500">Select an object</p>
-            )}
-            <div className="mt-3">
-              <label className="text-xs text-slate-500 block mb-1.5">Surface</label>
-              <div className="flex flex-wrap gap-1">
-                {SURFACE_TYPES.map((st) => (
-                  <button key={st.id} onClick={() => setActiveSurfaceType(st)}
-                    className={cn("px-2 py-0.5 rounded text-[10px] font-medium", activeSurfaceType.id === st.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
-                    style={{ backgroundColor: st.color + "40", color: st.color }}
-                    title={(st as { tooltip?: string }).tooltip || st.label}>{st.label}</button>
-                ))}
-              </div>
-            </div>
-            {activeTool === "vrd" && (
-              <div className="mt-3">
-                <label className="text-xs text-slate-500 block mb-1.5">VRD Network</label>
-                <div className="flex flex-wrap gap-1">
-                  {VRD_TYPES.map((v) => (
-                    <button key={v.id} onClick={() => setActiveVrdType(v)}
-                      className={cn("px-2 py-0.5 rounded text-[10px]", activeVrdType.id === v.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
-                      style={{ backgroundColor: v.color + "40", color: v.color }}>{v.label}</button>
-                  ))}
+                {activeTool === "vrd" && (
+                  <div className="mt-3">
+                    <label className="text-xs text-slate-500 block mb-1.5">VRD Network</label>
+                    <div className="flex flex-wrap gap-1">
+                      {VRD_TYPES.map((v) => (
+                        <button key={v.id} onClick={() => setActiveVrdType(v)}
+                          className={cn("px-2 py-0.5 rounded text-[10px]", activeVrdType.id === v.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
+                          style={{ backgroundColor: v.color + "40", color: v.color }}>{v.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-3 flex items-center gap-3">
+                  <div className="flex flex-wrap gap-1">
+                    {paletteColors.slice(0, 6).map((c) => (
+                      <button key={c} onClick={() => setActiveColor(c)}
+                        className={cn("w-5 h-5 rounded", activeColor === c && "ring-2 ring-white ring-offset-1 ring-offset-slate-900")}
+                        style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Stroke: {strokeWidth}px
+                    <input type="range" min={1} max={10} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-16 accent-blue-500 ml-1" />
+                  </div>
                 </div>
               </div>
-            )}
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex flex-wrap gap-1">
-                {paletteColors.slice(0, 6).map((c) => (
-                  <button key={c} onClick={() => setActiveColor(c)}
-                    className={cn("w-5 h-5 rounded", activeColor === c && "ring-2 ring-white ring-offset-1 ring-offset-slate-900")}
-                    style={{ backgroundColor: c }} />
-                ))}
-              </div>
-              <div className="text-xs text-slate-500">
-                Stroke: {strokeWidth}px
-                <input type="range" min={1} max={10} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-16 accent-blue-500 ml-1" />
-              </div>
-            </div>
-          </div>
             </>
           )}
         </div>

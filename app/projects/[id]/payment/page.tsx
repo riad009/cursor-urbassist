@@ -13,6 +13,7 @@ import {
   Shield,
   Sparkles,
   Lock,
+  RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
@@ -34,6 +35,7 @@ export default function PaymentPage({
     address?: string;
     authorizationType?: string;
     authorizationExplanation?: string;
+    pluAnalysisCount?: number;
     projectDescription?: {
       architectRequired?: boolean;
       wantPluAnalysis?: boolean;
@@ -44,8 +46,8 @@ export default function PaymentPage({
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
-  const [credits, setCredits] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pricing, setPricing] = useState({ first: 15, relaunch: 5 });
 
   const success = searchParams.get("success");
   const returnTo = searchParams.get("returnTo");
@@ -53,10 +55,15 @@ export default function PaymentPage({
   useEffect(() => {
     Promise.all([
       fetch(`/api/projects/${projectId}`).then((r) => r.json()),
-      fetch("/api/credits").then((r) => r.json()).catch(() => ({ credits: 0 })),
-    ]).then(([projectData, creditsData]) => {
+      fetch("/api/settings").then((r) => r.json()).catch(() => ({})),
+    ]).then(([projectData, settings]) => {
       if (projectData.project) setProject(projectData.project);
-      setCredits(creditsData.credits ?? 0);
+      if (settings.pluFirstAnalysisPriceEur) {
+        setPricing({
+          first: settings.pluFirstAnalysisPriceEur,
+          relaunch: settings.pluRelaunchPriceEur ?? 5,
+        });
+      }
       setLoading(false);
     });
   }, [projectId]);
@@ -68,7 +75,6 @@ export default function PaymentPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paidAt: new Date().toISOString() }),
       }).then(() => {
-        // Always redirect to project-description after payment
         router.push(`/projects/${projectId}/dashboard`);
       });
     }
@@ -83,8 +89,7 @@ export default function PaymentPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
-          type: "credits",
-          packageId: "credits-10",
+          type: "plu_analysis",
         }),
       });
       const data = await res.json();
@@ -96,6 +101,7 @@ export default function PaymentPage({
       if (data.url) {
         window.location.href = data.url;
       } else if (data.success) {
+        // Demo mode: payment processed immediately
         await fetch(`/api/projects/${projectId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -121,7 +127,6 @@ export default function PaymentPage({
   }
 
   // If Stripe returned ?success=true, show success screen immediately
-  // (don't show the payment form while we wait for paidAt to be set)
   if (success === "true") {
     return (
       <Navigation>
@@ -141,13 +146,15 @@ export default function PaymentPage({
 
   const authType = project?.authorizationType;
   const isDP = authType === "DP";
-  const isPC = authType === "PC" || authType === "ARCHITECT_REQUIRED";
   const architectRequired = project?.projectDescription?.architectRequired;
   const wantPluAnalysis = project?.projectDescription?.wantPluAnalysis ?? true;
   const wantCerfa = project?.projectDescription?.wantCerfa ?? true;
   const alreadyPaid = !!project?.paidAt;
+  const analysisCount = project?.pluAnalysisCount ?? 0;
+  const isRelaunch = analysisCount > 0;
+  const currentPrice = isRelaunch ? pricing.relaunch : pricing.first;
 
-  if (alreadyPaid) {
+  if (alreadyPaid && !isRelaunch) {
     return (
       <Navigation>
         <div className="min-h-screen flex items-center justify-center p-4">
@@ -176,7 +183,11 @@ export default function PaymentPage({
 
           {/* Header */}
           <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold text-slate-900">{t("pay.activateTitle")}</h1>
+            <h1 className="text-2xl font-bold text-slate-900">
+              {isRelaunch
+                ? (t("pay.processing") === "Processing…" ? "Relaunch PLU Analysis" : "Relancer l'analyse PLU")
+                : t("pay.activateTitle")}
+            </h1>
             <p className="text-sm text-slate-500">{project?.name}</p>
           </div>
 
@@ -235,16 +246,61 @@ export default function PaymentPage({
             </div>
           )}
 
+          {/* Analysis relaunch info */}
+          {isRelaunch && (
+            <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 flex items-start gap-3">
+              <RefreshCw className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-blue-700">
+                  {t("pay.processing") === "Processing…"
+                    ? "Analysis relaunch"
+                    : "Relance d'analyse"}
+                </p>
+                <p className="text-xs text-blue-600 mt-1">
+                  {t("pay.processing") === "Processing…"
+                    ? `You have already completed ${analysisCount} analysis${analysisCount > 1 ? "es" : ""}. This relaunch will update your PLU analysis after project modifications.`
+                    : `Vous avez déjà effectué ${analysisCount} analyse${analysisCount > 1 ? "s" : ""}. Cette relance mettra à jour votre analyse PLU après modification du projet.`}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Payment CTA */}
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-lg font-bold text-slate-900">{t("pay.oneCredit")}</p>
-                <p className="text-xs text-slate-500">{t("pay.currentBalance")} : {credits} {t("desc.credits")}</p>
+                <p className="text-lg font-bold text-slate-900">
+                  {isRelaunch
+                    ? (t("pay.processing") === "Processing…" ? "Updated Analysis" : "Analyse mise à jour")
+                    : (t("pay.processing") === "Processing…" ? "PLU Analysis" : "Analyse PLU")}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {isRelaunch
+                    ? (t("pay.processing") === "Processing…"
+                      ? "Additional analysis after project modification"
+                      : "Analyse complémentaire après modification du projet")
+                    : (t("pay.processing") === "Processing…"
+                      ? "Complete regulatory analysis for your project"
+                      : "Analyse réglementaire complète pour votre projet")}
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-slate-900">9,90 €</p>
-                <p className="text-[11px] text-slate-500">{t("pay.perFile")}</p>
+                <p className="text-2xl font-bold text-slate-900">{currentPrice} €</p>
+                {isRelaunch && (
+                  <p className="text-[11px] text-slate-400 line-through">{pricing.first} €</p>
+                )}
+              </div>
+            </div>
+
+            {/* Price breakdown */}
+            <div className="rounded-lg bg-white border border-slate-100 p-3 text-xs text-slate-500 space-y-1">
+              <div className="flex justify-between">
+                <span>{t("pay.processing") === "Processing…" ? "First analysis" : "Première analyse"}</span>
+                <span className="font-medium text-slate-700">{pricing.first} €</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{t("pay.processing") === "Processing…" ? "Relaunch after modification" : "Relance après modification"}</span>
+                <span className="font-medium text-slate-700">{pricing.relaunch} €</span>
               </div>
             </div>
 
@@ -268,8 +324,8 @@ export default function PaymentPage({
                 <>
                   <CreditCard className="w-5 h-5" />{" "}
                   {t("pay.processing") === "Processing…"
-                    ? "Confirm and access editor"
-                    : "Confirmer et accéder à l'éditeur"}
+                    ? `Pay ${currentPrice} € and start analysis`
+                    : `Payer ${currentPrice} € et lancer l'analyse`}
                 </>
               )}
             </button>

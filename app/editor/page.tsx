@@ -38,13 +38,20 @@ import {
   AlertTriangle,
   ChevronDown,
   Box,
+  Pencil,
+  StickyNote,
+  DoorOpen,
+  PanelTop,
+  ToggleLeft,
+  ToggleRight,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
 
-type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd";
+type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd" | "pencil" | "annotation";
 
 interface LayerItem {
   id: string;
@@ -73,10 +80,12 @@ const tools = [
   { id: "rectangle", label: "Rectangle", icon: Square, shortcut: "R" },
   { id: "polygon", label: "Polygon", icon: Pentagon, shortcut: "P" },
   { id: "circle", label: "Circle", icon: Circle, shortcut: "C" },
+  { id: "pencil", label: "Free Draw", icon: Pencil, shortcut: "B" },
   { id: "measure", label: "Measure", icon: Ruler, shortcut: "M" },
   { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A" },
   { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D" },
   { id: "text", label: "Text", icon: Type, shortcut: "T" },
+  { id: "annotation", label: "Annotation", icon: MessageSquare, shortcut: "N" },
   { id: "pan", label: "Pan", icon: Move, shortcut: "H" },
 ];
 
@@ -87,6 +96,23 @@ const templates = [
   { id: "pool", label: "Pool", icon: Droplets, color: "#06b6d4", width: 10, height: 5 },
   { id: "garden", label: "Garden", icon: Trees, color: "#22c55e", width: 8, height: 8 },
   { id: "terrace", label: "Terrace", icon: Hexagon, color: "#ec4899", width: 6, height: 4 },
+  { id: "window", label: "Window 1.2×1.2m", icon: PanelTop, color: "#0ea5e9", width: 1.2, height: 1.2 },
+  { id: "door", label: "Door 0.9×2.1m", icon: DoorOpen, color: "#a855f7", width: 0.9, height: 2.1 },
+  { id: "sliding-door", label: "Sliding Door 2.4×2.1m", icon: DoorOpen, color: "#d946ef", width: 2.4, height: 2.1 },
+];
+
+const ROOF_TYPES = [
+  { id: "flat", label: "Flat" },
+  { id: "gable", label: "Gable" },
+  { id: "hip", label: "Hip" },
+  { id: "mansard", label: "Mansard" },
+];
+
+const SHUTTER_TYPES = [
+  { id: "none", label: "None" },
+  { id: "roller", label: "Roller Shutters" },
+  { id: "traditional", label: "Traditional Shutters" },
+  { id: "folding", label: "Folding Shutters" },
 ];
 
 const SURFACE_TYPES = [
@@ -159,6 +185,8 @@ function EditorPageContent() {
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
   const [showCompliance, setShowCompliance] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
+  const [editorMode, setEditorMode] = useState<"guided" | "free">("guided");
+  const annotationCounterRef = useRef(0);
 
   const updateLayers = useCallback((canvas: fabric.Canvas) => {
     const objects = canvas.getObjects().filter(obj => {
@@ -223,6 +251,20 @@ function EditorPageContent() {
   useEffect(() => {
     projectDataRef.current = projectForEditor ? { parcelGeometry: projectForEditor.parcelGeometry } : null;
   }, [projectForEditor]);
+
+  // Auto-detect free mode when no regulatory analysis exists
+  useEffect(() => {
+    if (!currentProjectId) return;
+    fetch(`/api/projects/${currentProjectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const project = d.project;
+        if (project && !project.regulatoryAnalysis) {
+          setEditorMode("free");
+        }
+      })
+      .catch(() => { });
+  }, [currentProjectId]);
 
   const addPolygonMeasurements = useCallback(
     (polygon: fabric.Polygon, id: string) => {
@@ -454,7 +496,7 @@ function EditorPageContent() {
   // Real-time compliance: debounced check on draw/move/change
   const complianceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runComplianceCheck = useCallback(() => {
-    if (!currentProjectId) return;
+    if (!currentProjectId || editorMode === "free") return;
     const canvas = fabricRef.current;
     if (!canvas) return;
     if (complianceDebounceRef.current) clearTimeout(complianceDebounceRef.current);
@@ -494,7 +536,7 @@ function EditorPageContent() {
         // ignore
       }
     }, 800);
-  }, [currentProjectId, currentScale.pixelsPerMeter]);
+  }, [currentProjectId, currentScale.pixelsPerMeter, editorMode]);
 
   // Convert pixels to meters based on scale
   const pixelsToMeters = useCallback((pixels: number) => {
@@ -530,16 +572,16 @@ function EditorPageContent() {
 
     const distance = calculateDistance(x1, y1, x2, y2);
     const label = formatMeasurement(distance);
-    
+
     // Calculate angle and midpoint
     const angle = Math.atan2(y2 - y1, x2 - x1);
     const midX = (x1 + x2) / 2;
     const midY = (y1 + y2) / 2;
-    
+
     // Offset perpendicular to the line
     const offsetX = Math.sin(angle) * offset;
     const offsetY = -Math.cos(angle) * offset;
-    
+
     const dimX1 = x1 + offsetX;
     const dimY1 = y1 + offsetY;
     const dimX2 = x2 + offsetX;
@@ -608,7 +650,7 @@ function EditorPageContent() {
     // Create text label with background
     const textAngle = (angle * 180) / Math.PI;
     const adjustedAngle = textAngle > 90 || textAngle < -90 ? textAngle + 180 : textAngle;
-    
+
     const text = new fabric.Text(label, {
       left: dimMidX,
       top: dimMidY - 8,
@@ -643,7 +685,7 @@ function EditorPageContent() {
 
     // Bottom measurement (width)
     measurements.push(...createDimensionLine(left, top + height, left + width, top + height, id, 25, "#fbbf24"));
-    
+
     // Right measurement (height)
     measurements.push(...createDimensionLine(left + width, top, left + width, top + height, id, 25, "#fbbf24"));
 
@@ -884,7 +926,7 @@ function EditorPageContent() {
 
       if (isDrawing && drawingStart) {
         const distance = calculateDistance(drawingStart.x, drawingStart.y, pointer.x, pointer.y);
-        
+
         // Update live measurement display based on tool
         if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd") {
           setCurrentMeasurement(formatMeasurement(distance));
@@ -948,9 +990,15 @@ function EditorPageContent() {
     };
 
     const handleMouseDown = (e: fabric.TPointerEventInfo) => {
-      if (activeTool === "select" || activeTool === "pan") return;
-      
+      if (activeTool === "select" || activeTool === "pan" || activeTool === "pencil") return;
+
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
+
+      // Annotation mode - place annotation on click
+      if (activeTool === "annotation") {
+        addAnnotation(pointer.x, pointer.y);
+        return;
+      }
 
       // Polygon/Parcel mode - add points on click
       if (activeTool === "polygon" || activeTool === "parcel") {
@@ -964,7 +1012,7 @@ function EditorPageContent() {
 
     const handleMouseUp = (e: fabric.TPointerEventInfo) => {
       if (!isDrawing || !drawingStart) return;
-      
+
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
 
       // Remove temp shape
@@ -1012,7 +1060,7 @@ function EditorPageContent() {
         const top = Math.min(drawingStart.y, pointer.y);
         const width = Math.abs(pointer.x - drawingStart.x);
         const height = Math.abs(pointer.y - drawingStart.y);
-        
+
         if (width > 5 && height > 5) {
           const rect = new fabric.Rect({
             left,
@@ -1073,11 +1121,11 @@ function EditorPageContent() {
     const handleDoubleClick = () => {
       if ((activeTool === "polygon" || activeTool === "parcel") && polygonPoints.length >= 3) {
         const shapeId = `parcel-${Date.now()}`;
-        
+
         // Calculate centroid to normalize points
         const centroidX = polygonPoints.reduce((sum, p) => sum + p.x, 0) / polygonPoints.length;
         const centroidY = polygonPoints.reduce((sum, p) => sum + p.y, 0) / polygonPoints.length;
-        
+
         const normalizedPoints = polygonPoints.map(p => ({
           x: p.x - centroidX,
           y: p.y - centroidY,
@@ -1092,16 +1140,16 @@ function EditorPageContent() {
           originX: "center",
           originY: "center",
         });
-        
+
         (polygon as any).id = shapeId;
         (polygon as any).isParcel = activeTool === "parcel";
         (polygon as any).elementName = activeTool === "parcel" ? "Land Parcel" : (activeSurfaceType.label || "Polygon");
         if (activeTool === "polygon") (polygon as any).surfaceType = activeSurfaceType.id;
         canvas.add(polygon);
-        
+
         // Add measurements to all sides automatically
         addPolygonMeasurements(polygon, shapeId);
-        
+
         canvas.renderAll();
         setPolygonPoints([]);
       }
@@ -1197,18 +1245,73 @@ function EditorPageContent() {
     setActiveTool(tool);
     setPolygonPoints([]);
     setCurrentMeasurement("");
-    
+
     const canvas = fabricRef.current;
     if (!canvas) return;
 
-    canvas.isDrawingMode = false;
-    canvas.selection = tool === "select";
+    // Handle pencil (free draw) mode
+    if (tool === "pencil") {
+      canvas.isDrawingMode = true;
+      canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+      canvas.freeDrawingBrush.color = activeColor;
+      canvas.freeDrawingBrush.width = strokeWidth;
+      canvas.selection = false;
+    } else {
+      canvas.isDrawingMode = false;
+      canvas.selection = tool === "select";
+    }
   };
+
+  // Place annotation on canvas click
+  const addAnnotation = useCallback((x: number, y: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    annotationCounterRef.current += 1;
+    const num = annotationCounterRef.current;
+    const shapeId = `annotation-${Date.now()}`;
+
+    // Circle marker
+    const marker = new fabric.Circle({
+      radius: 14,
+      fill: "#f59e0b",
+      stroke: "#b45309",
+      strokeWidth: 2,
+      originX: "center",
+      originY: "center",
+    });
+    // Number label
+    const numText = new fabric.Text(String(num), {
+      fontSize: 14,
+      fontFamily: "sans-serif",
+      fontWeight: "bold",
+      fill: "#ffffff",
+      originX: "center",
+      originY: "center",
+    });
+    // Note text
+    const noteText = new fabric.Text("Note...", {
+      fontSize: 12,
+      fontFamily: "sans-serif",
+      fill: "#78716c",
+      left: 20,
+      top: -8,
+    });
+    const group = new fabric.Group([marker, numText, noteText], {
+      left: x - 14,
+      top: y - 14,
+    });
+    (group as any).id = shapeId;
+    (group as any).elementName = `Annotation #${num}`;
+    (group as any).isAnnotation = true;
+    canvas.add(group);
+    canvas.setActiveObject(group);
+    canvas.renderAll();
+  }, []);
 
   const handleZoom = (delta: number) => {
     const newZoom = Math.max(25, Math.min(400, zoom + delta));
     setZoom(newZoom);
-    
+
     const canvas = fabricRef.current;
     if (canvas) {
       canvas.setZoom(newZoom / 100);
@@ -1239,7 +1342,7 @@ function EditorPageContent() {
     // Remove all non-grid objects
     const objects = canvas.getObjects().filter(obj => !(obj as any).isGrid);
     objects.forEach(obj => canvas.remove(obj));
-    
+
     measurementLabelsRef.current.clear();
     canvas.renderAll();
   };
@@ -1253,7 +1356,7 @@ function EditorPageContent() {
 
     const center = canvas.getCenterPoint();
     const shapeId = `${templateId}-${Date.now()}`;
-    
+
     const widthPx = metersToPixels(template.width);
     const heightPx = metersToPixels(template.height);
 
@@ -1266,12 +1369,12 @@ function EditorPageContent() {
       stroke: template.color,
       strokeWidth: 2,
     });
-    
+
     (rect as any).id = shapeId;
     (rect as any).templateType = templateId;
     (rect as any).elementName = template.label;
     canvas.add(rect);
-    
+
     // Add label
     const label = new fabric.Text(template.label, {
       left: center.x,
@@ -1287,7 +1390,7 @@ function EditorPageContent() {
     (label as any).isMeasurement = true;
     (label as any).parentId = shapeId;
     canvas.add(label);
-    
+
     addRectMeasurements(rect, shapeId);
     canvas.setActiveObject(rect);
     canvas.renderAll();
@@ -1299,7 +1402,7 @@ function EditorPageContent() {
     if (!canvas) return;
 
     const shapeId = `parcel-sample-${Date.now()}`;
-    
+
     // Create an irregular polygon representing a cadastral land parcel
     // At 1:100 scale (10px per meter), these represent real-world dimensions
     const points = [
@@ -1312,7 +1415,7 @@ function EditorPageContent() {
     ];
 
     const center = canvas.getCenterPoint();
-    
+
     const polygon = new fabric.Polygon(points, {
       left: center.x,
       top: center.y,
@@ -1322,15 +1425,15 @@ function EditorPageContent() {
       originX: "center",
       originY: "center",
     });
-    
+
     (polygon as any).id = shapeId;
     (polygon as any).isParcel = true;
     (polygon as any).elementName = "Land Parcel";
     canvas.add(polygon);
-    
+
     // Add measurements to all sides automatically
     addPolygonMeasurements(polygon, shapeId);
-    
+
     // Add parcel label
     const label = new fabric.Text("PARCEL A-123", {
       left: center.x,
@@ -1347,7 +1450,7 @@ function EditorPageContent() {
     (label as any).isMeasurement = true;
     (label as any).parentId = shapeId;
     canvas.add(label);
-    
+
     canvas.renderAll();
   };
 
@@ -1491,9 +1594,36 @@ function EditorPageContent() {
           <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-600 text-xs font-medium">
             Scale {currentScale.label}
           </span>
+          {/* Guided / Free Mode Toggle */}
+          <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setEditorMode("guided")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all",
+                editorMode === "guided"
+                  ? "bg-emerald-500 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <ToggleLeft className="w-3.5 h-3.5" />
+              Guided
+            </button>
+            <button
+              onClick={() => setEditorMode("free")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all",
+                editorMode === "free"
+                  ? "bg-amber-500 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <ToggleRight className="w-3.5 h-3.5" />
+              Free
+            </button>
+          </div>
           <div className="h-6 w-px bg-white/10" />
-          <Link 
-            href="/facades" 
+          <Link
+            href="/facades"
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors text-sm font-medium"
           >
             <Layers className="w-4 h-4" />
@@ -1568,7 +1698,7 @@ function EditorPageContent() {
           </select>
 
           <div className="h-6 w-px bg-white/10" />
-          
+
           <button
             onClick={() => setShowGrid(!showGrid)}
             className={cn(
@@ -1579,7 +1709,7 @@ function EditorPageContent() {
           >
             <Grid3X3 className="w-5 h-5" />
           </button>
-          
+
           <button
             onClick={() => setSnapEnabled(!snapEnabled)}
             className={cn(
@@ -1732,6 +1862,16 @@ function EditorPageContent() {
             </div>
           </div>
 
+          {/* Free Mode Badge */}
+          {editorMode === "free" && (
+            <div className="absolute top-4 right-4 z-20">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold shadow-lg">
+                <ToggleRight className="w-4 h-4" />
+                FREE MODE – No compliance checks
+              </div>
+            </div>
+          )}
+
           {/* Canvas */}
           <div className="absolute inset-0 flex items-center justify-center bg-white">
             <canvas ref={canvasRef} className="shadow-2xl" />
@@ -1740,8 +1880,8 @@ function EditorPageContent() {
 
         {/* Right Panel */}
         <div className="w-72 bg-white border-l border-slate-200 flex flex-col">
-          {/* Compliance Panel */}
-          {currentProjectId && (
+          {/* Compliance Panel (Guided mode only) */}
+          {currentProjectId && editorMode === "guided" && (
             <div className="border-b border-slate-200">
               <button
                 onClick={() => setShowCompliance(!showCompliance)}
@@ -1788,12 +1928,12 @@ function EditorPageContent() {
                 <span className="text-xs text-slate-500">{layers.length} objects</span>
               </div>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {layers.length === 0 ? (
                 <div className="text-center py-8 text-slate-500 text-sm">
                   <p>No objects yet.</p>
-                  <p className="mt-2 text-xs">Draw shapes to see<br/>measurements automatically!</p>
+                  <p className="mt-2 text-xs">Draw shapes to see<br />measurements automatically!</p>
                 </div>
               ) : (
                 layers.map((layer) => (
@@ -1838,7 +1978,7 @@ function EditorPageContent() {
               <Settings className="w-4 h-4" />
               Properties
             </h3>
-            
+
             {selectedObject ? (
               <div className="space-y-3">
                 <div>
@@ -1875,6 +2015,81 @@ function EditorPageContent() {
                     <p className="text-sm text-amber-600 font-mono font-bold">
                       {formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}
                     </p>
+                  </div>
+                )}
+
+                {/* Roof Properties – for house/garage/building templates */}
+                {["house", "garage"].includes((selectedObject as any).templateType || "") && (
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <label className="text-xs text-slate-500 block font-medium">Roof</label>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Type</label>
+                      <select
+                        value={(selectedObject as any).roofType || "gable"}
+                        onChange={(e) => {
+                          (selectedObject as any).roofType = e.target.value;
+                          fabricRef.current?.requestRenderAll();
+                        }}
+                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm"
+                      >
+                        {ROOF_TYPES.map((rt) => (
+                          <option key={rt.id} value={rt.id}>{rt.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">
+                        Pitch: {(selectedObject as any).roofPitch ?? 30}°
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="60"
+                        value={(selectedObject as any).roofPitch ?? 30}
+                        disabled={(selectedObject as any).roofType === "flat"}
+                        onChange={(e) => {
+                          (selectedObject as any).roofPitch = Number(e.target.value);
+                          fabricRef.current?.requestRenderAll();
+                        }}
+                        className="w-full accent-blue-500 disabled:opacity-40"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">
+                        Overhang (m): {(selectedObject as any).roofOverhang ?? 0.5}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="3"
+                        step="0.1"
+                        value={(selectedObject as any).roofOverhang ?? 0.5}
+                        onChange={(e) => {
+                          (selectedObject as any).roofOverhang = parseFloat(e.target.value) || 0;
+                          fabricRef.current?.requestRenderAll();
+                        }}
+                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Shutter Properties – for window/sliding-door templates */}
+                {["window", "sliding-door"].includes((selectedObject as any).templateType || "") && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <label className="text-xs text-slate-500 block mb-1 font-medium">Shutters</label>
+                    <select
+                      value={(selectedObject as any).shutterType || "none"}
+                      onChange={(e) => {
+                        (selectedObject as any).shutterType = e.target.value;
+                        fabricRef.current?.requestRenderAll();
+                      }}
+                      className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm"
+                    >
+                      {SHUTTER_TYPES.map((st) => (
+                        <option key={st.id} value={st.id}>{st.label}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
               </div>

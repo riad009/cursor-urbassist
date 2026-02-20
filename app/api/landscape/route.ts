@@ -206,8 +206,28 @@ Rules: horizonLine 0-1 (fraction from top), ambiance one of: urban, suburban, ru
       if (!isUnrestrictedAdmin(user) && user.credits < 5) {
         return NextResponse.json({ error: "Insufficient credits (5 required)" }, { status: 402 });
       }
+      // Parse project info for context-aware prompt
+      const projectInfo = projectData ? (() => { try { return JSON.parse(projectData); } catch { return {}; } })() : {};
+      const vpName = (formData.get("viewpointName") as string) || "PC7";
+      const vpDirection = (formData.get("viewpointDirection") as string) || "front";
+      const northAngle = projectInfo.northAngle ?? 0;
+      const buildingMaterials = projectInfo.materials || "classic French suburban";
+      const roofType = projectInfo.roofType || "pitched tile";
+      const vegetation = projectInfo.vegetation || "deciduous trees and lawn";
+
+      const enhancedPrompt = [
+        "Professional architectural photomontage of a building project insertion.",
+        `Viewpoint: ${vpName} (${vpDirection} view).`,
+        `Project orientation: north at ${northAngle}° from top.`,
+        `Building style: ${buildingMaterials} with ${roofType} roof.`,
+        `Surrounding vegetation: ${vegetation}.`,
+        "Match the exact lighting, shadows, and perspective of the original site photo.",
+        "Ultra-realistic, 8k quality, seamless integration with existing landscape.",
+        "Consistent color temperature and atmospheric perspective with the site.",
+      ].join(" ");
+
       const imageDataUrl = await generateImage({
-        prompt: "Professional architectural photomontage: a single-family house integrated into a French suburban landscape, same lighting and perspective as the site photo, photorealistic, 8k, vegetation and context matching.",
+        prompt: enhancedPrompt,
         size: "1792x1024",
         style: "natural",
       });

@@ -137,6 +137,119 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (type === "plu_analysis") {
+      // Pay-per-use PLU analysis: €15 first, €5 relaunch
+      if (!projectId) {
+        return NextResponse.json(
+          { error: "projectId is required for PLU analysis payment" },
+          { status: 400 }
+        );
+      }
+
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, userId: user.id },
+      });
+      if (!project) {
+        return NextResponse.json(
+          { error: "Project not found" },
+          { status: 404 }
+        );
+      }
+
+      const isRelaunch = project.pluAnalysisCount > 0;
+      const priceEur = isRelaunch
+        ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
+        : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
+      const priceCents = Math.round(priceEur * 100);
+      const label = isRelaunch
+        ? `PLU Analysis Relaunch — ${project.name || "Project"}`
+        : `PLU Analysis — ${project.name || "Project"}`;
+
+      if (STRIPE_SECRET) {
+        const Stripe = (await import("stripe")).default;
+        const stripe = new Stripe(STRIPE_SECRET);
+
+        const successPath = successUrl
+          ? successUrl
+          : `/projects/${encodeURIComponent(projectId)}/payment?success=true&type=plu_analysis`;
+        const cancelPath = `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`;
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: label,
+                  description: isRelaunch
+                    ? "Updated PLU regulatory analysis after project modifications"
+                    : "Complete PLU regulatory analysis for your construction project",
+                },
+                unit_amount: priceCents,
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${getSiteUrl(request)}${successPath}`,
+          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
+          metadata: {
+            userId: user.id,
+            type: "plu_analysis",
+            projectId: String(projectId),
+            isRelaunch: isRelaunch ? "true" : "false",
+            priceEur: String(priceEur),
+          },
+        });
+
+        // Record pending payment
+        if (user.id !== HARDCODED_USER_ID) {
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: priceEur,
+              type: "plu_analysis",
+              status: "pending",
+              metadata: { projectId, isRelaunch },
+            },
+          });
+        }
+
+        return NextResponse.json({ url: session.url });
+      }
+
+      // Demo mode: no Stripe key → mark paid immediately
+      await prisma.project.update({
+        where: { id: projectId },
+        data: {
+          pluAnalysisCount: { increment: 1 },
+          paidAt: project.paidAt ?? new Date(),
+        },
+      });
+
+      if (user.id !== HARDCODED_USER_ID) {
+        await prisma.creditTransaction.create({
+          data: {
+            userId: user.id,
+            amount: 0,
+            type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
+            description: `PLU analysis (demo mode) — €${priceEur}`,
+            metadata: { projectId, isRelaunch, priceEur },
+          },
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        isRelaunch,
+        priceEur,
+        pluAnalysisCount: project.pluAnalysisCount + 1,
+        message: `PLU analysis payment recorded (demo mode — €${priceEur}). Set STRIPE_SECRET_KEY to enable real payments.`,
+      });
+    }
+
     if (type === "subscription") {
       // Subscription purchase
       const plan = await prisma.subscriptionPlan.findUnique({

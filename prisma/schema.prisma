@@ -91,6 +91,7 @@ enum CreditType {
   PURCHASE
   SUBSCRIPTION
   PLU_ANALYSIS
+  PLU_ANALYSIS_RELAUNCH
   PLAN_GENERATION
   VISUAL_GENERATION
   LANDSCAPE_INTEGRATION
@@ -139,6 +140,7 @@ model Project {
   authorizationExplanation String? @map("authorization_explanation")
   projectDescription Json?       @map("project_description") // structured description answers
   paidAt          DateTime?     @map("paid_at")               // when payment was completed
+  pluAnalysisCount Int          @default(0) @map("plu_analysis_count") // number of paid PLU analyses completed
   scale           String        @default("1:100")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")

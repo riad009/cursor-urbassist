@@ -3,16 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 import { fetchPdfText } from "@/lib/fetchPdfText";
 
-const ANALYSIS_CREDIT_COST = parseInt(
-  process.env.PLU_ANALYSIS_CREDITS || "3",
-  10
-) || 3;
-
 /**
  * Deep PLU analysis pipeline:
  * - Primary: project has address/coordinates → PLU detection → fetch official PDF → Gemini analysis.
  * - Fallback: when zone is not detected or user prefers to upload, accept documentContent in body → run Gemini analysis (after payment).
- * Payment: credits are deducted when analysis is run (except admin).
+ * Payment: euro-based pay-per-use (€15 first analysis, €5 relaunch). Payment is handled by Stripe checkout before this endpoint is called.
  */
 export async function POST(
   request: NextRequest,
@@ -27,16 +22,15 @@ export async function POST(
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (!isUnrestrictedAdmin(user)) {
-    if (user.credits < ANALYSIS_CREDIT_COST) {
-      return NextResponse.json(
-        {
-          error: `Insufficient credits. Deep PLU analysis costs ${ANALYSIS_CREDIT_COST} credits. You have ${user.credits}.`,
-          creditsRequired: ANALYSIS_CREDIT_COST,
-        },
-        { status: 402 }
-      );
-    }
+  // Payment gate: project must be paid for (unless admin)
+  if (!isUnrestrictedAdmin(user) && !project.paidAt) {
+    return NextResponse.json(
+      {
+        error: "Payment required. Please complete payment before running PLU analysis.",
+        code: "PAYMENT_REQUIRED",
+      },
+      { status: 402 }
+    );
   }
 
   try {
@@ -158,20 +152,29 @@ export async function POST(
     });
 
     if (!isUnrestrictedAdmin(user)) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { credits: { decrement: ANALYSIS_CREDIT_COST } },
+      const isRelaunch = project.pluAnalysisCount > 0;
+      const priceEur = isRelaunch
+        ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
+        : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
+
+      // Increment analysis count
+      await prisma.project.update({
+        where: { id },
+        data: { pluAnalysisCount: { increment: 1 } },
       });
+
+      // Audit trail (no credits deducted — payment was handled by Stripe checkout)
       await prisma.creditTransaction.create({
         data: {
           userId: user.id,
-          amount: -ANALYSIS_CREDIT_COST,
-          type: "PLU_ANALYSIS",
-          description: `Deep PLU analysis for project ${project.name?.slice(0, 40) || id}`,
+          amount: 0,
+          type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
+          description: `Deep PLU analysis for project ${project.name?.slice(0, 40) || id} — €${priceEur}`,
           metadata: {
             projectId: id,
             zoneType,
             source: bodyDocumentContent ? "upload" : pluSource,
+            priceEur,
           },
         },
       });
@@ -183,7 +186,12 @@ export async function POST(
       pdfUrl: regulatory.pdfUrl,
       zoneType: regulatory.zoneType,
       analysis: regulatory.aiAnalysis,
-      creditsUsed: isUnrestrictedAdmin(user) ? 0 : ANALYSIS_CREDIT_COST,
+      creditsUsed: 0,
+      priceEur: isUnrestrictedAdmin(user) ? 0 : (
+        project.pluAnalysisCount > 0
+          ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
+          : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15")
+      ),
     });
   } catch (error) {
     console.error("Regulatory auto:", error);

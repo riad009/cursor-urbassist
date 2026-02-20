@@ -89,6 +89,47 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        if (type === "plu_analysis") {
+          const projId = session.metadata?.projectId;
+          const isRelaunch = session.metadata?.isRelaunch === "true";
+          const priceEur = parseFloat(session.metadata?.priceEur || "0");
+
+          // Mark payment as completed
+          await prisma.payment.updateMany({
+            where: { stripeSessionId: session.id },
+            data: {
+              status: "completed",
+              stripePaymentId: session.payment_intent as string,
+            },
+          });
+
+          if (projId) {
+            // Increment analysis count and mark project as paid
+            await prisma.project.update({
+              where: { id: projId },
+              data: {
+                pluAnalysisCount: { increment: 1 },
+                paidAt: new Date(),
+              },
+            }).catch(() => {
+              // Project may not exist — ignore
+            });
+
+            // Audit log
+            if (userId) {
+              await prisma.creditTransaction.create({
+                data: {
+                  userId,
+                  amount: 0,
+                  type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
+                  description: `PLU analysis via Stripe — €${priceEur}`,
+                  metadata: { projectId: projId, isRelaunch, priceEur, sessionId: session.id },
+                },
+              });
+            }
+          }
+        }
+
         if (type === "subscription") {
           const planId = session.metadata?.planId;
           if (planId) {
