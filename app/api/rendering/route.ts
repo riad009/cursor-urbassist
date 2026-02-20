@@ -92,7 +92,8 @@ Respond with ONLY a JSON object:
             }
         );
 
-        let analysis: Record<string, unknown> = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let analysis: Record<string, any> = {};
         let enhancedPrompt = fullPrompt;
 
         if (geminiRes.ok) {

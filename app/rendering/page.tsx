@@ -39,7 +39,8 @@ function RenderingContent() {
     const [extraContext, setExtraContext] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
     const [result, setResult] = useState<{
-        analysis: Record<string, unknown>;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        analysis: Record<string, any>;
         enhancedPrompt: string;
         originalImage: string;
     } | null>(null);
