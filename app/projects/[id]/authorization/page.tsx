@@ -1393,7 +1393,7 @@ export default function AuthorizationPage({
                     <div className="px-5 py-4 space-y-2 border-t border-slate-100">
                       <div className="flex items-center gap-2 text-sm text-slate-700">
                         <FileText className="w-4 h-4 text-violet-400" />
-                        <span>{isEn ? "7 regulatory documents" : "7 documents réglementaires"}</span>
+                        <span>{isEn ? `${getDocumentsForType("PC").length} regulatory documents` : `${getDocumentsForType("PC").length} documents réglementaires`}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
                         <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
@@ -1721,7 +1721,7 @@ export default function AuthorizationPage({
                       <div className="px-5 py-4 space-y-2 border-t border-slate-100">
                         <div className="flex items-center gap-2 text-sm text-slate-700">
                           <FileText className={`w-4 h-4 ${accent.badge}`} />
-                          <span>{isDP ? "9" : "12"} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
+                          <span>{docs.length} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
                           <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
