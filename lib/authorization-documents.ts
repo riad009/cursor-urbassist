@@ -23,6 +23,7 @@ export const DP_DOCUMENTS: AuthorizationDocument[] = [
     { code: "DPC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
     { code: "DPC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
     { code: "DPC 8.1", label: "Notice descriptive du projet", description: "Description détaillée du projet et de son insertion" },
+    { code: "DPC 11", label: "Notice relative aux modalités d'exécution des travaux", description: "Requis en zone ABF / Patrimoine — détaille les modalités d'exécution" },
 ];
 
 // ─── DPC 11 — Only for ABF Heritage zones ───────────────────────────────────
