@@ -1425,7 +1425,7 @@ export default function AuthorizationPage({
                       <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
+                      <p className="text-2xl font-bold text-slate-900">€ {(89 + (autoDetectCerfa ? 5 : 0) + (autoDetectPlu ? 15 : 0)).toFixed(2)}</p>
                       <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
                     </div>
                   </div>
@@ -1753,7 +1753,7 @@ export default function AuthorizationPage({
                         <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-900">€ 89.00</p>
+                        <p className="text-2xl font-bold text-slate-900">€ {(89 + (quickModalCerfa ? 5 : 0) + (quickModalPlu ? 15 : 0)).toFixed(2)}</p>
                         <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
                       </div>
                     </div>
