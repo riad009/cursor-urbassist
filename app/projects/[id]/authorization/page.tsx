@@ -25,6 +25,7 @@ import {
   Trash2,
   Plus,
   Activity,
+  Home,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
@@ -776,42 +777,7 @@ export default function AuthorizationPage({
 
                   {/* ═══ Construction Indépendante Section ═══ */}
                   {selectedCategories.has("new_construction") && (
-                    <div className="rounded-2xl bg-white border border-blue-200 p-6 space-y-5">
-                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-                        <Building2 className="w-5 h-5 text-blue-600" />
-                        {isEn ? "Independent Construction" : "Construction Indépendante"}
-                      </h3>
-
-                      {/* Ground footprint */}
-                      <div className="space-y-2">
-                        <label className="text-base font-medium text-slate-700">
-                          {isEn ? "What is the ground footprint (m²)?" : "Quelle est la surface au sol créée (m²) ?"}
-                        </label>
-                        <p className="text-sm text-slate-400">
-                          {isEn ? "Outer contour of walls, not just interior" : "Contour extérieur des murs, pas uniquement l'intérieur"}
-                        </p>
-                        <input
-                          type="number"
-                          value={constructionFootprint || ""}
-                          onChange={(e) => { setConstructionFootprint(Number(e.target.value)); setConstructionRange(null); }}
-                          className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
-                          placeholder="Ex: 40"
-                          min={0}
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          {CONSTRUCTION_RANGES.map((r) => (
-                            <button key={r.label} type="button"
-                              onClick={() => { setConstructionRange(r); setConstructionFootprint(r.value); }}
-                              className={cn("px-4 py-2 rounded-lg text-sm font-semibold transition-all border",
-                                constructionRange?.label === r.label
-                                  ? "bg-blue-100 text-blue-700 border-blue-300 ring-2 ring-blue-500/20"
-                                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                              )}>
-                              {r.label} <span className="text-slate-400 font-normal">(ex: {r.value})</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    <div className="rounded-2xl bg-blue-50/40 border border-blue-200/60 p-6 space-y-5">
 
                       {/* Level selector */}
                       <LevelSelector
@@ -821,7 +787,47 @@ export default function AuthorizationPage({
                         isEn={isEn}
                       />
 
-                      {/* Add project button */}
+                      {/* Footprint + Floor area side by side */}
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* Footprint input */}
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-semibold text-slate-700">
+                            {isEn ? "Footprint (m²)" : "Emprise au sol (m²)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={constructionFootprint || ""}
+                            onChange={(e) => { setConstructionFootprint(Number(e.target.value)); setConstructionRange(null); }}
+                            className="w-full px-4 py-3 rounded-xl bg-white border-2 border-indigo-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition-all"
+                            placeholder={isEn ? "e.g. 22" : "ex. 22"}
+                            min={0}
+                          />
+                        </div>
+                        {/* Floor area (auto-estimated) */}
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                            {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
+                            <span className="text-slate-400">🧮</span>
+                          </label>
+                          <div className={cn(
+                            "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all",
+                            constructionFloorArea > 0
+                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                              : "bg-slate-50 border-slate-200 text-slate-400"
+                          )}>
+                            {constructionFloorArea > 0 ? constructionFloorArea.toFixed(2) : "—"}
+                          </div>
+                          {constructionFootprint > 0 && (
+                            <p className="text-xs text-slate-400 leading-snug">
+                              {isEn
+                                ? `Automatic calculation: (0.90 × Footprint × Levels) - Hoppers. Modifiable.`
+                                : `Calcul automatique : (0,90 × Emprise × Niveaux) - Trémies. Modifiable.`}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Add to folder button */}
                       <button
                         type="button"
                         disabled={constructionFootprint <= 0}
@@ -835,131 +841,69 @@ export default function AuthorizationPage({
                             inUrbanZone: isUrbanZone,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-5 h-5" />
-                        {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
+                        {isEn ? "Add to folder" : "Ajouter au dossier"}
                       </button>
                     </div>
                   )}
 
                   {/* ═══ Travaux sur Existant Section ═══ */}
                   {selectedCategories.has("existing_extension") && (
-                    <div className="rounded-2xl bg-white border border-amber-200 p-4 space-y-3">
-                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-                        <Hammer className="w-5 h-5 text-amber-600" />
-                        {isEn ? "Works on Existing Building" : "Travaux sur Existant"}
-                      </h3>
+                    <div className="rounded-2xl bg-amber-50/40 border border-amber-200/60 p-6 space-y-5">
 
-                      {/* Sub-type tags */}
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          { value: "extend" as ExtensionSubType, label: isEn ? "I'm extending" : "J'agrandis", desc: isEn ? "Extension / Super-elevation" : "Extension / Surélévation" },
-                          { value: "convert" as ExtensionSubType, label: isEn ? "I'm converting" : "J'aménage", desc: isEn ? "Change of destination, garage…" : "Changement destination, garage…" },
-                          { value: "renovate" as ExtensionSubType, label: isEn ? "I'm renovating" : "Je rénove", desc: isEn ? "Roof, facade…" : "Toiture, façade…" },
-                        ]).map((sub) => (
-                          <button key={sub.value} type="button"
-                            onClick={() => toggleExtensionSubType(sub.value)}
-                            className={cn("px-5 py-3 rounded-xl transition-all border text-left",
-                              extensionSubTypes.has(sub.value)
-                                ? "bg-amber-500/15 text-amber-700 border-amber-500/40 ring-2 ring-amber-500/20"
-                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                            )}>
-                            <span className="block font-medium text-base">{sub.label}</span>
-                            <span className="block text-sm text-slate-400 mt-0.5">{sub.desc}</span>
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Current surface + Ground footprint + Estimated floor area — inline */}
-                      <div className="grid grid-cols-3 gap-3">
-                        {/* Existing declared surface */}
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium text-slate-700">
-                            {isEn ? "Current declared surface (m²)" : "Surface actuelle déclarée (m²)"}
-                          </label>
-                          <input
-                            type="number"
-                            value={existingArea || ""}
-                            onChange={(e) => setExistingArea(Number(e.target.value))}
-                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
-                            placeholder="Ex: 110"
-                            min={0}
-                          />
-                        </div>
-
-                        {/* Ground footprint of extension */}
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium text-slate-700">
-                            {isEn ? "Ground footprint of extension (m²)" : "Surface au sol de l'extension (m²)"}
-                          </label>
-                          <input
-                            type="number"
-                            value={extensionFootprint || ""}
-                            onChange={(e) => { setExtensionFootprint(Number(e.target.value)); setExtensionRange(null); }}
-                            className="w-full px-3 py-2.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all placeholder:text-slate-400"
-                            placeholder="Ex: 50"
-                            min={0}
-                          />
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {EXTENSION_RANGES.map((r) => (
-                              <button key={r.label} type="button"
-                                onClick={() => { setExtensionRange(r); setExtensionFootprint(r.value); }}
-                                className={cn("px-3 py-1 rounded-lg text-xs font-semibold transition-all border",
-                                  extensionRange?.label === r.label
-                                    ? "bg-amber-100 text-amber-700 border-amber-500/40 ring-2 ring-amber-500/20"
-                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                                )}>
-                                {r.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Floor area estimated (read-only) */}
-                        <div className="space-y-1">
-                          <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
-                            {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
-                            <span className="text-slate-400">🧮</span>
-                          </label>
-                          <div className={cn(
-                            "w-full px-3 py-2.5 rounded-xl border-2 text-base font-bold transition-all",
-                            extensionFloorArea > 0
-                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                              : "bg-slate-50 border-slate-200 text-slate-400"
-                          )}>
-                            {extensionFloorArea > 0 ? `${extensionFloorArea.toFixed(2)}` : "—"}
-                          </div>
-                          {extensionFootprint > 0 ? (
-                            <p className="text-xs text-slate-400">
-                              {(() => {
-                                const coeffs: Record<number, number> = { 1: 0.95, 2: 0.90, 3: 0.82 };
-                                const c = coeffs[extensionLevels] ?? 0.80;
-                                return isEn
-                                  ? `${c} × ${extensionFootprint} × ${extensionLevels} level${extensionLevels > 1 ? "s" : ""} (ht > 1.80m)`
-                                  : `${c} × ${extensionFootprint} × ${extensionLevels} niveau${extensionLevels > 1 ? "x" : ""} (ht > 1,80m)`;
-                              })()}
-                            </p>
-                          ) : existingArea > 0 ? (
-                            <p className="text-xs text-slate-400">
-                              {isEn ? "From declared surface" : "Depuis surface déclarée"}
-                            </p>
-                          ) : null}
+                      {/* Current living area — yellow box */}
+                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 space-y-2">
+                        <label className="text-sm font-bold text-amber-900 flex items-center gap-2">
+                          <Home className="w-4 h-4" />
+                          {isEn ? "Current living area before renovations" : "Surface habitable actuelle avant travaux"}
+                        </label>
+                        <input
+                          type="number"
+                          value={existingArea || ""}
+                          onChange={(e) => setExistingArea(Number(e.target.value))}
+                          className="w-full px-4 py-3 rounded-xl bg-white border-2 border-amber-200 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all"
+                          placeholder={isEn ? "Example: 100" : "Exemple : 100"}
+                          min={0}
+                        />
+                        <div className="flex items-start gap-2">
+                          <Info className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                          <p className="text-xs text-amber-800 leading-snug">
+                            {isEn
+                              ? 'You can find this information in your personal space on impot.gouv.fr, under the section "My real estate".'
+                              : 'Vous pouvez retrouver cette information sur votre espace impot.gouv.fr, rubrique "Mes biens immobiliers".'}
+                          </p>
                         </div>
                       </div>
 
-                      {/* Level selector */}
-                      <LevelSelector
-                        label={isEn ? "Extension levels" : "Niveaux de l'extension"}
-                        levels={extensionLevels}
-                        setLevels={setExtensionLevels}
-                        isEn={isEn}
-                      />
+                      {/* Specify the type of work (multi-select) */}
+                      <div className="space-y-3">
+                        <p className="text-sm font-semibold text-slate-700">
+                          {isEn ? "Specify the type of work (Multiple choices possible):" : "Précisez le type de travaux (Plusieurs choix possibles) :"}
+                        </p>
+                        <div className="grid grid-cols-3 gap-3">
+                          {([
+                            { value: "extend" as ExtensionSubType, label: isEn ? "Extension / Raising the Height" : "Extension / Surélévation" },
+                            { value: "convert" as ExtensionSubType, label: isEn ? "Change of destination" : "Changement de destination" },
+                            { value: "renovate" as ExtensionSubType, label: isEn ? "Change in exterior appearance" : "Modification aspect extérieur" },
+                          ]).map((sub) => (
+                            <button key={sub.value} type="button"
+                              onClick={() => toggleExtensionSubType(sub.value)}
+                              className={cn("relative group px-4 py-3 rounded-xl transition-all border-2 text-center",
+                                extensionSubTypes.has(sub.value)
+                                  ? "bg-indigo-50 text-indigo-700 border-indigo-400 ring-2 ring-indigo-500/20"
+                                  : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-slate-50"
+                              )}>
+                              <span className="block font-medium text-sm leading-snug">{sub.label}</span>
+                              <Info className="w-3.5 h-3.5 text-slate-400 mx-auto mt-1.5" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
-                      {/* Add project button */}
+                      {/* Add to folder button */}
                       <button
                         type="button"
-                        disabled={extensionFootprint <= 0}
                         onClick={() => {
                           const count = workItems.filter(w => w.projectType === "existing_extension").length + 1;
                           const subLabel = extensionSubTypes.has("extend") ? (isEn ? "Extension" : "Extension")
@@ -975,10 +919,9 @@ export default function AuthorizationPage({
                             inUrbanZone: isUrbanZone,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-5 h-5" />
-                        {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
+                        {isEn ? "Add to folder" : "Ajouter au dossier"}
                       </button>
                     </div>
                   )}
@@ -1958,23 +1901,23 @@ function LevelSelector({
   isEn: boolean;
 }) {
   return (
-    <div className="space-y-1">
-      <label className="text-sm font-medium text-slate-700">{label}</label>
-      <div className="flex gap-2 h-[42px]">
+    <div className="space-y-2">
+      <label className="text-sm font-semibold text-slate-700">{label}</label>
+      <div className="flex flex-wrap gap-2">
         {[
-          { value: 1, label: isEn ? "Ground floor" : "RDC" },
-          { value: 2, label: isEn ? "R+1" : "R+1" },
-          { value: 3, label: isEn ? "R+2" : "R+2" },
+          { value: 1, label: isEn ? "Ground floor (ground floor)" : "Rez-de-chaussée (plain-pied)" },
+          { value: 2, label: isEn ? "Ground floor + 1st floor" : "RDC + 1 étage" },
+          { value: 3, label: isEn ? "Ground floor + 2 floors" : "RDC + 2 étages" },
         ].map((lvl) => (
           <button
             key={lvl.value}
             type="button"
             onClick={() => setLevels(lvl.value)}
             className={cn(
-              "flex-1 rounded-xl text-xs font-semibold transition-all border text-center",
+              "px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
               levels === lvl.value
-                ? "bg-blue-100 text-blue-700 border-blue-300 ring-2 ring-blue-500/20"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                ? "bg-amber-100 text-amber-800 border-amber-300"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
             )}
           >
             {lvl.label}

@@ -349,33 +349,33 @@ export default function NewProjectPage() {
                                                     if (!hasHeritage) return null;
                                                     const nm = heritageSummary?.nearestMonument;
                                                     return (
-                                                        <div className="rounded-lg bg-gradient-to-br from-red-50 to-orange-50 border border-red-200/60 p-2.5 space-y-1.5">
+                                                        <div className="rounded-lg bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200/60 p-2.5 space-y-1.5">
                                                             <div className="flex items-center gap-1.5">
-                                                                <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                                                                <p className="text-xs font-bold text-red-700">{t("newProj.heritageProtected")}</p>
+                                                                <AlertTriangle className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                                                                <p className="text-xs font-bold text-orange-600">{t("newProj.heritageProtected")}</p>
                                                             </div>
                                                             {nm && (
                                                                 <div className="pl-5 space-y-1">
-                                                                    <p className="text-[11px] text-red-700 font-semibold truncate">
+                                                                    <p className="text-[11px] text-orange-600 font-semibold truncate">
                                                                         🏛 {nm.name}
                                                                     </p>
                                                                     <div className="flex items-center gap-1.5 flex-wrap">
                                                                         {nm.distance != null && (
-                                                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-red-100/80 text-red-600 font-medium">
+                                                                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-100/80 text-orange-600 font-medium">
                                                                                 à {nm.distance}m
                                                                             </span>
                                                                         )}
-                                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-red-100/80 text-red-600 font-medium">
+                                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-100/80 text-orange-600 font-medium">
                                                                             {nm.type === "classé" ? "Classé" : "Inscrit"}
                                                                         </span>
                                                                     </div>
                                                                 </div>
                                                             )}
-                                                            <p className="text-[10px] text-red-500 pl-5 leading-relaxed">{t("newProj.heritageAbfNote")}</p>
+                                                            <p className="text-[10px] text-orange-500 pl-5 leading-relaxed">{t("newProj.heritageAbfNote")}</p>
                                                             {heritageSummary && heritageSummary.heritageTypes.length > 0 && (
                                                                 <div className="flex gap-1 pl-5 flex-wrap mt-0.5">
                                                                     {heritageSummary.heritageTypes.map((ht) => (
-                                                                        <span key={ht} className="text-[8px] px-1.5 py-0.5 rounded-full bg-red-100/80 text-red-500 font-semibold">
+                                                                        <span key={ht} className="text-[8px] px-1.5 py-0.5 rounded-full bg-orange-100/80 text-orange-500 font-semibold">
                                                                             {ht.replace(/_/g, " ")}
                                                                         </span>
                                                                     ))}
@@ -387,8 +387,8 @@ export default function NewProjectPage() {
 
                                                 {/* ── CRITICAL ITEMS — always visible ── */}
                                                 {classified.criticalItems.map((item, idx) => {
-                                                    const typeColor = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-red-400" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-400" : "bg-blue-400";
-                                                    const typeBadgeBg = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-red-50 text-red-500 border-red-100" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-50 text-amber-500 border-amber-100" : "bg-blue-50 text-blue-500 border-blue-100";
+                                                    const typeColor = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-400" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-400" : "bg-blue-400";
+                                                    const typeBadgeBg = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-50 text-orange-500 border-orange-100" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-50 text-amber-500 border-amber-100" : "bg-blue-50 text-blue-500 border-blue-100";
                                                     return (
                                                         <div key={`crit-${idx}`} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-50/80 border border-slate-100 transition-colors">
                                                             <span className={`w-2 h-2 rounded-full shrink-0 ${typeColor}`} />
