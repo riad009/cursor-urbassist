@@ -6,6 +6,7 @@
 
 export interface AuthorizationDocument {
     code: string;
+    dualCode?: string; // alternate PC/DPC code
     label: string;
     description?: string;
     tag?: string; // e.g. "ABF Required", "Existing", "Proposed"
@@ -14,15 +15,15 @@ export interface AuthorizationDocument {
 // ─── Déclaration Préalable (DP) ─────────────────────────────────────────────
 
 export const DP_DOCUMENTS: AuthorizationDocument[] = [
-    { code: "DPC 1", label: "Plan de situation", description: "Localise le terrain dans la commune" },
-    { code: "DPC 2", label: "Plan de masse", description: "Vue d'ensemble du terrain et des constructions" },
-    { code: "DPC 3", label: "Plan en coupe", description: "Coupe du terrain et de la construction" },
-    { code: "DPC 4", label: "Plan des façades et des toitures", description: "Élévations et toitures du projet" },
-    { code: "DPC 5", label: "Représentation de l'aspect extérieur", description: "Vue en perspective ou 3D du projet" },
-    { code: "DPC 6", label: "Document graphique", description: "Insertion du projet dans son environnement" },
-    { code: "DPC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
-    { code: "DPC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
-    { code: "DPC 8.1", label: "Notice descriptive du projet", description: "Description détaillée du projet et de son insertion" },
+    { code: "DPC 1", dualCode: "PC 1", label: "Plan de situation", description: "Localise le terrain dans la commune" },
+    { code: "DPC 2", dualCode: "PC 2", label: "Plan de masse", description: "Vue d'ensemble du terrain et des constructions" },
+    { code: "DPC 3", dualCode: "PC 3", label: "Plan en coupe", description: "Coupe du terrain et de la construction" },
+    { code: "DPC 4", dualCode: "PC 5", label: "Plan des façades et des toitures", description: "Élévations et toitures du projet" },
+    { code: "DPC 5", dualCode: "PC 6", label: "Représentation de l'aspect extérieur", description: "Vue en perspective ou 3D du projet" },
+    { code: "DPC 6", dualCode: "PC 6", label: "Document graphique", description: "Insertion du projet dans son environnement" },
+    { code: "DPC 7", dualCode: "PC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
+    { code: "DPC 8", dualCode: "PC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
+    { code: "DPC 8.1", dualCode: "PC 4", label: "Notice descriptive du projet", description: "Description détaillée du projet et de son insertion" },
     { code: "DPC 11", label: "Notice relative aux modalités d'exécution des travaux", description: "Requis en zone ABF / Patrimoine — détaille les modalités d'exécution" },
 ];
 
@@ -38,19 +39,20 @@ export const DPC11_DOCUMENT: AuthorizationDocument = {
 // ─── Permis de Construire (PC) ──────────────────────────────────────────────
 
 export const PC_DOCUMENTS: AuthorizationDocument[] = [
-    { code: "PC 1", label: "Plan de situation", description: "Localise le terrain dans la commune" },
-    { code: "PC 2", label: "Plan de masse", description: "Vue d'ensemble du terrain et des constructions" },
-    { code: "PC 3", label: "Plan en coupe", description: "Coupe du terrain et de la construction" },
-    { code: "PC 4", label: "Notice descriptive du projet", description: "Description du terrain, du projet et des matériaux" },
-    { code: "PC 5", label: "Plan des façades et des toitures", description: "Élévations et toitures du projet" },
-    { code: "PC 6", label: "Document graphique", description: "Insertion du projet dans son environnement" },
-    { code: "PC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
-    { code: "PC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
+    { code: "PC 1", dualCode: "DPC 1", label: "Plan de situation", description: "Localise le terrain dans la commune" },
+    { code: "PC 2", dualCode: "DPC 2", label: "Plan de masse", description: "Vue d'ensemble du terrain et des constructions" },
+    { code: "PC 3", dualCode: "DPC 3", label: "Plan en coupe", description: "Coupe du terrain et de la construction" },
+    { code: "PC 4", dualCode: "DPC 8.1", label: "Notice descriptive du projet", description: "Description du terrain, du projet et des matériaux" },
+    { code: "PC 5", dualCode: "DPC 4", label: "Plan des façades et des toitures", description: "Élévations et toitures du projet" },
+    { code: "PC 6", dualCode: "DPC 6", label: "Document graphique", description: "Insertion du projet dans son environnement" },
+    { code: "PC 7", dualCode: "DPC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
+    { code: "PC 8", dualCode: "DPC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
 ];
 
 // Split PC5 for existing structures
 export const PC5_EXISTING: AuthorizationDocument = {
     code: "PC 5a",
+    dualCode: "DPC 4a",
     label: "Plan des façades et toitures — État existant",
     description: "Élévations et toitures de la construction existante avant travaux",
     tag: "Existant",
@@ -58,6 +60,7 @@ export const PC5_EXISTING: AuthorizationDocument = {
 
 export const PC5_PROPOSED: AuthorizationDocument = {
     code: "PC 5b",
+    dualCode: "DPC 4b",
     label: "Plan des façades et toitures — État projeté",
     description: "Élévations et toitures du projet après travaux",
     tag: "Projeté",

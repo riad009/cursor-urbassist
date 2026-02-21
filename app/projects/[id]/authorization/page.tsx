@@ -901,9 +901,56 @@ export default function AuthorizationPage({
                         </div>
                       </div>
 
+                      {/* Level selector */}
+                      <LevelSelector
+                        label={isEn ? "Number of levels" : "Nombre de niveaux"}
+                        levels={extensionLevels}
+                        setLevels={setExtensionLevels}
+                        isEn={isEn}
+                      />
+
+                      {/* Footprint + Floor area side by side */}
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* Footprint input */}
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-semibold text-slate-700">
+                            {isEn ? "Footprint (m²)" : "Emprise au sol (m²)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={extensionFootprint || ""}
+                            onChange={(e) => { setExtensionFootprint(Number(e.target.value)); setExtensionRange(null); }}
+                            className="w-full px-4 py-3 rounded-xl bg-white border-2 border-amber-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition-all"
+                            placeholder={isEn ? "e.g. 22" : "ex. 22"}
+                            min={0}
+                          />
+                        </div>
+                        {/* Floor area (auto-estimated) */}
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                            {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
+                            <span className="text-slate-400">🧮</span>
+                          </label>
+                          <div className={cn(
+                            "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all",
+                            extensionFloorArea > 0
+                              ? "bg-amber-50 border-amber-200 text-amber-700"
+                              : "bg-slate-50 border-slate-200 text-slate-400"
+                          )}>
+                            {extensionFloorArea > 0 ? extensionFloorArea.toFixed(2) : "—"}
+                          </div>
+                          {extensionFootprint > 0 && (
+                            <p className="text-[10px] text-slate-400">
+                              = {extensionFootprint} m² × {extensionLevels} {extensionLevels > 1 ? (isEn ? "levels" : "niveaux") : (isEn ? "level" : "niveau")} × 0.9
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
                       {/* Add to folder button */}
                       <button
                         type="button"
+                        disabled={extensionFootprint <= 0}
                         onClick={() => {
                           const count = workItems.filter(w => w.projectType === "existing_extension").length + 1;
                           const subLabel = extensionSubTypes.has("extend") ? (isEn ? "Extension" : "Extension")
@@ -1395,12 +1442,12 @@ export default function AuthorizationPage({
                         <FileText className="w-4 h-4 text-violet-400" />
                         <span>{isEn ? `${getDocumentsForType("PC").length} regulatory documents` : `${getDocumentsForType("PC").length} documents réglementaires`}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                        <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                      <div className={`flex items-center gap-2 text-sm ${autoDetectPlu ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                        {autoDetectPlu ? <Check className="w-4 h-4 text-violet-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
                         <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                        <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                      <div className={`flex items-center gap-2 text-sm ${autoDetectCerfa ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                        {autoDetectCerfa ? <Check className="w-4 h-4 text-violet-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
                         <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-slate-700">
@@ -1601,10 +1648,10 @@ export default function AuthorizationPage({
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
                       <div className="grid grid-cols-2 gap-px bg-slate-100">
                         {docs.map((doc) => (
-                          <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                            <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                             <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
                             <div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.dualCode ? `${doc.code} / ${doc.dualCode}` : doc.code}</p>
                               <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
                             </div>
                           </div>
@@ -1723,12 +1770,12 @@ export default function AuthorizationPage({
                           <FileText className={`w-4 h-4 ${accent.badge}`} />
                           <span>{docs.length} {isEn ? "regulatory documents" : "documents réglementaires"}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                          <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                        <div className={`flex items-center gap-2 text-sm ${quickModalPlu ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                          {quickModalPlu ? <Check className={`w-4 h-4 ${accent.badge}`} /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
                           <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-slate-400 line-through">
-                          <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                        <div className={`flex items-center gap-2 text-sm ${quickModalCerfa ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                          {quickModalCerfa ? <Check className={`w-4 h-4 ${accent.badge}`} /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
                           <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-slate-700">
