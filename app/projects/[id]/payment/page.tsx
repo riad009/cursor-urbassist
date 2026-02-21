@@ -152,7 +152,7 @@ export default function PaymentPage({
   const alreadyPaid = !!project?.paidAt;
   const analysisCount = project?.pluAnalysisCount ?? 0;
   const isRelaunch = analysisCount > 0;
-  const currentPrice = isRelaunch ? pricing.relaunch : pricing.first;
+  const currentPrice = pricing.first + pricing.relaunch;
 
   if (alreadyPaid && !isRelaunch) {
     return (
@@ -286,9 +286,6 @@ export default function PaymentPage({
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold text-slate-900">{currentPrice} €</p>
-                {isRelaunch && (
-                  <p className="text-[11px] text-slate-400 line-through">{pricing.first} €</p>
-                )}
               </div>
             </div>
 

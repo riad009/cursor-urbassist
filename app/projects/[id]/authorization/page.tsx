@@ -1337,7 +1337,7 @@ export default function AuthorizationPage({
                         <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                           <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.dualCode ? `${doc.code} / ${doc.dualCode}` : doc.code}</p>
                             <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
                           </div>
                         </div>
@@ -1651,7 +1651,7 @@ export default function AuthorizationPage({
                             <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                             <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
                             <div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.dualCode ? `${doc.code} / ${doc.dualCode}` : doc.code}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
                               <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
                             </div>
                           </div>

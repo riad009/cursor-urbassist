@@ -157,9 +157,9 @@ export async function POST(request: NextRequest) {
       }
 
       const isRelaunch = project.pluAnalysisCount > 0;
-      const priceEur = isRelaunch
-        ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
-        : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
+      const firstPrice = parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
+      const relaunchPrice = parseFloat(process.env.PLU_RELAUNCH_PRICE || "5");
+      const priceEur = firstPrice + relaunchPrice;
       const priceCents = Math.round(priceEur * 100);
       const label = isRelaunch
         ? `PLU Analysis Relaunch — ${project.name || "Project"}`

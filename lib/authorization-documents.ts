@@ -47,6 +47,7 @@ export const PC_DOCUMENTS: AuthorizationDocument[] = [
     { code: "PC 6", dualCode: "DPC 6", label: "Document graphique", description: "Insertion du projet dans son environnement" },
     { code: "PC 7", dualCode: "DPC 7", label: "Photographie de l'environnement proche", description: "Photos du terrain et des abords immédiats" },
     { code: "PC 8", dualCode: "DPC 8", label: "Photographie de l'environnement lointain", description: "Photos du paysage environnant" },
+    { code: "DPC 11", label: "Notice relative aux modalités d'exécution des travaux", description: "Requis en zone ABF / Patrimoine — détaille les modalités d'exécution" },
 ];
 
 // Split PC5 for existing structures
