@@ -440,29 +440,45 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                         </div>
                     )}
 
-                    {/* ── Welcome banner (when not started) ── */}
-                    {!hasDescription && (
-                        <div className="rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 p-5 flex items-center gap-4 shadow-lg shadow-indigo-500/20">
-                            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                                <Sparkles className="w-6 h-6 text-white" />
+                    {/* ── Smart next-step banner ── */}
+                    {!allDone && (() => {
+                        // Determine the first incomplete step and build CTA
+                        const nextStep = !hasAddress
+                            ? { label: isEn ? "Set your project location" : "Définir l'emplacement de votre projet", href: `/projects/${projectId}`, icon: Map, color: "from-blue-600 to-cyan-600", lightColor: "text-blue-700", bgLight: "bg-blue-50" }
+                            : !hasAuthorization
+                                ? { label: isEn ? "Complete your authorization type" : "Complétez votre type d'autorisation", href: `/projects/${projectId}/authorization`, icon: FileText, color: "from-amber-500 to-orange-500", lightColor: "text-amber-700", bgLight: "bg-amber-50" }
+                                : !hasDescription
+                                    ? { label: isEn ? "Describe your project" : "Décrivez votre projet", href: `/projects/${projectId}/project-description`, icon: ClipboardList, color: "from-violet-500 to-purple-600", lightColor: "text-violet-700", bgLight: "bg-violet-50" }
+                                    : !hasPaid
+                                        ? { label: isEn ? "Complete your payment" : "Complétez votre paiement", href: `/projects/${projectId}/payment`, icon: CreditCard, color: "from-emerald-500 to-teal-600", lightColor: "text-emerald-700", bgLight: "bg-emerald-50" }
+                                        : null;
+
+                        if (!nextStep) return null;
+                        const StepIcon = nextStep.icon;
+
+                        return (
+                            <div className={`rounded-2xl bg-gradient-to-r ${nextStep.color} p-5 flex items-center gap-4 shadow-lg`}>
+                                <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                                    <StepIcon className="w-6 h-6 text-white" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-white font-bold text-base">
+                                        {isEn ? "Next step" : "Prochaine étape"}
+                                    </p>
+                                    <p className="text-white/80 text-sm mt-0.5">
+                                        {nextStep.label}
+                                    </p>
+                                </div>
+                                <Link
+                                    href={nextStep.href}
+                                    className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-slate-800 font-semibold text-sm hover:bg-slate-50 transition-colors"
+                                >
+                                    {isEn ? "Continue" : "Continuer"}
+                                    <ArrowRight className="w-4 h-4" />
+                                </Link>
                             </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-white font-bold text-base">
-                                    {isEn ? "Welcome to your project dashboard!" : "Bienvenue sur votre tableau de bord !"}
-                                </p>
-                                <p className="text-indigo-200 text-sm mt-0.5">
-                                    {isEn ? "Start by describing your project or jump straight into the 3D editor." : "Commencez par décrire votre projet ou lancez-vous dans l'éditeur 3D."}
-                                </p>
-                            </div>
-                            <Link
-                                href={`/projects/${projectId}/project-description`}
-                                className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-indigo-700 font-semibold text-sm hover:bg-indigo-50 transition-colors"
-                            >
-                                {isEn ? "Get started" : "Commencer"}
-                                <ArrowRight className="w-4 h-4" />
-                            </Link>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     {/* ── Action cards ── */}
                     <div>
