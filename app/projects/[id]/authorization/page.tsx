@@ -1334,10 +1334,10 @@ export default function AuthorizationPage({
                     </p>
                   </div>
 
-                  {/* Documents — show all PC documents (most complete set) */}
+                  {/* Documents — show all PC documents (most complete set) + DPC 11 */}
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <div className="grid grid-cols-2 gap-px bg-slate-100">
-                      {getDocumentsForType("PC").map((doc) => (
+                      {[...getDocumentsForType("PC"), { code: "DPC 11", dualCode: undefined, label: "Notice relative aux modalités d'exécution des travaux", description: "Requis en zone ABF / Patrimoine" }].map((doc) => (
                         <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                           <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
                           <div>
