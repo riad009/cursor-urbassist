@@ -90,13 +90,16 @@ export async function POST(request: NextRequest) {
       plu = { zoneType: (p.zoneType as string) ?? null, zoneName: (p.zoneName as string) ?? null, pluType: (p.pluType as string) ?? null };
       zoneFeatures = Array.isArray(pluResult.value.data.zoneFeatures) ? (pluResult.value.data.zoneFeatures as unknown[]) : [];
       const src = pluResult.value.data.source;
-      if (src === "fallback" || src === "none") {
+      if (src === "none") {
         pluDetectionFailed = true;
-        pluFallbackMessage = "Nous n'avons pas pu détecter automatiquement votre zone PLU ou RNU. Nous vous aiderons à la déterminer après validation de votre projet.";
+        pluFallbackMessage = "La détection automatique de la zone PLU n'a pas abouti. Nous vous aiderons à la déterminer après validation de votre projet.";
+      } else if (src === "no_data") {
+        // White zone — documents not uploaded yet. This is accurate data, not a failure.
+        pluFallbackMessage = "Les documents d'urbanisme de cette commune n'ont pas encore été mis en ligne. Contactez votre mairie pour connaître la réglementation applicable.";
       }
     } else {
       pluDetectionFailed = true;
-      pluFallbackMessage = "Nous n'avons pas pu détecter automatiquement votre zone PLU ou RNU. Nous vous aiderons à la déterminer après validation de votre projet.";
+      pluFallbackMessage = "La détection automatique de la zone PLU n'a pas abouti. Nous vous aiderons à la déterminer après validation de votre projet.";
     }
 
     // Protected areas

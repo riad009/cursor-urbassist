@@ -66,6 +66,7 @@ interface DecisionResponse {
     heritageTypes: string[];
   } | null;
   source: "server";
+  noData: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,7 @@ async function fetchPluDetection(
   isRnu: boolean;
   dpThreshold: number;
   rnuWarning: string | null;
+  noData: boolean;
   zoneType: string | null;
   pluType: string | null;
 }> {
@@ -102,6 +104,7 @@ async function fetchPluDetection(
         isRnu: data.isRnu ?? false,
         dpThreshold: data.dpThreshold ?? (data.isUrbanZone ? 40 : 20),
         rnuWarning: data.rnuWarning ?? null,
+        noData: data.noData ?? false,
         zoneType: data.plu?.zoneType ?? null,
         pluType: data.plu?.pluType ?? null,
       };
@@ -116,6 +119,7 @@ async function fetchPluDetection(
     isRnu: false,
     dpThreshold: 40,
     rnuWarning: null,
+    noData: true, // API failed = we have no reliable data
     zoneType: null,
     pluType: null,
   };
@@ -184,6 +188,7 @@ export async function POST(request: NextRequest) {
       isRnu: false,
       dpThreshold: 40,
       rnuWarning: null as string | null,
+      noData: true as boolean,
       zoneType: null as string | null,
       pluType: null as string | null,
     };
@@ -259,6 +264,7 @@ export async function POST(request: NextRequest) {
           }
         : null,
       source: "server",
+      noData: pluData.noData,
     };
 
     console.log(

@@ -100,10 +100,9 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // If no features found, default to RNU
-        if (features.length === 0) {
-            isRnu = true;
-        }
+        // If no features found, we have no data — NOT the same as RNU
+        // Only set isRnu when the API explicitly confirms it
+        // "No features" means the GPU API has no info for this commune
 
         return NextResponse.json({
             success: true,
@@ -114,6 +113,7 @@ export async function POST(request: NextRequest) {
             pluType,
             documentType,
             documentStatus,
+            noData: features.length === 0,
             features,
         });
     } catch (error) {

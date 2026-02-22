@@ -279,17 +279,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Guaranteed French commune fallback → RNU
+    // Commune found but no PLU/CC/RNU data → "no data" (white zone on Geoportail)
+    // White zones mean documents haven't been uploaded yet — NOT the same as RNU.
+    // RNU (grey zones) are only flagged when the municipality API explicitly says so.
     if (!pluInfo.zoneType && (communeCode || communeName)) {
-      pluInfo.zoneType = "RNU";
-      pluInfo.zoneName = "Règlement National d'Urbanisme";
-      pluInfo.pluType = "RNU";
-      pluInfo.pluStatus = "fallback";
-      console.log("[PLU] Fallback: RNU");
+      pluInfo.zoneType = null;
+      pluInfo.zoneName = null;
+      pluInfo.pluType = null;
+      pluInfo.pluStatus = "no_data";
+      console.log("[PLU] No urbanisme data found (white zone — documents not uploaded)");
     }
 
     pluInfo.communeName = communeName;
-    pluInfo.regulations = getDefaultRegulations(pluInfo.zoneType || "UB");
+    pluInfo.regulations = pluInfo.zoneType ? getDefaultRegulations(pluInfo.zoneType) : null;
 
     // ── Gemini AI enhancement — NON-BLOCKING ────────────────────────────
     // Removed from critical path. Default regulations are sufficient for
@@ -302,10 +304,13 @@ export async function POST(request: NextRequest) {
     const zoneUpper = (pluInfo.zoneType ?? "").toUpperCase();
     const isUrbanZone = zoneUpper.startsWith("U") || zoneUpper.startsWith("AU");
     const isRnu = pluInfo.pluType === "RNU" || pluInfo.zoneType === "RNU";
+    const noData = pluInfo.pluStatus === "no_data";
     const dpThreshold = isUrbanZone ? 40 : 20;
     const rnuWarning = isRnu
       ? "Terrain soumis au RNU : Constructibilité limitée à la continuité de l'urbanisation."
-      : null;
+      : noData
+        ? "Les documents d'urbanisme de cette commune n'ont pas encore été mis en ligne. Contactez votre mairie pour connaître la réglementation applicable."
+        : null;
 
     return NextResponse.json({
       success: true,
@@ -316,9 +321,10 @@ export async function POST(request: NextRequest) {
       isRnu,
       dpThreshold,
       rnuWarning,
+      noData,
       source: pluInfo.zoneType
-        ? pluInfo.pluStatus === "fallback" ? "fallback" : "gpu"
-        : "none",
+        ? "gpu"
+        : noData ? "no_data" : "none",
       gpu: {
         document: gpu.document,
         zone: zoneFeatures,

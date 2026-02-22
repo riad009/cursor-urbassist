@@ -215,11 +215,15 @@ export default function AuthorizationPage({
           if (zone.startsWith("U") || zone.startsWith("AU")) {
             setIsUrbanZone(true);
             setDpThreshold(40);
-          } else if (zone === "RNU" || zone.startsWith("A") || zone.startsWith("N")) {
+          } else if (zone === "RNU") {
             setIsUrbanZone(false);
             setDpThreshold(20);
-            setIsRnu(zone === "RNU" || !proj.zoneType);
+            setIsRnu(true);
+          } else if (zone.startsWith("A") || zone.startsWith("N")) {
+            setIsUrbanZone(false);
+            setDpThreshold(20);
           }
+          // When zone is empty (no data / white zone), keep defaults (urban=true, dpThreshold=40)
           // Use stored dpThreshold if available from previous decision
           const desc = proj.projectDescription;
           if (desc?.dpThreshold) {

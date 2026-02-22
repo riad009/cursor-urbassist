@@ -136,9 +136,13 @@ export default function DocumentsPage({
                                     {isEn ? "ABF Heritage Zone Detected" : "Zone ABF / Patrimoine détectée"}
                                 </p>
                                 <p className="text-xs text-amber-600 mt-1">
-                                    {isEn
-                                        ? "Additional document DPC 11 has been automatically added to your list."
-                                        : "Le document DPC 11 a été automatiquement ajouté à votre liste."}
+                                    {authType === "DP"
+                                        ? (isEn
+                                            ? "Additional document DPC 11 has been automatically added to your list."
+                                            : "Le document DPC 11 a été automatiquement ajouté à votre liste.")
+                                        : (isEn
+                                            ? "The PC4 descriptive notice will be completed with the necessary information for the ABF."
+                                            : "La notice descriptive PC4 sera complétée avec les informations nécessaires pour l'ABF.")}
                                 </p>
                             </div>
                         </div>

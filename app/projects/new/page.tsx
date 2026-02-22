@@ -306,7 +306,7 @@ export default function NewProjectPage() {
                                             <div>
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold border border-blue-100">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</span>
-                                                    <span className="text-xs text-slate-500 font-medium">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : "PLU"}</span>
+                                                    <span className="text-xs text-slate-500 font-medium">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : pluInfo?.pluType === "POS" ? "POS" : pluInfo?.pluType ? pluInfo.pluType : ""}</span>
                                                 </div>
                                                 <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[11px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1.5 transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.modify")}</button>
                                             </div>
