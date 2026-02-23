@@ -166,14 +166,26 @@ export default function ProjectDescriptionPage({
     const [designValidated, setDesignValidated] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<string>("PC4 / DPC 8-1");
 
-    // Project data
+    // Confirmation modal & generation tracking
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [generationCount, setGenerationCount] = useState(0);
+    const [generatedStatement, setGeneratedStatement] = useState<{ text: string; sections: Record<string, string> } | null>(null);
+    const [generationError, setGenerationError] = useState<string | null>(null);
+
+    // Real project/zone data
     const [projectName, setProjectName] = useState<string>("");
+    const [projectZoneType, setProjectZoneType] = useState<string>("");
+    const [projectProtectedAreas, setProjectProtectedAreas] = useState<{ type: string; name: string }[]>([]);
+
     useEffect(() => {
         fetch(`/api/projects/${projectId}`)
             .then((r) => r.json())
             .then((d) => {
                 if (d.project?.name) setProjectName(d.project.name);
                 if (d.project?.address) setProjectAddress(d.project.address);
+                if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
+                if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
+                if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
             })
             .catch(() => { });
     }, [projectId]);
@@ -345,21 +357,73 @@ export default function ProjectDescriptionPage({
         setTimeout(() => setStep(8), 1200);
     }
 
-    // Start analysis simulation
-    function handleStartAnalysis() {
+    // Show confirmation modal before starting analysis
+    function handleRequestAnalysis() {
+        setShowConfirmModal(true);
+    }
+
+    // Actually start the real AI analysis after user confirms
+    async function handleStartAnalysis() {
+        setShowConfirmModal(false);
         setShowAnalysisModal(true);
         setAnalysisProgress(0);
         setAnalysisComplete(false);
+        setGenerationError(null);
+
+        // Animate progress while waiting for API
         const interval = setInterval(() => {
             setAnalysisProgress(prev => {
-                if (prev >= 100) {
+                if (prev >= 90) {
                     clearInterval(interval);
-                    setAnalysisComplete(true);
-                    return 100;
+                    return 90; // Hold at 90% until API responds
                 }
-                return prev + Math.random() * 8 + 2;
+                return prev + Math.random() * 6 + 1;
             });
-        }, 200);
+        }, 300);
+
+        try {
+            // Build answers from wizard state
+            const answers: Record<string, string> = {
+                projectType: jobs.length > 0 ? jobs.map(j => j.displayLabel || j.nature).join(", ") : "Construction",
+                authorizationType: dpcResult?.determination || "PC",
+                currentState: terrainInitial || "",
+                topography: accessVerts || "",
+                floorArea: String(jobs.reduce((sum, j) => sum + j.floorAreaEstimated, 0)),
+                footprint: String(jobs.reduce((sum, j) => sum + j.footprint, 0)),
+                facadeMaterials: matExtMaterial ? `${matExtMaterial} (${matExtColor})` : "",
+                roofType: roofType || "",
+                roofMaterials: roofCovering ? `${roofCovering} (${roofColor})` : "",
+                exteriorFinishes: joineryMaterial || "",
+                colorPalette: [matExtColor, roofColor, wallColor, gutterColor].filter(Boolean).join(", "),
+                fencing: fenceMaterial ? `${fenceMaterial} (${fenceColor})` : "",
+            };
+
+            const res = await fetch("/api/descriptive-statement", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ projectId, answers }),
+            });
+
+            clearInterval(interval);
+            const data = await res.json();
+
+            if (res.ok && data.statement) {
+                setGeneratedStatement(data.statement);
+                setGenerationCount(prev => prev + 1);
+                setAnalysisProgress(100);
+                setAnalysisComplete(true);
+            } else {
+                setGenerationError(data.error || "Generation failed");
+                setAnalysisProgress(100);
+                setAnalysisComplete(true);
+            }
+        } catch (err) {
+            clearInterval(interval);
+            console.error("Analysis failed:", err);
+            setGenerationError("Connection error. Please try again.");
+            setAnalysisProgress(100);
+            setAnalysisComplete(true);
+        }
     }
 
     function handleViewResults() {
@@ -1564,7 +1628,7 @@ export default function ProjectDescriptionPage({
                                                 : "Vérification de la conformité de votre projet aux règles d'urbanisme locales."}
                                         </p>
 
-                                        {/* Zone cards */}
+                                        {/* Zone cards — real data */}
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-4">
                                                 <div className="flex items-center justify-between mb-2">
@@ -1572,31 +1636,45 @@ export default function ProjectDescriptionPage({
                                                         {isEn ? "PLU ZONE DETECTED" : "ZONE PLU DÉTECTÉE"}
                                                     </h3>
                                                     <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-                                                        {isEn ? "Urban Zone (U)" : "Zone Urbaine (U)"}
+                                                        {projectZoneType
+                                                            ? `Zone ${projectZoneType.toUpperCase()}`
+                                                            : (isEn ? "Not detected" : "Non détectée")}
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-slate-500 mt-1">
-                                                    {isEn
-                                                        ? "Dense zone generally allowing extensions up to 40m² under conditions."
-                                                        : "Zone dense permettant généralement des extensions jusqu'à 40m² sous conditions."}
+                                                    {projectZoneType && (projectZoneType.toUpperCase().startsWith("U") || projectZoneType.toUpperCase().startsWith("AU"))
+                                                        ? (isEn
+                                                            ? "Dense zone generally allowing extensions up to 40m² under conditions."
+                                                            : "Zone dense permettant généralement des extensions jusqu'à 40m² sous conditions.")
+                                                        : projectZoneType
+                                                            ? (isEn ? "Rural or natural zone — DP threshold at 20m²." : "Zone rurale/naturelle — seuil DP à 20m².")
+                                                            : (isEn ? "No PLU zone detected for this location." : "Aucune zone PLU détectée pour cette localisation.")}
                                                 </p>
                                                 <button className="text-xs text-indigo-600 font-semibold mt-2 hover:underline">
                                                     {isEn ? "Edit manually" : "Modifier manuellement"}
                                                 </button>
                                             </div>
-                                            <div className="rounded-xl border-2 border-amber-200 bg-amber-50/30 p-4">
+                                            <div className={`rounded-xl border-2 p-4 ${projectProtectedAreas.length > 0 ? "border-amber-200 bg-amber-50/30" : "border-green-200 bg-green-50/30"}`}>
                                                 <div className="flex items-center justify-between mb-2">
                                                     <h3 className="text-sm font-bold text-slate-900 uppercase">
                                                         {isEn ? "HERITAGE PROTECTION" : "PROTECTION PATRIMOINE"}
                                                     </h3>
-                                                    <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
-                                                        {isEn ? "No easement" : "Aucune servitude"}
+                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                                        projectProtectedAreas.length > 0
+                                                            ? "text-amber-600 bg-amber-100"
+                                                            : "text-green-600 bg-green-100"
+                                                    }`}>
+                                                        {projectProtectedAreas.length > 0
+                                                            ? (isEn ? `${projectProtectedAreas.length} zone(s) detected` : `${projectProtectedAreas.length} zone(s) détectée(s)`)
+                                                            : (isEn ? "No easement" : "Aucune servitude")}
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-slate-500 mt-1">
-                                                    {isEn
-                                                        ? "No specific heritage constraint detected on the plot."
-                                                        : "Pas de contrainte patrimoniale spécifique détectée sur la parcelle."}
+                                                    {projectProtectedAreas.length > 0
+                                                        ? projectProtectedAreas.slice(0, 3).map(a => a.name).join(", ")
+                                                        : (isEn
+                                                            ? "No specific heritage constraint detected on the plot."
+                                                            : "Pas de contrainte patrimoniale spécifique détectée sur la parcelle.")}
                                                 </p>
                                             </div>
                                         </div>
@@ -1642,7 +1720,7 @@ export default function ProjectDescriptionPage({
                                         <div className="flex justify-center pt-2">
                                             <button
                                                 type="button"
-                                                onClick={handleStartAnalysis}
+                                                onClick={handleRequestAnalysis}
                                                 className="flex items-center gap-2 px-8 py-4 rounded-xl bg-indigo-600 text-white font-bold text-base hover:bg-indigo-700 transition-all shadow-lg hover:shadow-xl"
                                             >
                                                 <FileText className="w-5 h-5" />
@@ -2347,6 +2425,57 @@ export default function ProjectDescriptionPage({
                     </div>
                 )}
 
+            {/* ══ CONFIRMATION MODAL ══ */}
+            {showConfirmModal && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm" style={{ zIndex: 9999 }}>
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 space-y-5">
+                        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
+                            <AlertTriangle className="w-8 h-8 text-amber-600" />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-900 text-center">
+                            {isEn ? "Confirm your project description" : "Confirmez votre description de projet"}
+                        </h3>
+                        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 space-y-2">
+                            <p className="text-sm text-amber-800 font-medium">
+                                {isEn
+                                    ? "Please confirm that your project description is final. Any further modification will result in additional billing."
+                                    : "Veuillez confirmer que votre description de projet est définitive. Toute modification ultérieure entraînera une facturation supplémentaire."}
+                            </p>
+                            <ul className="text-xs text-amber-700 space-y-1 ml-4 list-disc">
+                                <li>{isEn ? "The generation consumes Gemini AI tokens" : "La génération consomme des tokens IA Gemini"}</li>
+                                <li>{isEn ? "First generation is included" : "La première génération est incluse"}</li>
+                                <li>{isEn ? "Any major modification → additional billing" : "Toute modification majeure → facturation additionnelle"}</li>
+                            </ul>
+                        </div>
+                        {generationCount > 0 && (
+                            <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                                <p className="text-xs text-blue-700 font-medium">
+                                    {isEn
+                                        ? `This is a re-generation (${generationCount} previous). 2 credits will be deducted.`
+                                        : `Ceci est une re-génération (${generationCount} précédente${generationCount > 1 ? "s" : ""}). 2 crédits seront déduits.`}
+                                </p>
+                            </div>
+                        )}
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowConfirmModal(false)}
+                                className="flex-1 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold hover:bg-slate-50 transition-colors"
+                            >
+                                {isEn ? "Cancel" : "Annuler"}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleStartAnalysis}
+                                className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition-colors shadow-md"
+                            >
+                                {isEn ? "Confirm & Generate" : "Confirmer & Générer"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ══ ANALYSIS PROGRESS MODAL ══ */}
             {showAnalysisModal && (
                 <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm" style={{ zIndex: 9999 }}>
@@ -2355,35 +2484,56 @@ export default function ProjectDescriptionPage({
                             <FileText className="w-8 h-8 text-indigo-600" />
                         </div>
                         <h3 className="text-xl font-bold text-slate-900">
-                            {isEn ? "Analysis in progress..." : "Analyse en cours..."}
+                            {analysisComplete
+                                ? (generationError
+                                    ? (isEn ? "Generation Error" : "Erreur de génération")
+                                    : (isEn ? "Analysis Complete!" : "Analyse terminée !"))
+                                : (isEn ? "Analysis in progress..." : "Analyse en cours...")}
                         </h3>
                         <p className="text-sm text-slate-500">
-                            {isEn
-                                ? "The AI is cross-referencing your project data with the simulated local PLU rules."
-                                : "L'intelligence artificielle croise les données de votre projet avec les règles du PLU local simulé."}
+                            {analysisComplete
+                                ? (generationError
+                                    ? generationError
+                                    : (isEn
+                                        ? "Your descriptive notice has been generated by AI. Review the compliance results."
+                                        : "Votre notice descriptive a été générée par l'IA. Consultez les résultats de conformité."))
+                                : (isEn
+                                    ? "The AI is generating your descriptive notice and cross-referencing with PLU rules..."
+                                    : "L'IA génère votre notice descriptive et croise avec les règles du PLU...")}
                         </p>
 
                         {/* Progress bar */}
                         <div className="space-y-2">
                             <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                                 <div
-                                    className="h-full bg-indigo-600 rounded-full transition-all duration-300 ease-out"
+                                    className={`h-full rounded-full transition-all duration-300 ease-out ${generationError ? "bg-red-500" : "bg-indigo-600"}`}
                                     style={{ width: `${Math.min(analysisProgress, 100)}%` }}
                                 />
                             </div>
                             <p className="text-xs text-slate-500">
-                                {isEn ? "CES verification..." : "Vérification CES..."} {Math.min(Math.round(analysisProgress), 100)}%
+                                {analysisComplete
+                                    ? (generationError ? (isEn ? "Failed" : "Échoué") : (isEn ? "Complete" : "Terminé"))
+                                    : `${isEn ? "Generating notice..." : "Génération de la notice..."} ${Math.min(Math.round(analysisProgress), 100)}%`}
                             </p>
                         </div>
 
                         {/* View Results button (appears when complete) */}
-                        {analysisComplete && (
+                        {analysisComplete && !generationError && (
                             <button
                                 type="button"
                                 onClick={handleViewResults}
                                 className="w-full py-3.5 rounded-xl bg-indigo-600 text-white font-bold text-base hover:bg-indigo-700 transition-colors shadow-md"
                             >
                                 {isEn ? "View Results" : "Voir le résultat"}
+                            </button>
+                        )}
+                        {analysisComplete && generationError && (
+                            <button
+                                type="button"
+                                onClick={() => { setShowAnalysisModal(false); setGenerationError(null); }}
+                                className="w-full py-3.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-base hover:bg-slate-200 transition-colors"
+                            >
+                                {isEn ? "Close" : "Fermer"}
                             </button>
                         )}
                     </div>
