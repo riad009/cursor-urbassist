@@ -152,7 +152,7 @@ export default function PaymentPage({
   const alreadyPaid = !!project?.paidAt;
   const analysisCount = project?.pluAnalysisCount ?? 0;
   const isRelaunch = analysisCount > 0;
-  const currentPrice = pricing.first + pricing.relaunch;
+  const currentPrice = isRelaunch ? pricing.relaunch : pricing.first;
 
   if (alreadyPaid && !isRelaunch) {
     return (
@@ -291,13 +291,20 @@ export default function PaymentPage({
 
             {/* Price breakdown */}
             <div className="rounded-lg bg-white border border-slate-100 p-3 text-xs text-slate-500 space-y-1">
-              <div className="flex justify-between">
-                <span>{t("pay.processing") === "Processing…" ? "First analysis" : "Première analyse"}</span>
-                <span className="font-medium text-slate-700">{pricing.first} €</span>
-              </div>
-              <div className="flex justify-between">
+              {isRelaunch ? (
+                <div className="flex justify-between">
+                  <span>{t("pay.processing") === "Processing…" ? "Relaunch after modification" : "Relance après modification"}</span>
+                  <span className="font-medium text-slate-700">{pricing.relaunch} €</span>
+                </div>
+              ) : (
+                <div className="flex justify-between">
+                  <span>{t("pay.processing") === "Processing…" ? "First analysis" : "Première analyse"}</span>
+                  <span className="font-medium text-slate-700">{pricing.first} €</span>
+                </div>
+              )}
+              <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-50">
                 <span>{t("pay.processing") === "Processing…" ? "Relaunch after modification" : "Relance après modification"}</span>
-                <span className="font-medium text-slate-700">{pricing.relaunch} €</span>
+                <span>{pricing.relaunch} € / {t("pay.processing") === "Processing…" ? "relaunch" : "relance"}</span>
               </div>
             </div>
 

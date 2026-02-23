@@ -208,7 +208,7 @@ export default function AuthorizationPage({
           }
           setProjectData({
             name: proj.name,
-            zoneType: proj.zoneType,
+            zoneType: proj.regulatoryAnalysis?.zoneType ?? proj.zoneType,
             address: proj.address,
             regulatoryType: proj.regulatoryType,
             isProtectedZone: proj.protectedAreas?.length > 0,
@@ -216,7 +216,7 @@ export default function AuthorizationPage({
             citycode: proj.citycode,
           });
           // Auto-detect urban zone from PLU zone
-          const zone = (proj.zoneType || "").toUpperCase();
+          const zone = (proj.regulatoryAnalysis?.zoneType || proj.zoneType || "").toUpperCase();
           if (zone.startsWith("U") || zone.startsWith("AU")) {
             setIsUrbanZone(true);
             setDpThreshold(40);
