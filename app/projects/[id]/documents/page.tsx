@@ -39,9 +39,10 @@ export default function DocumentsPage({
         projectType?: string | null;
         projectDescription?: Record<string, unknown> | null;
         protectedAreas?: { type: string; name: string }[] | null;
+        regulatoryAnalysis?: { isProtectedArea?: boolean; abfRequired?: boolean; heritageTypes?: string[] } | null;
     } | null>(null);
 
-    // Load project data
+    // Load project data with regulatory analysis
     useEffect(() => {
         fetch(`/api/projects/${projectId}`)
             .then((r) => r.json())
@@ -52,14 +53,36 @@ export default function DocumentsPage({
             .finally(() => setLoading(false));
     }, [projectId]);
 
-    // Derive document list
+    // Derive document list with improved detection
     const authType = project?.authorizationType || null;
-    const hasABF = (project?.protectedAreas || []).some(
-        (a: { type: string }) => a.type === "ABF" || a.type === "HERITAGE"
+
+    // ABF detection: check both protectedAreas and regulatoryAnalysis
+    const protectedAreasABF = (project?.protectedAreas || []).some(
+        (a: { type: string }) =>
+            a.type === "ABF" ||
+            a.type === "HERITAGE" ||
+            a.type === "abf" ||
+            a.type === "heritage" ||
+            a.type === "MONUMENT_HISTORIQUE" ||
+            a.type === "SITE_PATRIMONIAL"
     );
+    const regulatoryABF = project?.regulatoryAnalysis?.isProtectedArea === true ||
+        project?.regulatoryAnalysis?.abfRequired === true;
+    const hasABF = protectedAreasABF || regulatoryABF;
+
+    // Existing structure detection: check projectType AND projectDescription categories
+    const projectDescCategories = (project?.projectDescription as { categories?: string[] })?.categories || [];
+    const projectDescWorkItems = (project?.projectDescription as { workItems?: { projectType: string }[] })?.workItems || [];
     const isExistingStructure =
         project?.projectType === "extension" ||
-        (project?.projectDescription as { categories?: string[] })?.categories?.includes("existing_extension");
+        project?.projectType === "existing_extension" ||
+        project?.projectType === "renovation" ||
+        project?.projectType === "facade_change" ||
+        projectDescCategories.includes("existing_extension") ||
+        projectDescCategories.includes("renovation") ||
+        projectDescWorkItems.some((w: { projectType: string }) =>
+            ["existing_extension", "facade_change"].includes(w.projectType)
+        );
 
     const documents = getDocumentsForProject(authType, {
         hasABF,

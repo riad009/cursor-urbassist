@@ -123,6 +123,7 @@ interface ProjectData {
   includeOverhangInFootprint: boolean;
   coordinates: { lat: number; lng: number } | null;
   parcelGeometry: unknown;
+  pluSetbacks?: Record<string, number>;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────

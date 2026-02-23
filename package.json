@@ -2,13 +2,10 @@
   "name": "clinet-demo",
   "version": "0.1.0",
   "private": true,
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "scripts": {
     "dev": "next dev",
     "dev:win": "powershell -ExecutionPolicy Bypass -File ./run-dev.ps1",
-    "build": "prisma generate && next build --webpack",
+    "build": "prisma generate && next build",
     "build:next": "next build",
     "start": "next start",
     "lint": "eslint",
