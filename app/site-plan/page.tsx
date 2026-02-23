@@ -1859,7 +1859,8 @@ function SitePlanContent() {
           const my = (info.bldgPt.y + info.projPt.y) / 2;
 
           // Check against PLU setback rules if available
-          const pluSetbacks = projectData?.pluSetbacks || {};
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pluSetbacks = (projectData as any)?.pluSetbacks || {};
           const setbackRule = (pluSetbacks as Record<string, number>)[cat] || 0;
           const isCompliant = setbackRule <= 0 || distM >= setbackRule;
           const complianceTag = setbackRule > 0
