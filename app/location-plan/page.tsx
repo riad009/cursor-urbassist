@@ -15,6 +15,8 @@ import {
   ArrowRight,
   FileDown,
   Ruler,
+  Combine,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
@@ -44,6 +46,10 @@ function LocationPlanPageContent() {
   const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
   const [paperFormat, setPaperFormat] = useState<"A4" | "A3">("A3");
   const [projectDetails, setProjectDetails] = useState<{ address?: string | null; parcelIds?: string[]; zoneType?: string | null } | null>(null);
+  const [mergedParcel, setMergedParcel] = useState<{ geometry: unknown; area: number; ids: string[] } | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [nearbyRoads, setNearbyRoads] = useState<{ name: string; classificationLabel: string; distance: number; ref?: string }[]>([]);
+  const [loadingRoads, setLoadingRoads] = useState(false);
 
   const projectIdFromUrl = searchParams.get("project");
 
@@ -98,6 +104,21 @@ function LocationPlanPageContent() {
       .catch(() => setProjectDetails(null));
   }, [selectedProjectId, projects]);
 
+  // Auto-detect nearby road types when coordinates change
+  useEffect(() => {
+    if (!selectedCoords) { setNearbyRoads([]); return; }
+    setLoadingRoads(true);
+    fetch("/api/cadastre/road-type", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat: selectedCoords.lat, lng: selectedCoords.lng, radius: 100 }),
+    })
+      .then((r) => r.json())
+      .then((data) => setNearbyRoads(data.roads || []))
+      .catch(() => setNearbyRoads([]))
+      .finally(() => setLoadingRoads(false));
+  }, [selectedCoords?.lat, selectedCoords?.lng]);
+
   const searchAddress = useCallback(async () => {
     if (!addressQuery.trim() || addressQuery.length < 3) {
       setAddressSuggestions([]);
@@ -128,7 +149,34 @@ function LocationPlanPageContent() {
       setSelectedCoords({ lng: coords[0], lat: coords[1] });
       setAddressSuggestions([]);
       setSelectedParcelIds([]);
+      setMergedParcel(null);
     }
+  };
+
+  const handleMergeParcels = async () => {
+    if (selectedParcelIds.length < 2) return;
+    setIsMerging(true);
+    try {
+      const res = await fetch("/api/cadastre/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parcelIds: selectedParcelIds }),
+      });
+      const data = await res.json();
+      if (data.success && data.merged) {
+        setMergedParcel({
+          geometry: data.merged.geometry,
+          area: data.merged.area,
+          ids: selectedParcelIds,
+        });
+      } else {
+        alert(data.error || "Failed to merge parcels. Parcels may not be adjacent.");
+      }
+    } catch (err) {
+      console.error("Merge error:", err);
+      alert("Failed to merge parcels.");
+    }
+    setIsMerging(false);
   };
 
   const exportMap = () => {
@@ -340,11 +388,39 @@ function LocationPlanPageContent() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedParcelIds([])}
+                  onClick={() => { setSelectedParcelIds([]); setMergedParcel(null); }}
                   className="text-xs font-medium text-blue-600 hover:text-blue-700"
                 >
                   Clear selection
                 </button>
+                {selectedParcelIds.length >= 2 && !mergedParcel && (
+                  <button
+                    type="button"
+                    onClick={handleMergeParcels}
+                    disabled={isMerging}
+                    className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {isMerging ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Combine className="w-3 h-3" />
+                    )}
+                    {isMerging ? "Merging..." : "Merge Parcels (Union)"}
+                  </button>
+                )}
+                {mergedParcel && (
+                  <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-xs font-semibold text-emerald-700">Parcels Merged</span>
+                    </div>
+                    <p className="text-xs text-emerald-600">
+                      Total area: {mergedParcel.area >= 10000
+                        ? `${(mergedParcel.area / 10000).toFixed(2)} ha`
+                        : `${mergedParcel.area} m²`}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -363,6 +439,35 @@ function LocationPlanPageContent() {
                     <li><span className="text-slate-500">PLU zone:</span> {projectDetails.zoneType}</li>
                   )}
                 </ul>
+              </div>
+            )}
+
+            {/* Road Type Detection */}
+            {selectedCoords && (
+              <div className="p-3 rounded-xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2">Adjacent Roads</h3>
+                {loadingRoads ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Detecting road types...
+                  </div>
+                ) : nearbyRoads.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {nearbyRoads.slice(0, 5).map((road, i) => (
+                      <li key={i} className="text-xs text-slate-600">
+                        <span className="font-medium text-slate-900">{road.name}</span>
+                        {road.ref && <span className="text-slate-400 ml-1">({road.ref})</span>}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                            {road.classificationLabel}
+                          </span>
+                          <span className="text-slate-400">{road.distance}m</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-400">No roads detected nearby.</p>
+                )}
               </div>
             )}
 

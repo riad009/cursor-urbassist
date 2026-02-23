@@ -123,6 +123,7 @@ interface ProjectData {
   includeOverhangInFootprint: boolean;
   coordinates: { lat: number; lng: number } | null;
   parcelGeometry: unknown;
+  pluSetbacks?: Record<string, number>;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -1726,49 +1727,161 @@ function SitePlanContent() {
         return { x: pt.x, y: pt.y };
       });
 
+      // ── Classify each parcel edge into front/rear/side-left/side-right ──
+      // Compute parcel centroid
+      let pcx = 0, pcy = 0;
+      worldPts.forEach((p: { x: number; y: number }) => { pcx += p.x; pcy += p.y; });
+      pcx /= worldPts.length; pcy /= worldPts.length;
+
+      // Determine "front" direction — bottom of canvas is usually the road/street side
+      // We use the downward direction (positive Y) as the default road direction
+      const roadAngle = Math.PI / 2; // pointing down = road
+
+      interface EdgeInfo {
+        idx: number;
+        a: { x: number; y: number };
+        b: { x: number; y: number };
+        midX: number;
+        midY: number;
+        angle: number; // bearing from centroid to edge midpoint
+        category: "front" | "rear" | "side-left" | "side-right";
+      }
+
+      const edges: EdgeInfo[] = [];
+      for (let i = 0; i < worldPts.length; i++) {
+        const a = worldPts[i];
+        const b = worldPts[(i + 1) % worldPts.length];
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2;
+        const angle = Math.atan2(midY - pcy, midX - pcx); // bearing from centroid to edge mid
+
+        // Compare with road direction to classify
+        let diff = angle - roadAngle;
+        while (diff > Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+        const absDiff = Math.abs(diff);
+
+        let category: EdgeInfo["category"];
+        if (absDiff < Math.PI / 4) category = "front";
+        else if (absDiff > 3 * Math.PI / 4) category = "rear";
+        else category = diff > 0 ? "side-right" : "side-left";
+
+        edges.push({ idx: i, a, b, midX, midY, angle, category });
+      }
+
+      // Colors for each boundary type
+      const categoryStyles: Record<string, { color: string; label: string }> = {
+        "front": { color: "#f97316", label: "Front" },
+        "rear": { color: "#8b5cf6", label: "Rear" },
+        "side-left": { color: "#06b6d4", label: "Left" },
+        "side-right": { color: "#ec4899", label: "Right" },
+      };
+
       buildings.forEach((bldg: any) => {
         const bc = (bldg as fabric.Object).getCenterPoint();
-        let minDist = Infinity;
-        let closestPt = { x: 0, y: 0 };
+        // Get building bounding box for edge-to-edge measurement
+        const br = (bldg as fabric.Object).getBoundingRect();
+        const bldgCorners = [
+          { x: br.left, y: br.top },
+          { x: br.left + br.width, y: br.top },
+          { x: br.left + br.width, y: br.top + br.height },
+          { x: br.left, y: br.top + br.height },
+        ];
 
-        // Find closest point on parcel boundary to building center
-        for (let i = 0; i < worldPts.length; i++) {
-          const a = worldPts[i];
-          const b = worldPts[(i + 1) % worldPts.length];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const lenSq = dx * dx + dy * dy;
-          let t = lenSq > 0 ? ((bc.x - a.x) * dx + (bc.y - a.y) * dy) / lenSq : 0;
-          t = Math.max(0, Math.min(1, t));
-          const proj = { x: a.x + t * dx, y: a.y + t * dy };
-          const d = Math.sqrt((bc.x - proj.x) ** 2 + (bc.y - proj.y) ** 2);
-          if (d < minDist) { minDist = d; closestPt = proj; }
-        }
+        // For each boundary category, find the closest edge and distance from building
+        const categoriesUsed = new Set<string>();
 
-        const distM = minDist / ppm;
-        const dimId = `bdim-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        // Group edges by category, find closest edge per category
+        const byCategory: Record<string, { dist: number; projPt: { x: number; y: number }; bldgPt: { x: number; y: number } }> = {};
 
-        // Dimension line
-        const dimLine = new fabric.Line([bc.x, bc.y, closestPt.x, closestPt.y], {
-          stroke: "#f97316", strokeWidth: 1.5, strokeDashArray: [4, 3],
-          selectable: false, evented: false,
+        edges.forEach((edge) => {
+          // Find closest point from any building corner/center to this edge
+          const pointsToCheck = [...bldgCorners, bc];
+          let bestDist = Infinity;
+          let bestProj = { x: 0, y: 0 };
+          let bestBldgPt: { x: number; y: number } = { x: bc.x, y: bc.y };
+
+          for (const pt of pointsToCheck) {
+            const dx = edge.b.x - edge.a.x, dy = edge.b.y - edge.a.y;
+            const lenSq = dx * dx + dy * dy;
+            let t = lenSq > 0 ? ((pt.x - edge.a.x) * dx + (pt.y - edge.a.y) * dy) / lenSq : 0;
+            t = Math.max(0, Math.min(1, t));
+            const proj = { x: edge.a.x + t * dx, y: edge.a.y + t * dy };
+            const d = Math.sqrt((pt.x - proj.x) ** 2 + (pt.y - proj.y) ** 2);
+            if (d < bestDist) {
+              bestDist = d;
+              bestProj = proj;
+              bestBldgPt = pt;
+            }
+          }
+
+          const cat = edge.category;
+          if (!byCategory[cat] || bestDist < byCategory[cat].dist) {
+            byCategory[cat] = { dist: bestDist, projPt: bestProj, bldgPt: bestBldgPt };
+          }
         });
-        (dimLine as any).isBoundaryDimension = true;
-        (dimLine as any).isMeasurement = true;
-        (dimLine as any).parentId = dimId;
-        canvas.add(dimLine);
 
-        // Label
-        const mx = (bc.x + closestPt.x) / 2, my = (bc.y + closestPt.y) / 2;
-        const label = new fabric.Text(`${distM.toFixed(2)} m`, {
-          left: mx, top: my - 10, fontSize: 10, fontFamily: "monospace",
-          fill: "#f97316", backgroundColor: "rgba(255,255,255,0.85)", padding: 2,
-          originX: "center", originY: "bottom",
-          selectable: false, evented: false,
+        // Draw dimension lines for ALL 4 boundary categories
+        Object.entries(byCategory).forEach(([cat, info]) => {
+          const distM = info.dist / ppm;
+          const style = categoryStyles[cat] || categoryStyles["front"];
+          const dimId = `bdim-${cat}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+          // Dimension line from building edge to parcel boundary
+          const dimLine = new fabric.Line(
+            [info.bldgPt.x, info.bldgPt.y, info.projPt.x, info.projPt.y],
+            {
+              stroke: style.color, strokeWidth: 1.5, strokeDashArray: [4, 3],
+              selectable: false, evented: false,
+            }
+          );
+          (dimLine as any).isBoundaryDimension = true;
+          (dimLine as any).isMeasurement = true;
+          (dimLine as any).parentId = dimId;
+          (dimLine as any).boundaryCategory = cat;
+          canvas.add(dimLine);
+
+          // Small endpoint circles
+          [info.bldgPt, info.projPt].forEach((pt) => {
+            const dot = new fabric.Circle({
+              left: pt.x - 2, top: pt.y - 2, radius: 2,
+              fill: style.color, stroke: "transparent",
+              selectable: false, evented: false,
+            });
+            (dot as any).isBoundaryDimension = true;
+            (dot as any).isMeasurement = true;
+            (dot as any).parentId = dimId;
+            canvas.add(dot);
+          });
+
+          // Label with category and distance
+          const mx = (info.bldgPt.x + info.projPt.x) / 2;
+          const my = (info.bldgPt.y + info.projPt.y) / 2;
+
+          // Check against PLU setback rules if available
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pluSetbacks = (projectData as any)?.pluSetbacks || {};
+          const setbackRule = (pluSetbacks as Record<string, number>)[cat] || 0;
+          const isCompliant = setbackRule <= 0 || distM >= setbackRule;
+          const complianceTag = setbackRule > 0
+            ? (isCompliant ? " ✓" : ` ✗ (min ${setbackRule}m)`)
+            : "";
+
+          const label = new fabric.Text(
+            `${style.label}: ${distM.toFixed(2)}m${complianceTag}`,
+            {
+              left: mx, top: my - 12, fontSize: 10, fontFamily: "monospace",
+              fill: isCompliant ? style.color : "#ef4444",
+              backgroundColor: "rgba(255,255,255,0.92)", padding: 3,
+              originX: "center", originY: "bottom",
+              selectable: false, evented: false,
+            }
+          );
+          (label as any).isBoundaryDimension = true;
+          (label as any).isMeasurement = true;
+          (label as any).parentId = dimId;
+          canvas.add(label);
         });
-        (label as any).isBoundaryDimension = true;
-        (label as any).isMeasurement = true;
-        (label as any).parentId = dimId;
-        canvas.add(label);
       });
     });
 

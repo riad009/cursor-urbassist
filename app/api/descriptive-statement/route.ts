@@ -5,14 +5,14 @@ import { prisma } from "@/lib/prisma";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Descriptive Statement (Notice Descriptive) generation
-// Section 9 of specifications
+// Supports draft → review → confirm workflow
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { projectId, answers } = await request.json();
+    const { projectId, answers, action } = await request.json();
 
     if (!projectId || !answers) {
       return NextResponse.json(
@@ -33,12 +33,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── CONFIRM action: finalize an existing draft ──
+    if (action === "confirm") {
+      const existing = await prisma.descriptiveStatement.findUnique({
+        where: { projectId },
+      });
+      if (!existing || existing.status !== "draft") {
+        return NextResponse.json(
+          { error: "No draft found to confirm" },
+          { status: 400 }
+        );
+      }
+
+      // Deduct credits on confirm (not on draft)
+      if (!isUnrestrictedAdmin(user)) {
+        if (user.credits < 2) {
+          return NextResponse.json(
+            { error: "Insufficient credits. 2 credits required." },
+            { status: 402 }
+          );
+        }
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { credits: { decrement: 2 } },
+        });
+        await prisma.creditTransaction.create({
+          data: {
+            userId: user.id,
+            amount: -2,
+            type: "DESCRIPTIVE_STATEMENT",
+            description: "Descriptive statement confirmed",
+          },
+        });
+      }
+
+      const confirmed = await prisma.descriptiveStatement.update({
+        where: { projectId },
+        data: { status: "confirmed" },
+      });
+
+      return NextResponse.json({
+        success: true,
+        statement: {
+          id: confirmed.id,
+          text: existing.generatedText,
+          sections: existing.sections,
+          status: "confirmed",
+        },
+        creditsUsed: 2,
+      });
+    }
+
+    // ── REGENERATE action: create new draft (free if first, costs credits after) ──
+    // Check if there's already a confirmed statement (re-generation costs credits)
+    const existingStatement = await prisma.descriptiveStatement.findUnique({
+      where: { projectId },
+    });
+    const isRegeneration = existingStatement?.status === "confirmed";
+
     // Generate descriptive statement text
     let generatedText = "";
     let sections: Record<string, string> = {};
 
     if (GEMINI_API_KEY) {
-      // Use AI to generate professional descriptive statement
       const prompt = buildDescriptivePrompt(answers, project);
 
       try {
@@ -64,17 +121,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // If AI didn't generate, use template-based generation
     if (!generatedText) {
       const result = generateFromTemplate(answers, project);
       generatedText = result.text;
       sections = result.sections;
     } else {
-      // Parse AI text into sections
       sections = parseIntoSections(generatedText);
     }
 
-    // Save to database
+    // Save as DRAFT (credits not yet deducted)
     const statement = await prisma.descriptiveStatement.upsert({
       where: { projectId },
       create: {
@@ -82,31 +137,15 @@ export async function POST(request: NextRequest) {
         answers,
         generatedText,
         sections,
-        status: "generated",
+        status: "draft",
       },
       update: {
         answers,
         generatedText,
         sections,
-        status: "generated",
+        status: "draft",
       },
     });
-
-    // Deduct credits (skip for admin)
-    if (!isUnrestrictedAdmin(user) && user.credits >= 2) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { credits: { decrement: 2 } },
-      });
-      await prisma.creditTransaction.create({
-        data: {
-          userId: user.id,
-          amount: -2,
-          type: "DESCRIPTIVE_STATEMENT",
-          description: "Descriptive statement generation",
-        },
-      });
-    }
 
     return NextResponse.json({
       success: true,
@@ -114,8 +153,11 @@ export async function POST(request: NextRequest) {
         id: statement.id,
         text: generatedText,
         sections,
-        status: statement.status,
+        status: "draft",
       },
+      isRegeneration,
+      creditCost: 2,
+      message: "Draft generated. Review and confirm to finalize (2 credits).",
     });
   } catch (error) {
     console.error("Descriptive statement error:", error);
@@ -161,29 +203,53 @@ Municipality: ${project.municipality || "Not specified"}
 
 Project Details:
 - Project type: ${answers.projectType || "Construction"}
+- Authorization type: ${answers.authorizationType || "Not determined"}
 - Current state of terrain: ${answers.currentState || "Not specified"}
+- Existing buildings: ${answers.existingBuildings || "None"}
+- Terrain topography: ${answers.topography || "Not specified"}
+- Existing vegetation: ${answers.vegetation || "Not specified"}
 - Proposed construction: ${answers.proposedConstruction || "Not specified"}
+- Building dimensions: ${answers.buildingDimensions || "Not specified"}
+- Number of levels: ${answers.numberOfLevels || "Not specified"}
+- Floor area created: ${answers.floorArea ? answers.floorArea + " m²" : "Not specified"}
+- Ground footprint: ${answers.footprint ? answers.footprint + " m²" : "Not specified"}
+- Setbacks from boundaries: ${answers.setbacks || "Not specified"}
 - Materials for facades: ${answers.facadeMaterials || "Not specified"}
 - Roofing type: ${answers.roofType || "Not specified"}  
 - Roofing materials: ${answers.roofMaterials || "Not specified"}
+- Roof slope: ${answers.roofSlope || "Not specified"}
 - Exterior finishes: ${answers.exteriorFinishes || "Not specified"}
+- Color palette: ${answers.colorPalette || "Not specified"}
 - Fencing: ${answers.fencing || "Not specified"}
 - Landscaping: ${answers.landscaping || "Not specified"}
+- Permeable surfaces: ${answers.permeableSurfaces || "Not specified"}
 - Access and parking: ${answers.accessParking || "Not specified"}
+- Existing parking spaces: ${answers.parkingExisting || "0"}
+- New parking spaces: ${answers.parkingNew || "Not specified"}
+- Accessibility (PMR): ${answers.accessibilityPMR || "Not specified"}
 - Utility connections: ${answers.utilities || "Not specified"}
 - Stormwater management: ${answers.stormwater || "Not specified"}
+- Wastewater: ${answers.wastewater || "Not specified"}
 - Energy performance: ${answers.energyPerformance || "Not specified"}
+- Heating system: ${answers.heatingSystem || "Not specified"}
+- Solar panels: ${answers.solarPanels || "Not specified"}
 - Additional details: ${answers.additionalDetails || "None"}
 
-Generate a formal descriptive statement in French that:
-1. Describes the current state of the terrain and surroundings
-2. Presents the proposed project
-3. Details exterior materials and finishes
-4. Describes landscape integration
-5. Explains utility connections
-6. Addresses energy and environmental considerations
+Generate a formal descriptive statement IN FRENCH that follows the standard structure:
+1. État actuel du terrain (Current state of terrain and surroundings)
+2. Présentation du projet (Project presentation — dimensions, levels, areas)
+3. Implantation et volumétrie (Building placement and setbacks from boundaries)
+4. Matériaux et aspect extérieur (Materials and exterior appearance — with RAL codes if provided)
+5. Clôtures et aménagements extérieurs (Fencing and exterior works)
+6. Aménagements paysagers et espaces verts (Landscaping, percent of green/permeable surfaces)
+7. Accès et stationnement (Access and parking provisions)
+8. Raccordement aux réseaux (VRD — utility connections)
+9. Gestion des eaux pluviales (Stormwater management)
+10. Performance énergétique et environnementale (Energy performance and RE2020 compliance)
+11. Accessibilité (Accessibility measures if applicable)
 
-The text must be suitable for submission to French urban planning authorities.`;
+The text must be suitable for submission to French urban planning authorities.
+Use professional technical vocabulary appropriate for a dossier de permis de construire / déclaration préalable.`;
 }
 
 function generateFromTemplate(
@@ -194,31 +260,52 @@ function generateFromTemplate(
 
   sections["1. État actuel du terrain"] =
     answers.currentState ||
-    `Le terrain est situé à ${project.address || "[adresse]"}, commune de ${project.municipality || "[commune]"}. Il présente une topographie [à préciser] et est actuellement [à préciser son état actuel: nu, construit, etc.].`;
+    `Le terrain est situé à ${project.address || "[adresse]"}, commune de ${project.municipality || "[commune]"}. Il présente une topographie ${answers.topography || "[à préciser]"} et est actuellement [à préciser son état actuel: nu, construit, etc.].`;
+
+  if (answers.existingBuildings) {
+    sections["1bis. Constructions existantes"] = answers.existingBuildings;
+  }
+
+  if (answers.vegetation) {
+    sections["1ter. Végétation existante"] = answers.vegetation;
+  }
 
   sections["2. Présentation du projet"] =
-    answers.proposedConstruction ||
-    `Le projet consiste en ${answers.projectType || "une construction neuve"} d'une surface de plancher de [à préciser] m². Le bâtiment comprendra [à préciser le programme].`;
+    `${answers.proposedConstruction || `Le projet consiste en ${answers.projectType || "une construction neuve"}.`}${answers.buildingDimensions ? `\n\nDimensions : ${answers.buildingDimensions}.` : ""}${answers.numberOfLevels ? ` Nombre de niveaux : ${answers.numberOfLevels}.` : ""}${answers.floorArea ? ` Surface de plancher créée : ${answers.floorArea} m².` : ""}${answers.footprint ? ` Emprise au sol : ${answers.footprint} m².` : ""}`;
 
-  sections["3. Implantation et volumétrie"] = `Le bâtiment sera implanté en respectant les règles du PLU applicable, avec un recul de [à préciser] mètres par rapport à la voie publique et de [à préciser] mètres par rapport aux limites séparatives. La hauteur maximale sera de [à préciser] mètres.`;
+  sections["3. Implantation et volumétrie"] = answers.setbacks
+    ? `Le bâtiment sera implanté en respectant les reculs suivants : ${answers.setbacks}.`
+    : `Le bâtiment sera implanté en respectant les règles du PLU applicable, avec un recul de [à préciser] mètres par rapport à la voie publique et de [à préciser] mètres par rapport aux limites séparatives. La hauteur maximale sera de [à préciser] mètres.`;
 
   sections["4. Matériaux et aspect extérieur"] =
-    `Façades : ${answers.facadeMaterials || "[à préciser]"}. Toiture : ${answers.roofType || "[à préciser]"} en ${answers.roofMaterials || "[à préciser]"}. Menuiseries : ${answers.exteriorFinishes || "[à préciser]"}.`;
+    `Façades : ${answers.facadeMaterials || "[à préciser]"}. Toiture : ${answers.roofType || "[à préciser]"} en ${answers.roofMaterials || "[à préciser]"}${answers.roofSlope ? `, pente ${answers.roofSlope}` : ""}. Menuiseries : ${answers.exteriorFinishes || "[à préciser]"}.${answers.colorPalette ? `\n\nPalette de couleurs : ${answers.colorPalette}` : ""}`;
 
   sections["5. Clôtures et aménagements extérieurs"] =
-    `Clôtures : ${answers.fencing || "[à préciser]"}. Aménagements paysagers : ${answers.landscaping || "[à préciser]"}.`;
+    `Clôtures : ${answers.fencing || "[à préciser]"}.`;
 
-  sections["6. Accès et stationnement"] =
-    answers.accessParking ||
-    "L'accès au terrain se fera depuis [à préciser]. Le stationnement sera assuré par [à préciser le nombre] places de stationnement conformes aux exigences du PLU.";
+  sections["6. Aménagements paysagers et espaces verts"] =
+    `${answers.landscaping || "[à préciser]"}.${answers.permeableSurfaces ? `\n\nSurfaces perméables / imperméables : ${answers.permeableSurfaces}` : ""}`;
 
-  sections["7. Raccordement aux réseaux"] =
+  sections["7. Accès et stationnement"] =
+    `${answers.accessParking || "L'accès au terrain se fera depuis [à préciser]."}${answers.parkingNew ? ` ${answers.parkingNew} places de stationnement seront créées.` : ""}${answers.parkingExisting ? ` Places existantes : ${answers.parkingExisting}.` : ""}`;
+
+  sections["8. Raccordement aux réseaux (VRD)"] =
     answers.utilities ||
-    "Le projet sera raccordé aux réseaux publics d'eau potable, d'assainissement, d'électricité et de télécommunications. Les eaux pluviales seront gérées par [à préciser].";
+    "Le projet sera raccordé aux réseaux publics d'eau potable, d'assainissement, d'électricité et de télécommunications.";
 
-  sections["8. Performance énergétique et environnementale"] =
-    answers.energyPerformance ||
-    "Le projet respectera la réglementation RE2020 en vigueur. Les dispositions suivantes seront mises en œuvre : [isolation, chauffage, ventilation, etc.].";
+  sections["9. Gestion des eaux pluviales"] =
+    answers.stormwater || "Les eaux pluviales seront gérées par [à préciser].";
+
+  if (answers.wastewater) {
+    sections["9bis. Assainissement"] = answers.wastewater;
+  }
+
+  sections["10. Performance énergétique et environnementale"] =
+    `${answers.energyPerformance || "Le projet respectera la réglementation RE2020 en vigueur."}${answers.heatingSystem ? `\n\nSystème de chauffage : ${answers.heatingSystem}.` : ""}${answers.solarPanels && answers.solarPanels !== "Non (No)" ? `\n\nPanneaux solaires : ${answers.solarPanels}.` : ""}`;
+
+  if (answers.accessibilityPMR) {
+    sections["11. Accessibilité"] = answers.accessibilityPMR;
+  }
 
   const text = Object.entries(sections)
     .map(([title, content]) => `${title}\n\n${content}`)

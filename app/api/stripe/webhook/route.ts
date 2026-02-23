@@ -89,6 +89,36 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // ── Rendering Pack fulfilment ──
+        if (type === "rendering_pack") {
+          const credits = parseInt(session.metadata?.credits || "0");
+          const renders = parseInt(session.metadata?.renders || "0");
+          if (credits > 0) {
+            await prisma.user.update({
+              where: { id: userId },
+              data: { credits: { increment: credits } },
+            });
+
+            await prisma.creditTransaction.create({
+              data: {
+                userId,
+                amount: credits,
+                type: "RENDERING_PACK_PURCHASE",
+                description: `Rendering pack: ${renders} renders (${credits} credits) via Stripe`,
+                metadata: { sessionId: session.id, renders },
+              },
+            });
+
+            await prisma.payment.updateMany({
+              where: { stripeSessionId: session.id },
+              data: {
+                status: "completed",
+                stripePaymentId: session.payment_intent as string,
+              },
+            });
+          }
+        }
+
         if (type === "plu_analysis") {
           const projId = session.metadata?.projectId;
           const isRelaunch = session.metadata?.isRelaunch === "true";
