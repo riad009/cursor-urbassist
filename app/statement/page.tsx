@@ -183,6 +183,9 @@ function StatementPageContent() {
   const [generatedText, setGeneratedText] = useState("");
   const [sections, setSections] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  const [statementStatus, setStatementStatus] = useState<"none" | "draft" | "confirmed">("none");
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -197,6 +200,25 @@ function StatementPageContent() {
       if (exists) setSelectedProject(projectParam);
     }
   }, [projectParam, projects, selectedProject]);
+
+  // Load existing statement if any
+  useEffect(() => {
+    if (!selectedProject) return;
+    fetch(`/api/descriptive-statement?projectId=${selectedProject}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.statement) {
+          setGeneratedText(data.statement.generatedText || "");
+          setSections(data.statement.sections || {});
+          setStatementStatus(data.statement.status === "confirmed" ? "confirmed" : data.statement.status === "draft" ? "draft" : "none");
+        } else {
+          setGeneratedText("");
+          setSections({});
+          setStatementStatus("none");
+        }
+      })
+      .catch(() => {});
+  }, [selectedProject]);
 
   const toggleSection = (section: string) => {
     const newSections = new Set(expandedSections);
@@ -226,12 +248,43 @@ function StatementPageContent() {
       if (data.success) {
         setGeneratedText(data.statement.text);
         setSections(data.statement.sections || {});
+        setStatementStatus("draft");
       }
     } catch (error) {
       console.error("Generation error:", error);
     }
 
     setIsGenerating(false);
+  };
+
+  const handleConfirm = async () => {
+    if (!selectedProject) return;
+    setIsConfirming(true);
+
+    try {
+      const res = await fetch("/api/descriptive-statement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedProject,
+          answers,
+          action: "confirm",
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setStatementStatus("confirmed");
+        setShowConfirmDialog(false);
+      } else {
+        alert(data.error || "Failed to confirm statement.");
+      }
+    } catch (error) {
+      console.error("Confirm error:", error);
+      alert("Failed to confirm statement.");
+    }
+
+    setIsConfirming(false);
   };
 
   const handleCopy = () => {
@@ -334,13 +387,24 @@ function StatementPageContent() {
                 )}
                 {copied ? "Copied!" : "Copy Text"}
               </button>
-              <button
-                onClick={handleExportPDF}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-slate-900 font-semibold hover:shadow-lg transition-all"
-              >
-                <Download className="w-5 h-5" />
-                Export PDF
-              </button>
+              {statementStatus === "draft" && (
+                <button
+                  onClick={() => setShowConfirmDialog(true)}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-semibold hover:shadow-lg transition-all"
+                >
+                  <Check className="w-5 h-5" />
+                  Confirm & Finalize (2 credits)
+                </button>
+              )}
+              {statementStatus === "confirmed" && (
+                <button
+                  onClick={handleExportPDF}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold hover:shadow-lg transition-all"
+                >
+                  <Download className="w-5 h-5" />
+                  Export PDF
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -499,12 +563,12 @@ function StatementPageContent() {
               {isGenerating ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Generating Statement...
+                  Generating Draft...
                 </>
               ) : (
                 <>
                   <Sparkles className="w-5 h-5" />
-                  Generate Descriptive Statement
+                  {statementStatus === "confirmed" ? "Regenerate Draft" : "Generate Draft (Free)"}
                 </>
               )}
             </button>
@@ -516,6 +580,12 @@ function StatementPageContent() {
               <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-indigo-400" />
                 Generated Statement
+                {statementStatus === "draft" && (
+                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold uppercase">Draft</span>
+                )}
+                {statementStatus === "confirmed" && (
+                  <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold uppercase">Confirmed</span>
+                )}
               </h3>
               {generatedText ? (
                 <div className="prose prose-invert prose-sm max-w-none">
@@ -532,6 +602,32 @@ function StatementPageContent() {
                   </p>
                 </div>
               )}
+
+              {/* Confirm Dialog */}
+              {showConfirmDialog && statementStatus === "draft" && (
+                <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                  <h4 className="text-sm font-semibold text-amber-800 mb-2">Confirm Statement?</h4>
+                  <p className="text-xs text-amber-700 mb-3">
+                    This will deduct <strong>2 credits</strong> from your account and finalize the descriptive statement. You can regenerate later but it will cost additional credits.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleConfirm}
+                      disabled={isConfirming}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-500 text-white text-xs font-semibold hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                    >
+                      {isConfirming ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      {isConfirming ? "Confirming..." : "Confirm (2 credits)"}
+                    </button>
+                    <button
+                      onClick={() => setShowConfirmDialog(false)}
+                      className="px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Credits Info */}
@@ -543,11 +639,14 @@ function StatementPageContent() {
                     Credits Required
                   </p>
                   <p className="text-xs text-slate-400 mt-1">
-                    Generating a descriptive statement costs 2 credits. You have{" "}
+                    Generating a draft is free. Confirming the statement costs 2 credits. You have{" "}
                     <span className="text-slate-900 font-medium">
                       {user?.credits || 0}
                     </span>{" "}
                     credits.
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Flow: Generate Draft → Review → Confirm (2 credits)
                   </p>
                 </div>
               </div>

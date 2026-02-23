@@ -5,14 +5,14 @@ import { prisma } from "@/lib/prisma";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Descriptive Statement (Notice Descriptive) generation
-// Section 9 of specifications
+// Supports draft → review → confirm workflow
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { projectId, answers } = await request.json();
+    const { projectId, answers, action } = await request.json();
 
     if (!projectId || !answers) {
       return NextResponse.json(
@@ -33,12 +33,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── CONFIRM action: finalize an existing draft ──
+    if (action === "confirm") {
+      const existing = await prisma.descriptiveStatement.findUnique({
+        where: { projectId },
+      });
+      if (!existing || existing.status !== "draft") {
+        return NextResponse.json(
+          { error: "No draft found to confirm" },
+          { status: 400 }
+        );
+      }
+
+      // Deduct credits on confirm (not on draft)
+      if (!isUnrestrictedAdmin(user)) {
+        if (user.credits < 2) {
+          return NextResponse.json(
+            { error: "Insufficient credits. 2 credits required." },
+            { status: 402 }
+          );
+        }
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { credits: { decrement: 2 } },
+        });
+        await prisma.creditTransaction.create({
+          data: {
+            userId: user.id,
+            amount: -2,
+            type: "DESCRIPTIVE_STATEMENT",
+            description: "Descriptive statement confirmed",
+          },
+        });
+      }
+
+      const confirmed = await prisma.descriptiveStatement.update({
+        where: { projectId },
+        data: { status: "confirmed" },
+      });
+
+      return NextResponse.json({
+        success: true,
+        statement: {
+          id: confirmed.id,
+          text: existing.generatedText,
+          sections: existing.sections,
+          status: "confirmed",
+        },
+        creditsUsed: 2,
+      });
+    }
+
+    // ── REGENERATE action: create new draft (free if first, costs credits after) ──
+    // Check if there's already a confirmed statement (re-generation costs credits)
+    const existingStatement = await prisma.descriptiveStatement.findUnique({
+      where: { projectId },
+    });
+    const isRegeneration = existingStatement?.status === "confirmed";
+
     // Generate descriptive statement text
     let generatedText = "";
     let sections: Record<string, string> = {};
 
     if (GEMINI_API_KEY) {
-      // Use AI to generate professional descriptive statement
       const prompt = buildDescriptivePrompt(answers, project);
 
       try {
@@ -64,17 +121,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // If AI didn't generate, use template-based generation
     if (!generatedText) {
       const result = generateFromTemplate(answers, project);
       generatedText = result.text;
       sections = result.sections;
     } else {
-      // Parse AI text into sections
       sections = parseIntoSections(generatedText);
     }
 
-    // Save to database
+    // Save as DRAFT (credits not yet deducted)
     const statement = await prisma.descriptiveStatement.upsert({
       where: { projectId },
       create: {
@@ -82,31 +137,15 @@ export async function POST(request: NextRequest) {
         answers,
         generatedText,
         sections,
-        status: "generated",
+        status: "draft",
       },
       update: {
         answers,
         generatedText,
         sections,
-        status: "generated",
+        status: "draft",
       },
     });
-
-    // Deduct credits (skip for admin)
-    if (!isUnrestrictedAdmin(user) && user.credits >= 2) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { credits: { decrement: 2 } },
-      });
-      await prisma.creditTransaction.create({
-        data: {
-          userId: user.id,
-          amount: -2,
-          type: "DESCRIPTIVE_STATEMENT",
-          description: "Descriptive statement generation",
-        },
-      });
-    }
 
     return NextResponse.json({
       success: true,
@@ -114,8 +153,11 @@ export async function POST(request: NextRequest) {
         id: statement.id,
         text: generatedText,
         sections,
-        status: statement.status,
+        status: "draft",
       },
+      isRegeneration,
+      creditCost: 2,
+      message: "Draft generated. Review and confirm to finalize (2 credits).",
     });
   } catch (error) {
     console.error("Descriptive statement error:", error);

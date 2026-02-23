@@ -442,6 +442,35 @@ function LocationPlanPageContent() {
               </div>
             )}
 
+            {/* Road Type Detection */}
+            {selectedCoords && (
+              <div className="p-3 rounded-xl bg-white border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-2">Adjacent Roads</h3>
+                {loadingRoads ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Detecting road types...
+                  </div>
+                ) : nearbyRoads.length > 0 ? (
+                  <ul className="space-y-1.5">
+                    {nearbyRoads.slice(0, 5).map((road, i) => (
+                      <li key={i} className="text-xs text-slate-600">
+                        <span className="font-medium text-slate-900">{road.name}</span>
+                        {road.ref && <span className="text-slate-400 ml-1">({road.ref})</span>}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                            {road.classificationLabel}
+                          </span>
+                          <span className="text-slate-400">{road.distance}m</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-400">No roads detected nearby.</p>
+                )}
+              </div>
+            )}
+
             {/* Map Info */}
             <div>
               <h3 className="text-sm font-semibold text-slate-900 mb-2">Map Info</h3>

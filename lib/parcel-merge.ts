@@ -88,10 +88,12 @@ export function computeTotalArea(parcels: ParcelGeometry[]): number {
 export function areAdjacent(a: ParcelGeometry, b: ParcelGeometry): boolean {
   if (!a.geometry || !b.geometry) return false;
   try {
-    const fa = a.geometry.type === "Polygon"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fa: any = a.geometry.type === "Polygon"
       ? turf.polygon(a.geometry.coordinates as number[][][])
       : turf.multiPolygon(a.geometry.coordinates as number[][][][]);
-    const fb = b.geometry.type === "Polygon"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fb: any = b.geometry.type === "Polygon"
       ? turf.polygon(b.geometry.coordinates as number[][][])
       : turf.multiPolygon(b.geometry.coordinates as number[][][][]);
 
