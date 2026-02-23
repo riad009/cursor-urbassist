@@ -127,9 +127,9 @@ const SHUTTER_TYPES = [
 
 // Interior room layout presets for buildings
 const ROOM_LAYOUT_PRESETS = [
-  { 
-    id: "simple-3", 
-    label: "3-Room (Living + Kitchen + Bedroom)", 
+  {
+    id: "simple-3",
+    label: "3-Room (Living + Kitchen + Bedroom)",
     rooms: [
       { name: "Living", x: 0.5, y: 0.2 },
       { name: "Kitchen", x: 0.275, y: 0.7 },
@@ -140,9 +140,9 @@ const ROOM_LAYOUT_PRESETS = [
       { type: "v", pos: 0.55, from: 0.4, to: 1 },
     ]
   },
-  { 
-    id: "studio", 
-    label: "Studio (Open + Bathroom)", 
+  {
+    id: "studio",
+    label: "Studio (Open + Bathroom)",
     rooms: [
       { name: "Studio", x: 0.4, y: 0.5 },
       { name: "Bath", x: 0.85, y: 0.15 },
@@ -152,9 +152,9 @@ const ROOM_LAYOUT_PRESETS = [
       { type: "h", pos: 0.3, from: 0.7, to: 1 },
     ]
   },
-  { 
-    id: "4-room", 
-    label: "4-Room (Living + Kitchen + 2 Bedrooms)", 
+  {
+    id: "4-room",
+    label: "4-Room (Living + Kitchen + 2 Bedrooms)",
     rooms: [
       { name: "Living", x: 0.275, y: 0.25 },
       { name: "Kitchen", x: 0.775, y: 0.25 },
@@ -166,9 +166,9 @@ const ROOM_LAYOUT_PRESETS = [
       { type: "v", pos: 0.55, from: 0, to: 1 },
     ]
   },
-  { 
-    id: "5-room", 
-    label: "5-Room (Living + Kitchen + Bath + 2 Bedrooms)", 
+  {
+    id: "5-room",
+    label: "5-Room (Living + Kitchen + Bath + 2 Bedrooms)",
     rooms: [
       { name: "Living", x: 0.3, y: 0.25 },
       { name: "Kitchen", x: 0.775, y: 0.25 },
@@ -1070,7 +1070,7 @@ function EditorPageContent() {
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
 
       // Check parcel boundary restriction if enabled
-      if (parcelBoundaryRestriction && activeTool !== "parcel" && activeTool !== "select") {
+      if (parcelBoundaryRestriction && activeTool !== "parcel") {
         const parcels = canvas.getObjects().filter((o: fabric.FabricObject) => (o as any).isParcel);
         if (parcels.length > 0) {
           const isInsideAnyParcel = parcels.some((parcel) => {
@@ -1323,7 +1323,7 @@ function EditorPageContent() {
         return activeColor;
       };
       const pointColor = getColor();
-      
+
       polygonPoints.forEach((point, index) => {
         const circle = new fabric.Circle({
           left: point.x - 5,
@@ -1841,17 +1841,17 @@ function EditorPageContent() {
       if ((o as any).isInteriorPartition && (o as any).parentId === parentId) canvas.remove(o);
     });
     if (!showInterior) return;
-    
+
     // Get selected layout preset (default to simple-3)
     const layoutId = (obj as any).interiorLayoutId || "simple-3";
     const layout = ROOM_LAYOUT_PRESETS.find(p => p.id === layoutId) || ROOM_LAYOUT_PRESETS[0];
-    
+
     const left = obj.left || 0;
     const top = obj.top || 0;
     const w = ((obj as any).width || 0) * (obj.scaleX || 1);
     const h = ((obj as any).height || 0) * (obj.scaleY || 1);
     const partitionColor = '#cbd5e1';
-    
+
     // Draw partitions based on preset
     layout.partitions.forEach(p => {
       let line: fabric.Line;
@@ -1860,9 +1860,9 @@ function EditorPageContent() {
         const fromX = p.from !== undefined ? p.from : 0;
         const toX = p.to !== undefined ? p.to : 1;
         line = new fabric.Line([
-          left + w * fromX + 2, 
-          top + h * p.pos, 
-          left + w * toX - 2, 
+          left + w * fromX + 2,
+          top + h * p.pos,
+          left + w * toX - 2,
           top + h * p.pos
         ], {
           stroke: partitionColor,
@@ -1876,9 +1876,9 @@ function EditorPageContent() {
         const fromY = p.from !== undefined ? p.from : 0;
         const toY = p.to !== undefined ? p.to : 1;
         line = new fabric.Line([
-          left + w * p.pos, 
-          top + h * fromY + 2, 
-          left + w * p.pos, 
+          left + w * p.pos,
+          top + h * fromY + 2,
+          left + w * p.pos,
           top + h * toY - 2
         ], {
           stroke: partitionColor,
@@ -1893,7 +1893,7 @@ function EditorPageContent() {
       (line as any).parentId = parentId;
       canvas.add(line);
     });
-    
+
     // Room labels from preset
     layout.rooms.forEach(r => {
       const roomLabel = new fabric.Text(r.name, {

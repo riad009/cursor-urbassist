@@ -15,6 +15,8 @@ import {
   ArrowRight,
   FileDown,
   Ruler,
+  Combine,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
@@ -44,6 +46,8 @@ function LocationPlanPageContent() {
   const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
   const [paperFormat, setPaperFormat] = useState<"A4" | "A3">("A3");
   const [projectDetails, setProjectDetails] = useState<{ address?: string | null; parcelIds?: string[]; zoneType?: string | null } | null>(null);
+  const [mergedParcel, setMergedParcel] = useState<{ geometry: unknown; area: number; ids: string[] } | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
 
   const projectIdFromUrl = searchParams.get("project");
 
@@ -128,7 +132,34 @@ function LocationPlanPageContent() {
       setSelectedCoords({ lng: coords[0], lat: coords[1] });
       setAddressSuggestions([]);
       setSelectedParcelIds([]);
+      setMergedParcel(null);
     }
+  };
+
+  const handleMergeParcels = async () => {
+    if (selectedParcelIds.length < 2) return;
+    setIsMerging(true);
+    try {
+      const res = await fetch("/api/cadastre/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parcelIds: selectedParcelIds }),
+      });
+      const data = await res.json();
+      if (data.success && data.merged) {
+        setMergedParcel({
+          geometry: data.merged.geometry,
+          area: data.merged.area,
+          ids: selectedParcelIds,
+        });
+      } else {
+        alert(data.error || "Failed to merge parcels. Parcels may not be adjacent.");
+      }
+    } catch (err) {
+      console.error("Merge error:", err);
+      alert("Failed to merge parcels.");
+    }
+    setIsMerging(false);
   };
 
   const exportMap = () => {
