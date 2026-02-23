@@ -1798,7 +1798,7 @@ function SitePlanContent() {
           const pointsToCheck = [...bldgCorners, bc];
           let bestDist = Infinity;
           let bestProj = { x: 0, y: 0 };
-          let bestBldgPt = bc;
+          let bestBldgPt: { x: number; y: number } = { x: bc.x, y: bc.y };
 
           for (const pt of pointsToCheck) {
             const dx = edge.b.x - edge.a.x, dy = edge.b.y - edge.a.y;

@@ -29,6 +29,7 @@ interface Project {
 }
 
 const QUESTIONS = [
+  // ── Project Type & Context ──
   {
     id: "projectType",
     section: "Project Description",
@@ -41,6 +42,19 @@ const QUESTIONS = [
       "Aménagement extérieur (Exterior works)",
       "Changement de destination (Change of use)",
       "Surélévation (Raising existing building)",
+      "Piscine (Swimming pool)",
+      "Démolition + reconstruction (Demolition & rebuild)",
+    ],
+  },
+  {
+    id: "authorizationType",
+    section: "Project Description",
+    question: "Authorization type (if known):",
+    type: "select",
+    options: [
+      "Déclaration préalable (DP)",
+      "Permis de construire (PC)",
+      "Non déterminé (Not yet determined)",
     ],
   },
   {
@@ -52,6 +66,36 @@ const QUESTIONS = [
       "e.g., Flat terrain, currently undeveloped with grass and a few trees. No existing structures. The parcel is bordered by residential properties on three sides and a municipal road on the south.",
   },
   {
+    id: "existingBuildings",
+    section: "Current State",
+    question: "Existing buildings on the parcel (if any):",
+    type: "textarea",
+    placeholder:
+      "e.g., Existing single-family house of 90m² built in 1975. Detached garage of 18m². Total existing floor area: 108m².",
+  },
+  {
+    id: "topography",
+    section: "Current State",
+    question: "Terrain topography:",
+    type: "select",
+    options: [
+      "Plat (Flat)",
+      "Légère pente (Slight slope, <5%)",
+      "Pente modérée (Moderate slope, 5-15%)",
+      "Forte pente (Steep slope, >15%)",
+      "Terrasses naturelles (Natural terraces)",
+    ],
+  },
+  {
+    id: "vegetation",
+    section: "Current State",
+    question: "Existing vegetation to preserve or remove:",
+    type: "textarea",
+    placeholder:
+      "e.g., Two mature oak trees (to be preserved), hedge along northern boundary (to be maintained), grass lawn (to be partially removed for construction).",
+  },
+  // ── Proposed Project Details ──
+  {
     id: "proposedConstruction",
     section: "Proposed Project",
     question: "Describe the proposed construction in detail:",
@@ -59,6 +103,49 @@ const QUESTIONS = [
     placeholder:
       "e.g., Single-family dwelling of 120m² on two levels (ground floor + first floor) with an attached garage of 20m². The building will have a traditional gable roof.",
   },
+  {
+    id: "buildingDimensions",
+    section: "Proposed Project",
+    question: "Building dimensions (length × width × height):",
+    type: "text",
+    placeholder: "e.g., 12m × 10m, height 7.5m at ridge, 4.2m at eaves",
+  },
+  {
+    id: "numberOfLevels",
+    section: "Proposed Project",
+    question: "Number of levels:",
+    type: "select",
+    options: [
+      "R (Ground floor only)",
+      "R+1 (Ground + 1st floor)",
+      "R+2 (Ground + 2 floors)",
+      "R+1+C (Ground + 1st floor + attic)",
+      "Semi-enterré + R (Basement + Ground)",
+      "Semi-enterré + R+1 (Basement + Ground + 1st)",
+    ],
+  },
+  {
+    id: "floorArea",
+    section: "Proposed Project",
+    question: "Floor area created (Surface de plancher in m²):",
+    type: "number",
+    placeholder: "120",
+  },
+  {
+    id: "footprint",
+    section: "Proposed Project",
+    question: "Ground footprint (Emprise au sol in m²):",
+    type: "number",
+    placeholder: "80",
+  },
+  {
+    id: "setbacks",
+    section: "Proposed Project",
+    question: "Building setbacks from boundaries:",
+    type: "textarea",
+    placeholder: "e.g., 5m from road (front), 3m left side, 4m right side, 6m rear. PLU requires min 5m from road and 3m from side boundaries.",
+  },
+  // ── Exterior Materials ──
   {
     id: "facadeMaterials",
     section: "Exterior Materials",
@@ -89,6 +176,13 @@ const QUESTIONS = [
     placeholder: "e.g., Clay tiles (tuiles terre cuite) in natural red",
   },
   {
+    id: "roofSlope",
+    section: "Exterior Materials",
+    question: "Roof slope (if applicable):",
+    type: "text",
+    placeholder: "e.g., 35° (two slopes), as per PLU Article 11",
+  },
+  {
     id: "exteriorFinishes",
     section: "Exterior Materials",
     question: "Describe windows, doors and other exterior elements:",
@@ -96,6 +190,14 @@ const QUESTIONS = [
     placeholder:
       "e.g., Aluminum window frames in anthracite grey (RAL 7016), French windows on ground floor south facade, solid oak front door.",
   },
+  {
+    id: "colorPalette",
+    section: "Exterior Materials",
+    question: "Color palette (RAL references if possible):",
+    type: "textarea",
+    placeholder: "e.g., Facades: off-white RAL 9010. Shutters: charcoal RAL 7016. Gutters: zinc grey. Roof tiles: natural red.",
+  },
+  // ── Exterior Works ──
   {
     id: "fencing",
     section: "Exterior Works",
@@ -112,6 +214,14 @@ const QUESTIONS = [
     placeholder:
       "e.g., Front garden with lawn and native shrubs. Rear terrace in natural stone (30m²). Two olive trees to be planted. Existing mature oak to be preserved.",
   },
+  {
+    id: "permeableSurfaces",
+    section: "Exterior Works",
+    question: "Permeable vs impermeable surfaces (% or m²):",
+    type: "textarea",
+    placeholder: "e.g., Total parcel: 500m². Impermeable: building 80m² + driveway 40m² + terrace 30m² = 150m² (30%). Permeable: garden 350m² (70%). PLU requires min 40% green space.",
+  },
+  // ── Access & Parking ──
   {
     id: "accessParking",
     section: "Access & Parking",
@@ -135,8 +245,16 @@ const QUESTIONS = [
     placeholder: "2",
   },
   {
+    id: "accessibilityPMR",
+    section: "Access & Parking",
+    question: "Accessibility measures (PMR / handicap):",
+    type: "textarea",
+    placeholder: "e.g., Ground floor fully accessible. Entrance ramp 5% slope. Door width 0.90m minimum. Adapted bathroom on ground floor.",
+  },
+  // ── Utilities ──
+  {
     id: "utilities",
-    section: "Utilities",
+    section: "Utilities (VRD)",
     question: "Describe utility connections (VRD):",
     type: "textarea",
     placeholder:
@@ -144,12 +262,25 @@ const QUESTIONS = [
   },
   {
     id: "stormwater",
-    section: "Utilities",
+    section: "Utilities (VRD)",
     question: "How will stormwater be managed?",
     type: "textarea",
     placeholder:
       "e.g., Rainwater harvesting tank (5000L) for garden irrigation. Remaining stormwater directed to soakaway pit. Green roof on garage to reduce runoff.",
   },
+  {
+    id: "wastewater",
+    section: "Utilities (VRD)",
+    question: "Wastewater management:",
+    type: "select",
+    options: [
+      "Raccordement au réseau public (Public sewer connection)",
+      "Assainissement individuel (Individual treatment)",
+      "Fosse septique existante (Existing septic tank)",
+      "Micro-station d'épuration (Micro treatment plant)",
+    ],
+  },
+  // ── Energy & Environment ──
   {
     id: "energyPerformance",
     section: "Energy & Environment",
@@ -159,12 +290,40 @@ const QUESTIONS = [
       "e.g., RE2020 compliant. Triple glazing, external insulation (200mm mineral wool). Air-source heat pump. Solar PV panels (3kWp) on south-facing roof. VMC double-flux ventilation.",
   },
   {
+    id: "heatingSystem",
+    section: "Energy & Environment",
+    question: "Heating system:",
+    type: "select",
+    options: [
+      "Pompe à chaleur air-air (Air-to-air heat pump)",
+      "Pompe à chaleur air-eau (Air-to-water heat pump)",
+      "Chaudière gaz condensation (Gas condensing boiler)",
+      "Poêle à bois / granulés (Wood / pellet stove)",
+      "Chauffage électrique (Electric heating)",
+      "Géothermie (Geothermal)",
+      "Mixte / Combinaison (Combined)",
+    ],
+  },
+  {
+    id: "solarPanels",
+    section: "Energy & Environment",
+    question: "Solar panels planned?",
+    type: "select",
+    options: [
+      "Oui - Panneaux photovoltaïques (PV panels)",
+      "Oui - Chauffe-eau solaire (Solar water heater)",
+      "Oui - PV + solaire thermique (Both)",
+      "Non (No)",
+    ],
+  },
+  // ── Additional ──
+  {
     id: "additionalDetails",
     section: "Additional",
     question: "Any additional information for the descriptive statement:",
     type: "textarea",
     placeholder:
-      "e.g., The project is designed to integrate harmoniously with the existing residential neighborhood...",
+      "e.g., The project is designed to integrate harmoniously with the existing residential neighborhood. ABF consultation required (heritage zone).",
   },
 ];
 
