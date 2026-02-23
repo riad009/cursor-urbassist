@@ -44,6 +44,7 @@ export default function NewProjectPage() {
     const [parcels, setParcels] = useState<{ id: string; section: string; number: string; area: number; geometry?: unknown; commune?: string }[]>([]);
     const [selectedParcelIds, setSelectedParcelIds] = useState<string[]>([]);
     const [pluInfo, setPluInfo] = useState<{ zoneType: string | null; zoneName: string | null; pluType?: string | null } | null>(null);
+    const [pluNoData, setPluNoData] = useState(false);
     const [manualPluZone, setManualPluZone] = useState<string>("");
     const [showManualPluEdit, setShowManualPluEdit] = useState(false);
     const [zoneFeatures, setZoneFeatures] = useState<unknown[]>([]);
@@ -121,7 +122,7 @@ export default function NewProjectPage() {
         setNewAddress(addr.label);
         setAddressSuggestions([]);
         setLoadingCadastre(true); setLoadingPlu(true); setLoadingProtectedAreas(true);
-        setCadastreError(null); setParcels([]); setPluInfo(null); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]); setHeritageSummary(null);
+        setCadastreError(null); setParcels([]); setPluInfo(null); setPluNoData(false); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]); setHeritageSummary(null);
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
@@ -131,7 +132,7 @@ export default function NewProjectPage() {
 
         // 2) PLU
         fetch("/api/plu-detection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, address: addr.label }) })
-            .then(async (r) => { if (!r.ok) return; const d = await r.json(); const plu = d.plu ?? {}; if (plu.zoneType || plu.zoneName) setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null }); setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []); })
+            .then(async (r) => { if (!r.ok) return; const d = await r.json(); const plu = d.plu ?? {}; if (plu.zoneType || plu.zoneName) setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null }); setPluNoData(!!d.noData); setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []); })
             .catch(() => { })
             .finally(() => setLoadingPlu(false));
 
@@ -193,9 +194,9 @@ export default function NewProjectPage() {
                                         value={selectedAddress ? newAddress : addressQuery}
                                         onChange={(e) => {
                                             const v = e.target.value; setAddressQuery(v); setNewAddress(v);
-                                            if (selectedAddress) { setSelectedAddress(null); setPluInfo(null); setZoneFeatures([]); setParcels([]); setSelectedParcelIds([]); setProtectedAreas([]); setCadastreError(null); setNorthAngleDegrees(null); }
+                                            if (selectedAddress) { setSelectedAddress(null); setPluInfo(null); setPluNoData(false); setZoneFeatures([]); setParcels([]); setSelectedParcelIds([]); setProtectedAreas([]); setCadastreError(null); setNorthAngleDegrees(null); }
                                         }}
-                                        onFocus={() => { if (selectedAddress) { setSelectedAddress(null); setPluInfo(null); setZoneFeatures([]); setParcels([]); setSelectedParcelIds([]); setProtectedAreas([]); setCadastreError(null); setNorthAngleDegrees(null); } }}
+                                        onFocus={() => { if (selectedAddress) { setSelectedAddress(null); setPluInfo(null); setPluNoData(false); setZoneFeatures([]); setParcels([]); setSelectedParcelIds([]); setProtectedAreas([]); setCadastreError(null); setNorthAngleDegrees(null); } }}
                                         className="w-full pl-12 pr-4 py-3.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base"
                                         placeholder={t("newProj.searchPlaceholder")}
                                     />
@@ -309,6 +310,15 @@ export default function NewProjectPage() {
                                                     <span className="text-xs text-slate-500 font-medium">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : pluInfo?.pluType === "POS" ? "POS" : pluInfo?.pluType ? pluInfo.pluType : ""}</span>
                                                 </div>
                                                 <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[11px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1.5 transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.modify")}</button>
+                                            </div>
+                                        ) : pluNoData ? (
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-1.5">
+                                                    <Info className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                                    <p className="text-xs font-medium text-amber-600">{t("newProj.noZoneTitle")}</p>
+                                                </div>
+                                                <p className="text-[11px] text-slate-500 leading-relaxed">{t("newProj.noZoneMessage")}</p>
+                                                <button type="button" onClick={() => setShowManualPluEdit(true)} className="text-[11px] text-blue-500 hover:text-blue-600 inline-flex items-center gap-1 font-medium transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.enterManually")}</button>
                                             </div>
                                         ) : (
                                             <p className="text-xs text-slate-400 italic">{t("newProj.notDetected")}</p>

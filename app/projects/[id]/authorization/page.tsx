@@ -1334,10 +1334,10 @@ export default function AuthorizationPage({
                     </p>
                   </div>
 
-                  {/* Documents — show all PC documents (most complete set) + DPC 11 */}
+                  {/* Documents — show all PC documents (most complete set) */}
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <div className="grid grid-cols-2 gap-px bg-slate-100">
-                      {[...getDocumentsForType("PC"), { code: "DPC 11", dualCode: undefined, label: "Notice relative aux modalités d'exécution des travaux", description: "Requis en zone ABF / Patrimoine" }].map((doc) => (
+                      {getDocumentsForType("PC").map((doc) => (
                         <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                           <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
                           <div>
@@ -1393,6 +1393,20 @@ export default function AuthorizationPage({
                     </button>
                   </div>
 
+                  {/* Note — single-family houses & annexes */}
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                      <Info className="w-3.5 h-3.5" />
+                      {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                    </p>
+                    <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                      <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                      <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                    </ul>
+                  </div>
 
                   {/* Actions */}
                   <div className="flex gap-3">
@@ -1652,7 +1666,7 @@ export default function AuthorizationPage({
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
                       <div className="grid grid-cols-2 gap-px bg-slate-100">
                         {docs.map((doc) => (
-                            <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                          <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                             <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
                             <div>
                               <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
@@ -1708,21 +1722,21 @@ export default function AuthorizationPage({
                     </div>
 
 
-                    {/* Note — only for Building Permit, not DP */}
-                    {!isDP && (
-                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                      <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                        <Info className="w-3.5 h-3.5" />
-                        {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                      </p>
-                      <p className="text-xs text-amber-700">
-                        {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                      </p>
-                      <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                        <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                        <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                      </ul>
-                    </div>
+                    {/* Note — for both DP and PC (single-family houses & annexes) */}
+                    {(
+                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                        <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                          <Info className="w-3.5 h-3.5" />
+                          {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                        </p>
+                        <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                          <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                          <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                        </ul>
+                      </div>
                     )}
 
                     {/* CTA */}

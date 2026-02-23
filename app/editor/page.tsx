@@ -187,6 +187,8 @@ function EditorPageContent() {
   const [canvasReady, setCanvasReady] = useState(false);
   const [editorMode, setEditorMode] = useState<"guided" | "free">("guided");
   const annotationCounterRef = useRef(0);
+  const [interiorLayoutMode, setInteriorLayoutMode] = useState(false);
+  const [interiorDrawing, setInteriorDrawing] = useState<{ start: { x: number; y: number } | null; parentId: string | null }>({ start: null, parentId: null });
 
   const updateLayers = useCallback((canvas: fabric.Canvas) => {
     const objects = canvas.getObjects().filter(obj => {
@@ -1000,6 +1002,26 @@ function EditorPageContent() {
         return;
       }
 
+      // Text tool - place editable text on click
+      if (activeTool === "text") {
+        const textObj = new fabric.IText("Text", {
+          left: pointer.x,
+          top: pointer.y,
+          fontSize: 16,
+          fontFamily: "sans-serif",
+          fill: activeColor,
+          editable: true,
+        });
+        const shapeId = `text-${Date.now()}`;
+        (textObj as any).id = shapeId;
+        (textObj as any).elementName = "Text";
+        canvas.add(textObj);
+        canvas.setActiveObject(textObj);
+        textObj.enterEditing();
+        canvas.renderAll();
+        return;
+      }
+
       // Polygon/Parcel mode - add points on click
       if (activeTool === "polygon" || activeTool === "parcel") {
         setPolygonPoints(prev => [...prev, { x: pointer.x, y: pointer.y }]);
@@ -1347,6 +1369,196 @@ function EditorPageContent() {
     canvas.renderAll();
   };
 
+  // Draw a dashed overhang outline around a building template
+  const drawOverhangOverlay = useCallback((obj: fabric.FabricObject) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const templateType = (obj as any).templateType;
+    if (!templateType || !['house', 'garage'].includes(templateType)) return;
+    const overhang = (obj as any).roofOverhang ?? 0.5;
+    if (overhang <= 0) return;
+    const parentId = (obj as any).id;
+    // Remove old overlay for this object
+    canvas.getObjects().forEach((o) => {
+      if ((o as any).isOverhangOverlay && (o as any).parentId === parentId) canvas.remove(o);
+    });
+    const ovPx = metersToPixels(overhang);
+    const left = (obj.left || 0) - ovPx;
+    const top = (obj.top || 0) - ovPx;
+    const w = ((obj as any).width || 0) * (obj.scaleX || 1) + ovPx * 2;
+    const h = ((obj as any).height || 0) * (obj.scaleY || 1) + ovPx * 2;
+    const overlay = new fabric.Rect({
+      left,
+      top,
+      width: w,
+      height: h,
+      fill: 'transparent',
+      stroke: '#94a3b8',
+      strokeWidth: 1.5,
+      strokeDashArray: [6, 4],
+      selectable: false,
+      evented: false,
+    });
+    (overlay as any).isOverhangOverlay = true;
+    (overlay as any).isMeasurement = true;
+    (overlay as any).parentId = parentId;
+    canvas.add(overlay);
+    // Add overhang label
+    const label = new fabric.Text(`Overhang: ${overhang}m`, {
+      left: left + w / 2,
+      top: top - 12,
+      fontSize: 10,
+      fontFamily: 'monospace',
+      fill: '#64748b',
+      originX: 'center',
+      selectable: false,
+      evented: false,
+    });
+    (label as any).isOverhangOverlay = true;
+    (label as any).isMeasurement = true;
+    (label as any).parentId = parentId;
+    canvas.add(label);
+  }, [metersToPixels]);
+
+  // Draw shutter indicators on window/door/sliding-door templates
+  const drawShutterIndicator = useCallback((obj: fabric.FabricObject) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const templateType = (obj as any).templateType;
+    if (!templateType || !['window', 'door', 'sliding-door'].includes(templateType)) return;
+    const shutterType = (obj as any).shutterType || 'none';
+    const parentId = (obj as any).id;
+    // Remove old indicator
+    canvas.getObjects().forEach((o) => {
+      if ((o as any).isShutterIndicator && (o as any).parentId === parentId) canvas.remove(o);
+    });
+    if (shutterType === 'none') return;
+    const left = obj.left || 0;
+    const top = obj.top || 0;
+    const w = ((obj as any).width || 0) * (obj.scaleX || 1);
+    const h = ((obj as any).height || 0) * (obj.scaleY || 1);
+    const shutterColor = shutterType === 'roller' ? '#64748b' : shutterType === 'traditional' ? '#92400e' : '#78716c';
+    if (shutterType === 'roller') {
+      // Roller shutter: horizontal bar at top
+      const bar = new fabric.Rect({
+        left: left,
+        top: top - 4,
+        width: w,
+        height: 4,
+        fill: shutterColor,
+        selectable: false,
+        evented: false,
+      });
+      (bar as any).isShutterIndicator = true;
+      (bar as any).isMeasurement = true;
+      (bar as any).parentId = parentId;
+      canvas.add(bar);
+    } else {
+      // Traditional / folding: hash marks on sides
+      const lineCount = shutterType === 'folding' ? 3 : 4;
+      for (let side = 0; side < 2; side++) {
+        const xBase = side === 0 ? left - 3 : left + w + 1;
+        for (let i = 0; i < lineCount; i++) {
+          const yPos = top + (h / (lineCount + 1)) * (i + 1);
+          const hashLine = new fabric.Line([xBase, yPos, xBase + 2, yPos], {
+            stroke: shutterColor,
+            strokeWidth: 1.5,
+            selectable: false,
+            evented: false,
+          });
+          (hashLine as any).isShutterIndicator = true;
+          (hashLine as any).isMeasurement = true;
+          (hashLine as any).parentId = parentId;
+          canvas.add(hashLine);
+        }
+      }
+    }
+    // Shutter type label
+    const shutterLabel = SHUTTER_TYPES.find(s => s.id === shutterType)?.label || '';
+    const text = new fabric.Text(shutterLabel, {
+      left: left + w / 2,
+      top: top + h + 4,
+      fontSize: 9,
+      fontFamily: 'sans-serif',
+      fill: shutterColor,
+      originX: 'center',
+      selectable: false,
+      evented: false,
+    });
+    (text as any).isShutterIndicator = true;
+    (text as any).isMeasurement = true;
+    (text as any).parentId = parentId;
+    canvas.add(text);
+  }, []);
+
+  // Draw interior partition lines inside a building template
+  const drawInteriorPartitions = useCallback((obj: fabric.FabricObject) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const templateType = (obj as any).templateType;
+    if (!templateType || !['house'].includes(templateType)) return;
+    const parentId = (obj as any).id;
+    const showInterior = (obj as any).showInteriorLayout;
+    // Remove old partitions
+    canvas.getObjects().forEach((o) => {
+      if ((o as any).isInteriorPartition && (o as any).parentId === parentId) canvas.remove(o);
+    });
+    if (!showInterior) return;
+    // Simple default interior: split into rooms
+    const left = obj.left || 0;
+    const top = obj.top || 0;
+    const w = ((obj as any).width || 0) * (obj.scaleX || 1);
+    const h = ((obj as any).height || 0) * (obj.scaleY || 1);
+    const partitionColor = '#cbd5e1';
+    // Horizontal partition at 40% height
+    const hLine = new fabric.Line([left + 2, top + h * 0.4, left + w - 2, top + h * 0.4], {
+      stroke: partitionColor,
+      strokeWidth: 1,
+      strokeDashArray: [4, 3],
+      selectable: false,
+      evented: false,
+    });
+    (hLine as any).isInteriorPartition = true;
+    (hLine as any).isMeasurement = true;
+    (hLine as any).parentId = parentId;
+    canvas.add(hLine);
+    // Vertical partition at 55% width in the bottom section
+    const vLine = new fabric.Line([left + w * 0.55, top + h * 0.4, left + w * 0.55, top + h - 2], {
+      stroke: partitionColor,
+      strokeWidth: 1,
+      strokeDashArray: [4, 3],
+      selectable: false,
+      evented: false,
+    });
+    (vLine as any).isInteriorPartition = true;
+    (vLine as any).isMeasurement = true;
+    (vLine as any).parentId = parentId;
+    canvas.add(vLine);
+    // Room labels
+    const rooms = [
+      { name: 'Living', x: left + w * 0.5, y: top + h * 0.2 },
+      { name: 'Kitchen', x: left + w * 0.275, y: top + h * 0.7 },
+      { name: 'Room', x: left + w * 0.775, y: top + h * 0.7 },
+    ];
+    rooms.forEach(r => {
+      const roomLabel = new fabric.Text(r.name, {
+        left: r.x,
+        top: r.y,
+        fontSize: 9,
+        fontFamily: 'sans-serif',
+        fill: '#94a3b8',
+        originX: 'center',
+        originY: 'center',
+        selectable: false,
+        evented: false,
+      });
+      (roomLabel as any).isInteriorPartition = true;
+      (roomLabel as any).isMeasurement = true;
+      (roomLabel as any).parentId = parentId;
+      canvas.add(roomLabel);
+    });
+  }, []);
+
   const addTemplate = (templateId: string) => {
     const canvas = fabricRef.current;
     if (!canvas) return;
@@ -1360,6 +1572,9 @@ function EditorPageContent() {
     const widthPx = metersToPixels(template.width);
     const heightPx = metersToPixels(template.height);
 
+    // Parking template: dashed stroke with vehicle icon
+    const isParking = templateId === 'parking';
+
     const rect = new fabric.Rect({
       left: center.x - widthPx / 2,
       top: center.y - heightPx / 2,
@@ -1367,19 +1582,26 @@ function EditorPageContent() {
       height: heightPx,
       fill: template.color + "20",
       stroke: template.color,
-      strokeWidth: 2,
+      strokeWidth: isParking ? 1.5 : 2,
+      strokeDashArray: isParking ? [6, 3] : undefined,
     });
 
     (rect as any).id = shapeId;
     (rect as any).templateType = templateId;
     (rect as any).elementName = template.label;
+    // Default overhang for buildings
+    if (['house', 'garage'].includes(templateId)) {
+      (rect as any).roofOverhang = 0.5;
+      (rect as any).roofType = 'gable';
+      (rect as any).roofPitch = 30;
+    }
     canvas.add(rect);
 
     // Add label
     const label = new fabric.Text(template.label, {
       left: center.x,
-      top: center.y,
-      fontSize: 14,
+      top: center.y - (isParking ? 8 : 0),
+      fontSize: isParking ? 10 : 14,
       fontFamily: "sans-serif",
       fill: template.color,
       originX: "center",
@@ -1391,7 +1613,51 @@ function EditorPageContent() {
     (label as any).parentId = shapeId;
     canvas.add(label);
 
+    // Parking: add dimensions text and simplified vehicle graphic
+    if (isParking) {
+      const dimText = new fabric.Text(`${template.width}m × ${template.height}m`, {
+        left: center.x,
+        top: center.y + 6,
+        fontSize: 9,
+        fontFamily: 'monospace',
+        fill: '#9ca3af',
+        originX: 'center',
+        originY: 'center',
+        selectable: false,
+        evented: false,
+      });
+      (dimText as any).isMeasurement = true;
+      (dimText as any).parentId = shapeId;
+      canvas.add(dimText);
+
+      // Simplified car outline (small rectangle inside)
+      const carW = widthPx * 0.6;
+      const carH = heightPx * 0.5;
+      const car = new fabric.Rect({
+        left: center.x - carW / 2,
+        top: center.y - carH / 2 - 5,
+        width: carW,
+        height: carH,
+        fill: 'transparent',
+        stroke: '#9ca3af',
+        strokeWidth: 0.8,
+        rx: 3,
+        ry: 3,
+        selectable: false,
+        evented: false,
+      });
+      (car as any).isMeasurement = true;
+      (car as any).parentId = shapeId;
+      canvas.add(car);
+    }
+
     addRectMeasurements(rect, shapeId);
+
+    // Draw overhang overlay for buildings
+    if (['house', 'garage'].includes(templateId)) {
+      drawOverhangOverlay(rect);
+    }
+
     canvas.setActiveObject(rect);
     canvas.renderAll();
   };
@@ -2066,22 +2332,46 @@ function EditorPageContent() {
                         value={(selectedObject as any).roofOverhang ?? 0.5}
                         onChange={(e) => {
                           (selectedObject as any).roofOverhang = parseFloat(e.target.value) || 0;
+                          drawOverhangOverlay(selectedObject);
                           fabricRef.current?.requestRenderAll();
                         }}
                         className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm"
                       />
                     </div>
+                    {/* Interior Layout toggle */}
+                    {(selectedObject as any).templateType === 'house' && (
+                      <div className="flex items-center justify-between pt-1">
+                        <label className="text-xs text-slate-400">Interior Layout</label>
+                        <button
+                          onClick={() => {
+                            const current = !!(selectedObject as any).showInteriorLayout;
+                            (selectedObject as any).showInteriorLayout = !current;
+                            drawInteriorPartitions(selectedObject);
+                            fabricRef.current?.requestRenderAll();
+                          }}
+                          className={cn(
+                            'px-2 py-0.5 rounded text-xs font-medium transition-colors',
+                            (selectedObject as any).showInteriorLayout
+                              ? 'bg-blue-100 text-blue-600'
+                              : 'bg-slate-100 text-slate-400'
+                          )}
+                        >
+                          {(selectedObject as any).showInteriorLayout ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Shutter Properties – for window/sliding-door templates */}
-                {["window", "sliding-door"].includes((selectedObject as any).templateType || "") && (
+                {/* Shutter Properties – for window/door/sliding-door templates */}
+                {["window", "door", "sliding-door"].includes((selectedObject as any).templateType || "") && (
                   <div className="pt-2 border-t border-slate-100">
                     <label className="text-xs text-slate-500 block mb-1 font-medium">Shutters</label>
                     <select
                       value={(selectedObject as any).shutterType || "none"}
                       onChange={(e) => {
                         (selectedObject as any).shutterType = e.target.value;
+                        drawShutterIndicator(selectedObject);
                         fabricRef.current?.requestRenderAll();
                       }}
                       className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm"

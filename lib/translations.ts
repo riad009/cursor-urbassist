@@ -261,6 +261,9 @@ export const translations: Record<string, Record<Locale, string>> = {
     "newProj.signInBtn": { fr: "Se connecter", en: "Sign in" },
     "newProj.parcel": { fr: "parcelle", en: "parcel" },
     "newProj.parcels_plural": { fr: "parcelles", en: "parcels" },
+    "newProj.noZoneTitle": { fr: "Zone non détectée", en: "Zone not detected" },
+    "newProj.noZoneMessage": { fr: "Comme indiqué sur le site officiel du gouvernement, les documents d'urbanisme de cette commune n'ont pas encore été mis en ligne.", en: "As indicated on the official government website, the urban planning documents for this municipality have not yet been made available online." },
+    "newProj.enterManually": { fr: "Saisir manuellement", en: "Enter manually" },
 
     // ─── Description Page ────────────────────────────────────────────────────────
     "desc.backToPayment": { fr: "← Retour au paiement", en: "← Back to payment" },
