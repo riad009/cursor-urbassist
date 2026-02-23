@@ -57,64 +57,69 @@ export async function POST(request: NextRequest) {
 
       // ── Real Stripe checkout session (when key is configured) ──
       if (STRIPE_SECRET) {
-        const Stripe = (await import("stripe")).default;
-        const stripe = new Stripe(STRIPE_SECRET);
+        try {
+          const Stripe = (await import("stripe")).default;
+          const stripe = new Stripe(STRIPE_SECRET);
 
-        // After payment, redirect back into the project flow
-        // successUrl can be passed by the caller to override the default redirect
-        const successPath = successUrl
-          ? successUrl
-          : projectId
-            ? `/projects/${encodeURIComponent(projectId)}/payment?success=true`
-            : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
-        const cancelPath = projectId
-          ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
-          : `/projects?cancelled=true`;
+          // After payment, redirect back into the project flow
+          // successUrl can be passed by the caller to override the default redirect
+          const successPath = successUrl
+            ? successUrl
+            : projectId
+              ? `/projects/${encodeURIComponent(projectId)}/payment?success=true`
+              : `/projects?success=true&session_id={CHECKOUT_SESSION_ID}`;
+          const cancelPath = projectId
+            ? `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`
+            : `/projects?cancelled=true`;
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [
-            {
-              price_data: {
-                currency: "eur",
-                product_data: {
-                  name: pkg.label,
-                  description: `${pkg.credits} credits for UrbAssist platform`,
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [
+              {
+                price_data: {
+                  currency: "eur",
+                  product_data: {
+                    name: pkg.label,
+                    description: `${pkg.credits} credits for UrbAssist platform`,
+                  },
+                  unit_amount: pkg.price,
                 },
-                unit_amount: pkg.price,
+                quantity: 1,
               },
-              quantity: 1,
-            },
-          ],
-          mode: "payment",
-          success_url: `${getSiteUrl(request)}${successPath}`,
-          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
-          metadata: {
-            userId: user.id,
-            type: "credits",
-            credits: String(pkg.credits),
-            ...(projectId ? { projectId: String(projectId) } : {}),
-          },
-        });
-
-        // Record payment intent in DB (skip for hardcoded demo user who has no DB row)
-        if (user.id !== HARDCODED_USER_ID) {
-          await prisma.payment.create({
-            data: {
+            ],
+            mode: "payment",
+            success_url: `${getSiteUrl(request)}${successPath}`,
+            cancel_url: `${getSiteUrl(request)}${cancelPath}`,
+            metadata: {
               userId: user.id,
-              stripeSessionId: session.id,
-              amount: pkg.price / 100,
               type: "credits",
-              creditsAmount: pkg.credits,
-              status: "pending",
+              credits: String(pkg.credits),
+              ...(projectId ? { projectId: String(projectId) } : {}),
             },
           });
-        }
 
-        return NextResponse.json({ url: session.url });
+          // Record payment intent in DB (skip for hardcoded demo user who has no DB row)
+          if (user.id !== HARDCODED_USER_ID) {
+            await prisma.payment.create({
+              data: {
+                userId: user.id,
+                stripeSessionId: session.id,
+                amount: pkg.price / 100,
+                type: "credits",
+                creditsAmount: pkg.credits,
+                status: "pending",
+              },
+            });
+          }
+
+          return NextResponse.json({ url: session.url });
+        } catch (stripeErr) {
+          // Stripe connection failed — fall through to demo mode
+          console.warn("Stripe connection failed, falling back to demo mode:", stripeErr);
+        }
       }
 
-      // ── No Stripe key → demo mode: add credits directly ──
+      // ── No Stripe key or Stripe failed → demo mode: add credits directly ──
       if (user.id === HARDCODED_USER_ID) {
         return NextResponse.json({
           success: true,
@@ -152,53 +157,57 @@ export async function POST(request: NextRequest) {
       }
 
       if (STRIPE_SECRET) {
-        const Stripe = (await import("stripe")).default;
-        const stripe = new Stripe(STRIPE_SECRET);
+        try {
+          const Stripe = (await import("stripe")).default;
+          const stripe = new Stripe(STRIPE_SECRET);
 
-        const successPath = successUrl || `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
-        const cancelPath = `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}&cancelled=true` : "?cancelled=true"}`;
+          const successPath = successUrl || `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
+          const cancelPath = `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}&cancelled=true` : "?cancelled=true"}`;
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [
-            {
-              price_data: {
-                currency: "eur",
-                product_data: {
-                  name: pack.label,
-                  description: `${pack.renders} ultra-realistic renders (${pack.credits} credits) for UrbAssist Rendering Studio`,
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [
+              {
+                price_data: {
+                  currency: "eur",
+                  product_data: {
+                    name: pack.label,
+                    description: `${pack.renders} ultra-realistic renders (${pack.credits} credits) for UrbAssist Rendering Studio`,
+                  },
+                  unit_amount: pack.price,
                 },
-                unit_amount: pack.price,
+                quantity: 1,
               },
-              quantity: 1,
-            },
-          ],
-          mode: "payment",
-          success_url: `${getSiteUrl(request)}${successPath}`,
-          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
-          metadata: {
-            userId: user.id,
-            type: "rendering_pack",
-            credits: String(pack.credits),
-            renders: String(pack.renders),
-            ...(projectId ? { projectId: String(projectId) } : {}),
-          },
-        });
-
-        if (user.id !== HARDCODED_USER_ID) {
-          await prisma.payment.create({
-            data: {
+            ],
+            mode: "payment",
+            success_url: `${getSiteUrl(request)}${successPath}`,
+            cancel_url: `${getSiteUrl(request)}${cancelPath}`,
+            metadata: {
               userId: user.id,
-              stripeSessionId: session.id,
-              amount: pack.price / 100,
               type: "rendering_pack",
-              creditsAmount: pack.credits,
-              status: "pending",
+              credits: String(pack.credits),
+              renders: String(pack.renders),
+              ...(projectId ? { projectId: String(projectId) } : {}),
             },
           });
-        }
 
-        return NextResponse.json({ url: session.url });
+          if (user.id !== HARDCODED_USER_ID) {
+            await prisma.payment.create({
+              data: {
+                userId: user.id,
+                stripeSessionId: session.id,
+                amount: pack.price / 100,
+                type: "rendering_pack",
+                creditsAmount: pack.credits,
+                status: "pending",
+              },
+            });
+          }
+
+          return NextResponse.json({ url: session.url });
+        } catch (stripeErr) {
+          console.warn("Stripe connection failed for rendering pack, falling back to demo mode:", stripeErr);
+        }
       }
 
       // Demo mode: add credits immediately
@@ -256,61 +265,65 @@ export async function POST(request: NextRequest) {
         : `PLU Analysis — ${project.name || "Project"}`;
 
       if (STRIPE_SECRET) {
-        const Stripe = (await import("stripe")).default;
-        const stripe = new Stripe(STRIPE_SECRET);
+        try {
+          const Stripe = (await import("stripe")).default;
+          const stripe = new Stripe(STRIPE_SECRET);
 
-        const successPath = successUrl
-          ? successUrl
-          : `/projects/${encodeURIComponent(projectId)}/payment?success=true&type=plu_analysis`;
-        const cancelPath = `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`;
+          const successPath = successUrl
+            ? successUrl
+            : `/projects/${encodeURIComponent(projectId)}/payment?success=true&type=plu_analysis`;
+          const cancelPath = `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`;
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [
-            {
-              price_data: {
-                currency: "eur",
-                product_data: {
-                  name: label,
-                  description: isRelaunch
-                    ? "Updated PLU regulatory analysis after project modifications"
-                    : "Complete PLU regulatory analysis for your construction project",
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [
+              {
+                price_data: {
+                  currency: "eur",
+                  product_data: {
+                    name: label,
+                    description: isRelaunch
+                      ? "Updated PLU regulatory analysis after project modifications"
+                      : "Complete PLU regulatory analysis for your construction project",
+                  },
+                  unit_amount: priceCents,
                 },
-                unit_amount: priceCents,
+                quantity: 1,
               },
-              quantity: 1,
-            },
-          ],
-          mode: "payment",
-          success_url: `${getSiteUrl(request)}${successPath}`,
-          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
-          metadata: {
-            userId: user.id,
-            type: "plu_analysis",
-            projectId: String(projectId),
-            isRelaunch: isRelaunch ? "true" : "false",
-            priceEur: String(priceEur),
-          },
-        });
-
-        // Record pending payment
-        if (user.id !== HARDCODED_USER_ID) {
-          await prisma.payment.create({
-            data: {
+            ],
+            mode: "payment",
+            success_url: `${getSiteUrl(request)}${successPath}`,
+            cancel_url: `${getSiteUrl(request)}${cancelPath}`,
+            metadata: {
               userId: user.id,
-              stripeSessionId: session.id,
-              amount: priceEur,
               type: "plu_analysis",
-              status: "pending",
-              metadata: { projectId, isRelaunch },
+              projectId: String(projectId),
+              isRelaunch: isRelaunch ? "true" : "false",
+              priceEur: String(priceEur),
             },
           });
-        }
 
-        return NextResponse.json({ url: session.url });
+          // Record pending payment
+          if (user.id !== HARDCODED_USER_ID) {
+            await prisma.payment.create({
+              data: {
+                userId: user.id,
+                stripeSessionId: session.id,
+                amount: priceEur,
+                type: "plu_analysis",
+                status: "pending",
+                metadata: { projectId, isRelaunch },
+              },
+            });
+          }
+
+          return NextResponse.json({ url: session.url });
+        } catch (stripeErr) {
+          console.warn("Stripe connection failed for PLU analysis, falling back to demo mode:", stripeErr);
+        }
       }
 
-      // Demo mode: no Stripe key → mark paid immediately
+      // Demo mode: no Stripe key or Stripe failed → mark paid immediately
       await prisma.project.update({
         where: { id: projectId },
         data: {
@@ -362,37 +375,36 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      if (plan.stripePriceId && !STRIPE_SECRET) {
-        return NextResponse.json(
-          { error: "Stripe is not configured. Set STRIPE_SECRET_KEY to enable subscription payments." },
-          { status: 503 }
-        );
-      }
-
       if (STRIPE_SECRET && plan.stripePriceId) {
-        const Stripe = (await import("stripe")).default;
-        const stripe = new Stripe(STRIPE_SECRET);
+        try {
+          const Stripe = (await import("stripe")).default;
+          const stripe = new Stripe(STRIPE_SECRET);
 
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          line_items: [{ price: plan.stripePriceId, quantity: 1 }],
-          mode: "subscription",
-          success_url: `${getSiteUrl(request)}/projects?session_id={CHECKOUT_SESSION_ID}&success=true`,
-          cancel_url: `${getSiteUrl(request)}/projects?cancelled=true`,
-          metadata: {
-            userId: user.id,
-            type: "subscription",
-            planId: plan.id,
-          },
-        });
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+            mode: "subscription",
+            success_url: `${getSiteUrl(request)}/projects?session_id={CHECKOUT_SESSION_ID}&success=true`,
+            cancel_url: `${getSiteUrl(request)}/projects?cancelled=true`,
+            metadata: {
+              userId: user.id,
+              type: "subscription",
+              planId: plan.id,
+            },
+          });
 
-        return NextResponse.json({ url: session.url });
+          return NextResponse.json({ url: session.url });
+        } catch (stripeErr) {
+          console.warn("Stripe connection failed for subscription, falling back to demo mode:", stripeErr);
+        }
       }
 
-      // Demo mode: no Stripe session (missing STRIPE_SECRET_KEY or plan.stripePriceId)
+      // Demo mode: no Stripe session (missing STRIPE_SECRET_KEY, plan.stripePriceId, or Stripe failed)
       const whyNoStripe = !STRIPE_SECRET
         ? "Set STRIPE_SECRET_KEY in .env and add a Stripe Price ID to this plan in Admin."
-        : "Add a Stripe Price ID to this plan in Admin (Plans → edit plan → Stripe Price ID).";
+        : !plan.stripePriceId
+          ? "Add a Stripe Price ID to this plan in Admin (Plans → edit plan → Stripe Price ID)."
+          : "Stripe connection failed. Check your STRIPE_SECRET_KEY.";
 
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 1);
