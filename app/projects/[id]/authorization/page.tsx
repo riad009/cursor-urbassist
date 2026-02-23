@@ -41,6 +41,11 @@ import {
 } from "@/lib/dp-pc-calculator";
 import {
   getDocumentsForType,
+  getDocumentsForProject,
+  DP_DOCUMENTS,
+  PC_DOCUMENTS,
+  DPC11_DOCUMENT,
+  type AuthorizationDocument,
 } from "@/lib/authorization-documents";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -1334,20 +1339,37 @@ export default function AuthorizationPage({
                     </p>
                   </div>
 
-                  {/* Documents — show all PC documents (most complete set) */}
-                  <div className="rounded-xl border border-slate-200 overflow-hidden">
-                    <div className="grid grid-cols-2 gap-px bg-slate-100">
-                      {getDocumentsForType("PC").map((doc) => (
-                        <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
-                          <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.dualCode ? `${doc.code} / ${doc.dualCode}` : doc.code}</p>
-                            <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
-                          </div>
+                  {/* Documents — show all PC documents with dual DPC codes (most complete set) */}
+                  {(() => {
+                    // Build merged list: PC docs with dual DPC codes, plus DPC 11 if ABF
+                    const hasABF = projectData?.isProtectedZone ?? false;
+                    const mergedDocs = PC_DOCUMENTS.map((doc) => ({
+                      ...doc,
+                      displayCode: doc.dualCode ? `${doc.code} / ${doc.dualCode}` : doc.code,
+                    }));
+                    // Add DPC 11 only for the "I don't know" merged view if ABF (as a DP-specific doc)
+                    const allDocs = hasABF
+                      ? [...mergedDocs, { ...DPC11_DOCUMENT, displayCode: DPC11_DOCUMENT.code }]
+                      : mergedDocs;
+                    return (
+                      <div className="rounded-xl border border-slate-200 overflow-hidden">
+                        <div className="grid grid-cols-2 gap-px bg-slate-100">
+                          {allDocs.map((doc) => (
+                            <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
+                              <Check className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase">{(doc as { displayCode?: string }).displayCode || doc.code}</p>
+                                <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
+                                {doc.tag === "ABF" && (
+                                  <p className="text-[10px] text-amber-600 mt-0.5">{isEn ? "Required in ABF zone only" : "Requis en zone ABF uniquement"}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Optional add-ons */}
                   <div className="space-y-2">
@@ -1560,7 +1582,7 @@ export default function AuthorizationPage({
           const accent = isDP
             ? { bg: "bg-emerald-50", icon: "bg-emerald-100 text-emerald-600", badge: "text-emerald-600", btn: "from-emerald-500 to-teal-500" }
             : { bg: "bg-purple-50", icon: "bg-purple-100 text-purple-600", badge: "text-purple-600", btn: "from-purple-500 to-violet-600" };
-          const docs = getDocumentsForType(quickModal.type);
+          const docs = getDocumentsForProject(quickModal.type, { hasABF: projectData?.isProtectedZone ?? false });
           const typeLabel = isDP
             ? (isEn ? "Preliminary Declaration" : "Déclaration Préalable")
             : (isEn ? "Building Permit" : "Permis de Construire");
@@ -1669,8 +1691,16 @@ export default function AuthorizationPage({
                           <div key={doc.code} className="bg-white px-4 py-3 flex items-start gap-2">
                             <Check className={`w-4 h-4 shrink-0 mt-0.5 ${isDP ? "text-emerald-500" : "text-purple-500"}`} />
                             <div>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
+                                {doc.tag === "ABF" && (
+                                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">ABF</span>
+                                )}
+                              </div>
                               <p className="text-xs font-medium text-slate-800 leading-snug">{doc.label}</p>
+                              {doc.tag === "ABF" && doc.description && (
+                                <p className="text-[10px] text-amber-600 mt-0.5">{doc.description}</p>
+                              )}
                             </div>
                           </div>
                         ))}
