@@ -51,7 +51,7 @@ import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
 
-type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd" | "pencil" | "annotation";
+type Tool = "select" | "rectangle" | "circle" | "line" | "polygon" | "text" | "pan" | "measure" | "parcel" | "vrd" | "pencil" | "annotation" | "elevation-marker" | "access-point" | "section-line" | "freeform";
 
 interface LayerItem {
   id: string;
@@ -80,10 +80,14 @@ const tools = [
   { id: "rectangle", label: "Rectangle", icon: Square, shortcut: "R" },
   { id: "polygon", label: "Polygon", icon: Pentagon, shortcut: "P" },
   { id: "circle", label: "Circle", icon: Circle, shortcut: "C" },
+  { id: "freeform", label: "Freeform Shape", icon: Hexagon, shortcut: "F" },
   { id: "pencil", label: "Free Draw", icon: Pencil, shortcut: "B" },
   { id: "measure", label: "Measure", icon: Ruler, shortcut: "M" },
   { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A" },
   { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D" },
+  { id: "elevation-marker", label: "Elevation Marker", icon: Compass, shortcut: "E" },
+  { id: "access-point", label: "Plot Access", icon: DoorOpen, shortcut: "G" },
+  { id: "section-line", label: "Section Line", icon: Minus, shortcut: "S" },
   { id: "text", label: "Text", icon: Type, shortcut: "T" },
   { id: "annotation", label: "Annotation", icon: MessageSquare, shortcut: "N" },
   { id: "pan", label: "Pan", icon: Move, shortcut: "H" },
@@ -99,6 +103,12 @@ const templates = [
   { id: "window", label: "Window 1.2×1.2m", icon: PanelTop, color: "#0ea5e9", width: 1.2, height: 1.2 },
   { id: "door", label: "Door 0.9×2.1m", icon: DoorOpen, color: "#a855f7", width: 0.9, height: 2.1 },
   { id: "sliding-door", label: "Sliding Door 2.4×2.1m", icon: DoorOpen, color: "#d946ef", width: 2.4, height: 2.1 },
+  // Vegetation templates
+  { id: "tree-small", label: "Tree (small)", icon: Trees, color: "#16a34a", width: 4, height: 4 },
+  { id: "tree-large", label: "Tree (large)", icon: Trees, color: "#15803d", width: 8, height: 8 },
+  { id: "hedge", label: "Hedge", icon: Trees, color: "#22c55e", width: 1, height: 10 },
+  { id: "shrub", label: "Shrub", icon: Trees, color: "#4ade80", width: 2, height: 2 },
+  { id: "lawn", label: "Lawn", icon: Trees, color: "#86efac", width: 10, height: 10 },
 ];
 
 const ROOF_TYPES = [
@@ -113,6 +123,66 @@ const SHUTTER_TYPES = [
   { id: "roller", label: "Roller Shutters" },
   { id: "traditional", label: "Traditional Shutters" },
   { id: "folding", label: "Folding Shutters" },
+];
+
+// Interior room layout presets for buildings
+const ROOM_LAYOUT_PRESETS = [
+  { 
+    id: "simple-3", 
+    label: "3-Room (Living + Kitchen + Bedroom)", 
+    rooms: [
+      { name: "Living", x: 0.5, y: 0.2 },
+      { name: "Kitchen", x: 0.275, y: 0.7 },
+      { name: "Bedroom", x: 0.775, y: 0.7 },
+    ],
+    partitions: [
+      { type: "h", pos: 0.4 },
+      { type: "v", pos: 0.55, from: 0.4, to: 1 },
+    ]
+  },
+  { 
+    id: "studio", 
+    label: "Studio (Open + Bathroom)", 
+    rooms: [
+      { name: "Studio", x: 0.4, y: 0.5 },
+      { name: "Bath", x: 0.85, y: 0.15 },
+    ],
+    partitions: [
+      { type: "v", pos: 0.7, from: 0, to: 0.3 },
+      { type: "h", pos: 0.3, from: 0.7, to: 1 },
+    ]
+  },
+  { 
+    id: "4-room", 
+    label: "4-Room (Living + Kitchen + 2 Bedrooms)", 
+    rooms: [
+      { name: "Living", x: 0.275, y: 0.25 },
+      { name: "Kitchen", x: 0.775, y: 0.25 },
+      { name: "Bedroom 1", x: 0.275, y: 0.75 },
+      { name: "Bedroom 2", x: 0.775, y: 0.75 },
+    ],
+    partitions: [
+      { type: "h", pos: 0.5 },
+      { type: "v", pos: 0.55, from: 0, to: 1 },
+    ]
+  },
+  { 
+    id: "5-room", 
+    label: "5-Room (Living + Kitchen + Bath + 2 Bedrooms)", 
+    rooms: [
+      { name: "Living", x: 0.3, y: 0.25 },
+      { name: "Kitchen", x: 0.775, y: 0.25 },
+      { name: "Bath", x: 0.85, y: 0.6 },
+      { name: "Bedroom 1", x: 0.275, y: 0.75 },
+      { name: "Bedroom 2", x: 0.55, y: 0.75 },
+    ],
+    partitions: [
+      { type: "h", pos: 0.5 },
+      { type: "v", pos: 0.55, from: 0, to: 0.5 },
+      { type: "v", pos: 0.7, from: 0.5, to: 1 },
+      { type: "h", pos: 0.7, from: 0.7, to: 1 },
+    ]
+  },
 ];
 
 const SURFACE_TYPES = [
@@ -189,6 +259,9 @@ function EditorPageContent() {
   const annotationCounterRef = useRef(0);
   const [interiorLayoutMode, setInteriorLayoutMode] = useState(false);
   const [interiorDrawing, setInteriorDrawing] = useState<{ start: { x: number; y: number } | null; parentId: string | null }>({ start: null, parentId: null });
+  const [parcelBoundaryRestriction, setParcelBoundaryRestriction] = useState(true);
+  const elevationMarkerCounterRef = useRef(0);
+  const sectionLineCounterRef = useRef(0);
 
   const updateLayers = useCallback((canvas: fabric.Canvas) => {
     const objects = canvas.getObjects().filter(obj => {
@@ -996,6 +1069,53 @@ function EditorPageContent() {
 
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
 
+      // Check parcel boundary restriction if enabled
+      if (parcelBoundaryRestriction && activeTool !== "parcel" && activeTool !== "select") {
+        const parcels = canvas.getObjects().filter((o: fabric.FabricObject) => (o as any).isParcel);
+        if (parcels.length > 0) {
+          const isInsideAnyParcel = parcels.some((parcel) => {
+            return parcel.containsPoint(new fabric.Point(pointer.x, pointer.y));
+          });
+          if (!isInsideAnyParcel) {
+            // Show warning but don't block completely
+            console.warn("Drawing outside parcel boundary");
+          }
+        }
+      }
+
+      // Elevation marker mode - place elevation marker on click
+      if (activeTool === "elevation-marker") {
+        addElevationMarker(pointer.x, pointer.y);
+        return;
+      }
+
+      // Access point mode - place access point on click
+      if (activeTool === "access-point") {
+        addAccessPoint(pointer.x, pointer.y);
+        return;
+      }
+
+      // Section line mode - draw section line
+      if (activeTool === "section-line") {
+        setPolygonPoints(prev => {
+          if (prev.length === 0) {
+            return [{ x: pointer.x, y: pointer.y }];
+          } else if (prev.length === 1) {
+            // Complete section line with second point
+            addSectionLine(prev[0].x, prev[0].y, pointer.x, pointer.y);
+            return [];
+          }
+          return prev;
+        });
+        return;
+      }
+
+      // Freeform shape mode - add points on click
+      if (activeTool === "freeform") {
+        setPolygonPoints(prev => [...prev, { x: pointer.x, y: pointer.y }]);
+        return;
+      }
+
       // Annotation mode - place annotation on click
       if (activeTool === "annotation") {
         addAnnotation(pointer.x, pointer.y);
@@ -1141,8 +1261,8 @@ function EditorPageContent() {
     if (!canvas) return;
 
     const handleDoubleClick = () => {
-      if ((activeTool === "polygon" || activeTool === "parcel") && polygonPoints.length >= 3) {
-        const shapeId = `parcel-${Date.now()}`;
+      if ((activeTool === "polygon" || activeTool === "parcel" || activeTool === "freeform") && polygonPoints.length >= 3) {
+        const shapeId = activeTool === "freeform" ? `freeform-${Date.now()}` : `parcel-${Date.now()}`;
 
         // Calculate centroid to normalize points
         const centroidX = polygonPoints.reduce((sum, p) => sum + p.x, 0) / polygonPoints.length;
@@ -1165,8 +1285,9 @@ function EditorPageContent() {
 
         (polygon as any).id = shapeId;
         (polygon as any).isParcel = activeTool === "parcel";
-        (polygon as any).elementName = activeTool === "parcel" ? "Land Parcel" : (activeSurfaceType.label || "Polygon");
-        if (activeTool === "polygon") (polygon as any).surfaceType = activeSurfaceType.id;
+        (polygon as any).isFreeform = activeTool === "freeform";
+        (polygon as any).elementName = activeTool === "parcel" ? "Land Parcel" : activeTool === "freeform" ? "Freeform Shape" : (activeSurfaceType.label || "Polygon");
+        if (activeTool === "polygon" || activeTool === "freeform") (polygon as any).surfaceType = activeSurfaceType.id;
         canvas.add(polygon);
 
         // Add measurements to all sides automatically
@@ -1193,14 +1314,22 @@ function EditorPageContent() {
     const oldPreview = canvas.getObjects().filter(obj => (obj as any).isPolygonPreview);
     oldPreview.forEach(p => canvas.remove(p));
 
-    if ((activeTool === "polygon" || activeTool === "parcel") && polygonPoints.length > 0) {
+    if ((activeTool === "polygon" || activeTool === "parcel" || activeTool === "freeform" || activeTool === "section-line") && polygonPoints.length > 0) {
       // Draw points
+      const getColor = () => {
+        if (activeTool === "parcel") return "#22c55e";
+        if (activeTool === "section-line") return "#db2777";
+        if (activeTool === "freeform") return "#8b5cf6";
+        return activeColor;
+      };
+      const pointColor = getColor();
+      
       polygonPoints.forEach((point, index) => {
         const circle = new fabric.Circle({
           left: point.x - 5,
           top: point.y - 5,
           radius: 5,
-          fill: activeTool === "parcel" ? "#22c55e" : activeColor,
+          fill: pointColor,
           selectable: false,
           evented: false,
         });
@@ -1211,7 +1340,7 @@ function EditorPageContent() {
         if (index > 0) {
           const prevPoint = polygonPoints[index - 1];
           const line = new fabric.Line([prevPoint.x, prevPoint.y, point.x, point.y], {
-            stroke: activeTool === "parcel" ? "#22c55e" : activeColor,
+            stroke: pointColor,
             strokeWidth: 2,
             strokeDashArray: [5, 5],
             selectable: false,
@@ -1245,7 +1374,7 @@ function EditorPageContent() {
       if (polygonPoints.length > 0) {
         const lastPoint = polygonPoints[polygonPoints.length - 1];
         const line = new fabric.Line([lastPoint.x, lastPoint.y, mousePos.x, mousePos.y], {
-          stroke: activeTool === "parcel" ? "#22c55e" : activeColor,
+          stroke: pointColor,
           strokeWidth: 1,
           strokeDashArray: [3, 3],
           selectable: false,
@@ -1329,6 +1458,214 @@ function EditorPageContent() {
     canvas.setActiveObject(group);
     canvas.renderAll();
   }, []);
+
+  // Place elevation marker (TN/TF) on canvas
+  const addElevationMarker = useCallback((x: number, y: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    elevationMarkerCounterRef.current += 1;
+    const num = elevationMarkerCounterRef.current;
+    const shapeId = `elevation-${Date.now()}`;
+    const elevation = window.prompt("Enter elevation (e.g., TN 125.50 or TF 128.00):", `TN ${(100 + num * 0.5).toFixed(2)}`);
+    if (!elevation) return;
+
+    // Triangle marker pointing down
+    const triangle = new fabric.Triangle({
+      width: 16,
+      height: 14,
+      fill: "#0ea5e9",
+      stroke: "#0369a1",
+      strokeWidth: 1,
+      angle: 180,
+      originX: "center",
+      originY: "center",
+    });
+
+    // Elevation text
+    const elevText = new fabric.Text(elevation, {
+      fontSize: 11,
+      fontFamily: "monospace",
+      fontWeight: "bold",
+      fill: "#0f172a",
+      backgroundColor: "#bae6fd",
+      padding: 2,
+      originX: "center",
+      top: 10,
+    });
+
+    const group = new fabric.Group([triangle, elevText], {
+      left: x - 8,
+      top: y - 7,
+    });
+    (group as any).id = shapeId;
+    (group as any).elementName = elevation;
+    (group as any).isElevationMarker = true;
+    (group as any).elevationValue = elevation;
+    canvas.add(group);
+    canvas.setActiveObject(group);
+    canvas.renderAll();
+  }, []);
+
+  // Place plot access point marker on canvas
+  const addAccessPoint = useCallback((x: number, y: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const shapeId = `access-${Date.now()}`;
+    const accessType = window.prompt("Access type (Vehicle, Pedestrian, Both):", "Vehicle");
+    if (!accessType) return;
+
+    // Arrow shape pointing inward
+    const arrowPoints = [
+      { x: 0, y: -12 },
+      { x: 10, y: 0 },
+      { x: 5, y: 0 },
+      { x: 5, y: 12 },
+      { x: -5, y: 12 },
+      { x: -5, y: 0 },
+      { x: -10, y: 0 },
+    ];
+
+    const arrow = new fabric.Polygon(arrowPoints, {
+      fill: "#22c55e",
+      stroke: "#15803d",
+      strokeWidth: 2,
+      originX: "center",
+      originY: "center",
+    });
+
+    // Access type label
+    const accessLabel = new fabric.Text(accessType, {
+      fontSize: 10,
+      fontFamily: "sans-serif",
+      fontWeight: "bold",
+      fill: "#166534",
+      backgroundColor: "#dcfce7",
+      padding: 2,
+      originX: "center",
+      top: 18,
+    });
+
+    const group = new fabric.Group([arrow, accessLabel], {
+      left: x - 10,
+      top: y - 12,
+    });
+    (group as any).id = shapeId;
+    (group as any).elementName = `Access: ${accessType}`;
+    (group as any).isAccessPoint = true;
+    (group as any).accessType = accessType;
+    canvas.add(group);
+    canvas.setActiveObject(group);
+    canvas.renderAll();
+  }, []);
+
+  // Add section line (for PC3/DPC3 generation)
+  const addSectionLine = useCallback((x1: number, y1: number, x2: number, y2: number) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    sectionLineCounterRef.current += 1;
+    const num = sectionLineCounterRef.current;
+    const shapeId = `section-line-${Date.now()}`;
+
+    // Section line (dashed pink/magenta)
+    const line = new fabric.Line([x1, y1, x2, y2], {
+      stroke: "#db2777",
+      strokeWidth: 2,
+      strokeDashArray: [10, 5],
+    });
+    (line as any).id = shapeId;
+    (line as any).isSectionLine = true;
+    (line as any).elementName = `Section ${String.fromCharCode(64 + num)}-${String.fromCharCode(64 + num)}'`;
+    (line as any).sectionId = `S${num}`;
+
+    // Section markers at each end
+    const markerRadius = 10;
+    const labelA = new fabric.Circle({
+      left: x1 - markerRadius,
+      top: y1 - markerRadius,
+      radius: markerRadius,
+      fill: "#db2777",
+      stroke: "#be185d",
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+    });
+    (labelA as any).isMeasurement = true;
+    (labelA as any).parentId = shapeId;
+
+    const textA = new fabric.Text(String.fromCharCode(64 + num), {
+      left: x1,
+      top: y1,
+      fontSize: 12,
+      fontFamily: "sans-serif",
+      fontWeight: "bold",
+      fill: "#ffffff",
+      originX: "center",
+      originY: "center",
+      selectable: false,
+      evented: false,
+    });
+    (textA as any).isMeasurement = true;
+    (textA as any).parentId = shapeId;
+
+    const labelB = new fabric.Circle({
+      left: x2 - markerRadius,
+      top: y2 - markerRadius,
+      radius: markerRadius,
+      fill: "#db2777",
+      stroke: "#be185d",
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+    });
+    (labelB as any).isMeasurement = true;
+    (labelB as any).parentId = shapeId;
+
+    const textB = new fabric.Text(`${String.fromCharCode(64 + num)}'`, {
+      left: x2,
+      top: y2,
+      fontSize: 12,
+      fontFamily: "sans-serif",
+      fontWeight: "bold",
+      fill: "#ffffff",
+      originX: "center",
+      originY: "center",
+      selectable: false,
+      evented: false,
+    });
+    (textB as any).isMeasurement = true;
+    (textB as any).parentId = shapeId;
+
+    // Add dimension measurement
+    const distance = calculateDistance(x1, y1, x2, y2);
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const dimText = new fabric.Text(`${formatMeasurement(distance)}`, {
+      left: midX,
+      top: midY - 15,
+      fontSize: 10,
+      fontFamily: "monospace",
+      fill: "#be185d",
+      backgroundColor: "#fce7f3",
+      padding: 2,
+      originX: "center",
+      selectable: false,
+      evented: false,
+    });
+    (dimText as any).isMeasurement = true;
+    (dimText as any).parentId = shapeId;
+
+    canvas.add(line);
+    canvas.add(labelA);
+    canvas.add(textA);
+    canvas.add(labelB);
+    canvas.add(textB);
+    canvas.add(dimText);
+    canvas.setActiveObject(line);
+    canvas.renderAll();
+
+    // Store measurement labels
+    measurementLabelsRef.current.set(shapeId, [labelA, textA, labelB, textB, dimText]);
+  }, [calculateDistance, formatMeasurement]);
 
   const handleZoom = (delta: number) => {
     const newZoom = Math.max(25, Math.min(400, zoom + delta));
@@ -1504,46 +1841,64 @@ function EditorPageContent() {
       if ((o as any).isInteriorPartition && (o as any).parentId === parentId) canvas.remove(o);
     });
     if (!showInterior) return;
-    // Simple default interior: split into rooms
+    
+    // Get selected layout preset (default to simple-3)
+    const layoutId = (obj as any).interiorLayoutId || "simple-3";
+    const layout = ROOM_LAYOUT_PRESETS.find(p => p.id === layoutId) || ROOM_LAYOUT_PRESETS[0];
+    
     const left = obj.left || 0;
     const top = obj.top || 0;
     const w = ((obj as any).width || 0) * (obj.scaleX || 1);
     const h = ((obj as any).height || 0) * (obj.scaleY || 1);
     const partitionColor = '#cbd5e1';
-    // Horizontal partition at 40% height
-    const hLine = new fabric.Line([left + 2, top + h * 0.4, left + w - 2, top + h * 0.4], {
-      stroke: partitionColor,
-      strokeWidth: 1,
-      strokeDashArray: [4, 3],
-      selectable: false,
-      evented: false,
+    
+    // Draw partitions based on preset
+    layout.partitions.forEach(p => {
+      let line: fabric.Line;
+      if (p.type === "h") {
+        // Horizontal partition
+        const fromX = p.from !== undefined ? p.from : 0;
+        const toX = p.to !== undefined ? p.to : 1;
+        line = new fabric.Line([
+          left + w * fromX + 2, 
+          top + h * p.pos, 
+          left + w * toX - 2, 
+          top + h * p.pos
+        ], {
+          stroke: partitionColor,
+          strokeWidth: 1,
+          strokeDashArray: [4, 3],
+          selectable: false,
+          evented: false,
+        });
+      } else {
+        // Vertical partition
+        const fromY = p.from !== undefined ? p.from : 0;
+        const toY = p.to !== undefined ? p.to : 1;
+        line = new fabric.Line([
+          left + w * p.pos, 
+          top + h * fromY + 2, 
+          left + w * p.pos, 
+          top + h * toY - 2
+        ], {
+          stroke: partitionColor,
+          strokeWidth: 1,
+          strokeDashArray: [4, 3],
+          selectable: false,
+          evented: false,
+        });
+      }
+      (line as any).isInteriorPartition = true;
+      (line as any).isMeasurement = true;
+      (line as any).parentId = parentId;
+      canvas.add(line);
     });
-    (hLine as any).isInteriorPartition = true;
-    (hLine as any).isMeasurement = true;
-    (hLine as any).parentId = parentId;
-    canvas.add(hLine);
-    // Vertical partition at 55% width in the bottom section
-    const vLine = new fabric.Line([left + w * 0.55, top + h * 0.4, left + w * 0.55, top + h - 2], {
-      stroke: partitionColor,
-      strokeWidth: 1,
-      strokeDashArray: [4, 3],
-      selectable: false,
-      evented: false,
-    });
-    (vLine as any).isInteriorPartition = true;
-    (vLine as any).isMeasurement = true;
-    (vLine as any).parentId = parentId;
-    canvas.add(vLine);
-    // Room labels
-    const rooms = [
-      { name: 'Living', x: left + w * 0.5, y: top + h * 0.2 },
-      { name: 'Kitchen', x: left + w * 0.275, y: top + h * 0.7 },
-      { name: 'Room', x: left + w * 0.775, y: top + h * 0.7 },
-    ];
-    rooms.forEach(r => {
+    
+    // Room labels from preset
+    layout.rooms.forEach(r => {
       const roomLabel = new fabric.Text(r.name, {
-        left: r.x,
-        top: r.y,
+        left: left + w * r.x,
+        top: top + h * r.y,
         fontSize: 9,
         fontFamily: 'sans-serif',
         fill: '#94a3b8',
@@ -1887,6 +2242,20 @@ function EditorPageContent() {
               Free
             </button>
           </div>
+          {/* Parcel Boundary Restriction Toggle */}
+          <button
+            onClick={() => setParcelBoundaryRestriction(!parcelBoundaryRestriction)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all border",
+              parcelBoundaryRestriction
+                ? "bg-emerald-100 border-emerald-300 text-emerald-700"
+                : "bg-slate-100 border-slate-200 text-slate-500"
+            )}
+            title={parcelBoundaryRestriction ? "Drawing restricted to parcel" : "Drawing unrestricted"}
+          >
+            <Square className="w-3.5 h-3.5" />
+            {parcelBoundaryRestriction ? "Parcel Lock ON" : "Parcel Lock OFF"}
+          </button>
           <div className="h-6 w-px bg-white/10" />
           <Link
             href="/facades"
@@ -2109,13 +2478,24 @@ function EditorPageContent() {
             </div>
           )}
 
-          {/* Polygon/Parcel instruction */}
-          {(activeTool === "polygon" || activeTool === "parcel") && (
+          {/* Polygon/Parcel/Freeform/Section instruction */}
+          {(activeTool === "polygon" || activeTool === "parcel" || activeTool === "freeform" || activeTool === "section-line") && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
               <div className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm">
-                Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
-                {polygonPoints.length > 0 && (
-                  <span className="ml-2 text-emerald-600">({polygonPoints.length} points)</span>
+                {activeTool === "section-line" ? (
+                  <>
+                    Click <span className="text-pink-600 font-medium">start point</span>, then <span className="text-pink-600 font-medium">end point</span> for section line.
+                    {polygonPoints.length === 1 && (
+                      <span className="ml-2 text-emerald-600">(Click end point)</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
+                    {polygonPoints.length > 0 && (
+                      <span className="ml-2 text-emerald-600">({polygonPoints.length} points)</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -2358,6 +2738,25 @@ function EditorPageContent() {
                         >
                           {(selectedObject as any).showInteriorLayout ? 'ON' : 'OFF'}
                         </button>
+                      </div>
+                    )}
+                    {/* Room Layout Preset Selector */}
+                    {(selectedObject as any).templateType === 'house' && (selectedObject as any).showInteriorLayout && (
+                      <div className="pt-1">
+                        <label className="text-xs text-slate-400 block mb-1">Room Layout</label>
+                        <select
+                          value={(selectedObject as any).interiorLayoutId || "simple-3"}
+                          onChange={(e) => {
+                            (selectedObject as any).interiorLayoutId = e.target.value;
+                            drawInteriorPartitions(selectedObject);
+                            fabricRef.current?.requestRenderAll();
+                          }}
+                          className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-xs"
+                        >
+                          {ROOM_LAYOUT_PRESETS.map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.label}</option>
+                          ))}
+                        </select>
                       </div>
                     )}
                   </div>

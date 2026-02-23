@@ -30,6 +30,13 @@ const CREDIT_PACKAGES = [
   { id: "credits-100", credits: 100, price: 5990, label: "100 Credits" },
 ];
 
+// Dedicated rendering credit packs (independent monetisation)
+const RENDERING_PACKS = [
+  { id: "render-5", renders: 5, credits: 50, price: 1490, label: "5 Renders Pack" },
+  { id: "render-15", renders: 15, credits: 150, price: 3490, label: "15 Renders Pack" },
+  { id: "render-50", renders: 50, credits: 500, price: 8990, label: "50 Renders Pack" },
+];
+
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user)
@@ -134,6 +141,89 @@ export async function POST(request: NextRequest) {
         success: true,
         credits: user.credits + pkg.credits,
         message: `${pkg.credits} credits added (demo mode - set STRIPE_SECRET_KEY to enable real payments)`,
+      });
+    }
+
+    // ── Rendering Pack (independent monetisation) ──
+    if (type === "rendering_pack") {
+      const pack = RENDERING_PACKS.find((p) => p.id === packageId);
+      if (!pack) {
+        return NextResponse.json({ error: "Invalid rendering pack" }, { status: 400 });
+      }
+
+      if (STRIPE_SECRET) {
+        const Stripe = (await import("stripe")).default;
+        const stripe = new Stripe(STRIPE_SECRET);
+
+        const successPath = successUrl || `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`;
+        const cancelPath = `/rendering${projectId ? `?project=${encodeURIComponent(projectId)}&cancelled=true` : "?cancelled=true"}`;
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: pack.label,
+                  description: `${pack.renders} ultra-realistic renders (${pack.credits} credits) for UrbAssist Rendering Studio`,
+                },
+                unit_amount: pack.price,
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${getSiteUrl(request)}${successPath}`,
+          cancel_url: `${getSiteUrl(request)}${cancelPath}`,
+          metadata: {
+            userId: user.id,
+            type: "rendering_pack",
+            credits: String(pack.credits),
+            renders: String(pack.renders),
+            ...(projectId ? { projectId: String(projectId) } : {}),
+          },
+        });
+
+        if (user.id !== HARDCODED_USER_ID) {
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: pack.price / 100,
+              type: "rendering_pack",
+              creditsAmount: pack.credits,
+              status: "pending",
+            },
+          });
+        }
+
+        return NextResponse.json({ url: session.url });
+      }
+
+      // Demo mode: add credits immediately
+      if (user.id === HARDCODED_USER_ID) {
+        return NextResponse.json({
+          success: true,
+          credits: user.credits + pack.credits,
+          message: `${pack.credits} rendering credits added (demo mode)`,
+        });
+      }
+
+      await prisma.user.update({ where: { id: user.id }, data: { credits: { increment: pack.credits } } });
+      await prisma.creditTransaction.create({
+        data: {
+          userId: user.id,
+          amount: pack.credits,
+          type: "RENDERING_PACK_PURCHASE",
+          description: `Rendering pack: ${pack.renders} renders (${pack.credits} credits, demo mode)`,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        credits: user.credits + pack.credits,
+        message: `${pack.credits} rendering credits added (demo mode - set STRIPE_SECRET_KEY for real payments)`,
       });
     }
 
@@ -358,6 +448,11 @@ export async function GET() {
       ...p,
       priceFormatted: `€${(p.price / 100).toFixed(2)}`,
       pricePerCredit: `€${(p.price / 100 / p.credits).toFixed(2)}`,
+    })),
+    renderingPacks: RENDERING_PACKS.map((p) => ({
+      ...p,
+      priceFormatted: `€${(p.price / 100).toFixed(2)}`,
+      pricePerRender: `€${(p.price / 100 / p.renders).toFixed(2)}`,
     })),
   });
 }
