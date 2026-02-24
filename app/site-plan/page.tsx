@@ -58,6 +58,14 @@ import {
   FileText,
   X,
   Mountain,
+  Pencil,
+  MessageSquare,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Bold,
+  Italic,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep, getPrevStep } from "@/lib/step-flow";
@@ -99,7 +107,10 @@ type Tool =
   | "elevation"
   | "section"
   | "vegetation"
-  | "viewpoint";
+  | "viewpoint"
+  | "pencil"
+  | "arrow"
+  | "callout";
 
 type ViewMode = "2d" | "3d";
 
@@ -143,20 +154,31 @@ const SCALES = [
 ];
 
 const tools = [
-  { id: "select", label: "Select", icon: MousePointer2, shortcut: "V", tooltip: "Select and move objects" },
-  { id: "line", label: "Line", icon: Minus, shortcut: "L", tooltip: "Draw walls, fences, or segments" },
-  { id: "rectangle", label: "Rectangle", icon: Square, shortcut: "R", tooltip: "Quick rectangle for buildings or surfaces" },
-  { id: "polygon", label: "Polygon", icon: Pentagon, shortcut: "P", tooltip: "Free shape: click points, double-click to close" },
-  { id: "circle", label: "Circle", icon: Circle, shortcut: "C", tooltip: "Circles or round surfaces" },
-  { id: "measure", label: "Measure", icon: Ruler, shortcut: "M", tooltip: "Measure distance between two points" },
-  { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A", tooltip: "Draw parcel boundary (polygon)" },
-  { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
-  { id: "elevation", label: "Elevation", icon: Ruler, shortcut: "E", tooltip: "Click to place elevation point (m)" },
-  { id: "section", label: "Section line", icon: Minus, shortcut: "S", tooltip: "Draw section cut line" },
-  { id: "vegetation", label: "Vegetation", icon: Trees, shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
-  { id: "viewpoint", label: "Viewpoint", icon: Eye, shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
-  { id: "text", label: "Text", icon: Type, shortcut: "T", tooltip: "Add text labels" },
-  { id: "pan", label: "Pan", icon: Move, shortcut: "H", tooltip: "Pan the canvas" },
+  { id: "select",    label: "Select",      icon: MousePointer2,  shortcut: "V", tooltip: "Select and move objects" },
+  { id: "pan",       label: "Pan",         icon: Move,          shortcut: "H", tooltip: "Pan the canvas" },
+  { id: "line",      label: "Line",        icon: Minus,         shortcut: "L", tooltip: "Draw walls, fences, or segments" },
+  { id: "rectangle",label: "Rectangle",   icon: Square,        shortcut: "R", tooltip: "Quick rectangle for buildings or surfaces" },
+  { id: "polygon",   label: "Polygon",     icon: Pentagon,      shortcut: "P", tooltip: "Free shape: click points, double-click to close" },
+  { id: "circle",    label: "Circle",      icon: Circle,        shortcut: "C", tooltip: "Circles or round surfaces" },
+  { id: "pencil",    label: "Pencil",      icon: Pencil,        shortcut: "B", tooltip: "Freehand drawing" },
+  { id: "text",      label: "Text",        icon: Type,          shortcut: "T", tooltip: "Click to add editable text" },
+  { id: "arrow",     label: "Arrow",       icon: ArrowRight,    shortcut: "W", tooltip: "Arrow annotation" },
+  { id: "callout",   label: "Callout",     icon: MessageSquare, shortcut: "K", tooltip: "Callout bubble annotation" },
+  { id: "measure",   label: "Measure",     icon: Ruler,         shortcut: "M", tooltip: "Measure distance between two points" },
+  { id: "elevation", label: "Elevation",   icon: Ruler,         shortcut: "E", tooltip: "Click to place elevation point (m)" },
+  { id: "section",   label: "Section line",icon: Minus,         shortcut: "S", tooltip: "Draw section cut line" },
+  { id: "parcel",    label: "Land Parcel", icon: MapPin,        shortcut: "A", tooltip: "Draw parcel boundary (polygon)" },
+  { id: "vrd",       label: "VRD Networks",icon: Zap,           shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
+  { id: "vegetation",label: "Vegetation",  icon: Trees,         shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
+  { id: "viewpoint", label: "Viewpoint",   icon: Eye,           shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
+];
+
+/** Phase 8: Tool groups with section labels for grouped toolbar rendering */
+const TOOL_GROUPS = [
+  { label: "Select",   ids: ["select", "pan"] },
+  { label: "Draw",     ids: ["line", "rectangle", "polygon", "circle", "pencil"] },
+  { label: "Annotate", ids: ["text", "arrow", "callout", "measure", "elevation", "section"] },
+  { label: "Place",    ids: ["parcel", "vrd", "vegetation", "viewpoint"] },
 ];
 
 const templatesList = [
@@ -168,6 +190,26 @@ const templatesList = [
   { id: "garden", label: "Garden", icon: Trees, color: "#22c55e", width: 8, height: 8 },
   { id: "terrace", label: "Terrace", icon: Hexagon, color: "#ec4899", width: 6, height: 4 },
 ];
+
+/**
+ * Custom Fabric.js properties to include in every canvas.toJSON() call.
+ * Without this list, ALL custom flags are silently dropped during serialization.
+ */
+const CANVAS_PROPS = [
+  "id", "elementName", "name",
+  // Overlay / internal flags
+  "isGrid", "isMeasurement", "isPolygonPreview",
+  "isBoundaryOverlay", "isBoundaryDimension", "isRegulatoryFootprint",
+  "isNorthArrow", "isInteriorLayout",
+  "isBuildingOpening", "isBuildingOverhang", "isExteriorEnvelope",
+  "isElevationPoint", "isVegetation", "isViewpoint",
+  "isAnnotation", "isVrd", "isSectionLine", "isParcel",
+  "excludeFromExport",
+  // Data fields
+  "parentId", "elevationValue", "vegetationType", "vrdType",
+  "surfaceType", "templateType", "buildingId", "constructionType",
+  "isExisting", "_buildingDetailId", "_overlayBuildingId",
+] as const;
 
 const SURFACE_TYPES = [
   // Permeable
@@ -260,6 +302,8 @@ function SitePlanContent() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(projectIdFromUrl);
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
   const [saving, setSaving] = useState(false);
+  // Phase 8: forceUpdate for text formatting panel re-renders
+  const [, forceUpdate] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -309,21 +353,28 @@ function SitePlanContent() {
   const redoStackRef = useRef<string[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  // Perf: debounce updateLayers so rapid canvas events don't spam O(n) layer recomputes
+  const updateLayersDebounceRef = useRef<number | null>(null);
 
   // ─── Utility functions ──────────────────────────────────────────────────────
 
   const updateLayers = useCallback((canvas: fabric.Canvas) => {
-    const objects = canvas.getObjects().filter((obj: any) => {
-      return !obj.excludeFromExport && !obj.isGrid && !obj.isMeasurement && !obj.isPolygonPreview;
-    });
-    const newLayers: LayerItem[] = objects.map((obj: any, index: number) => ({
-      id: obj.id || `layer-${index}`,
-      name: obj.elementName || obj.name || (obj.isParcel ? "Land Parcel" : obj.type || "Object"),
-      type: obj.type || "unknown",
-      visible: obj.visible ?? true,
-      locked: !obj.selectable,
-    }));
-    setLayers(newLayers.reverse());
+    // Debounce: batch rapid canvas events into one update per 100ms
+    if (updateLayersDebounceRef.current) window.clearTimeout(updateLayersDebounceRef.current);
+    updateLayersDebounceRef.current = window.setTimeout(() => {
+      updateLayersDebounceRef.current = null;
+      const objects = canvas.getObjects().filter((obj: any) => {
+        return !obj.excludeFromExport && !obj.isGrid && !obj.isMeasurement && !obj.isPolygonPreview;
+      });
+      const newLayers: LayerItem[] = objects.map((obj: any, index: number) => ({
+        id: obj.id || `layer-${index}`,
+        name: obj.elementName || obj.name || (obj.isParcel ? "Land Parcel" : obj.type || "Object"),
+        type: obj.type || "unknown",
+        visible: obj.visible ?? true,
+        locked: !obj.selectable,
+      }));
+      setLayers(newLayers.reverse());
+    }, 100);
   }, []);
 
   const pixelsToMeters = useCallback((pixels: number) => pixels / currentScale.pixelsPerMeter, [currentScale]);
@@ -480,18 +531,18 @@ function SitePlanContent() {
 
   // ─── Real-time compliance ──────────────────────────────────────────────────
 
-  const complianceDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const undoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const complianceDebounceRef = useRef<number | null>(null);
+  const undoDebounceRef = useRef<number | null>(null);
   const MAX_UNDO = 50;
 
   const pushUndoState = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    if (undoDebounceRef.current) clearTimeout(undoDebounceRef.current);
-    undoDebounceRef.current = setTimeout(() => {
+    if (undoDebounceRef.current) window.clearTimeout(undoDebounceRef.current);
+    undoDebounceRef.current = window.setTimeout(() => {
       undoDebounceRef.current = null;
       try {
-        const json = JSON.stringify(canvas.toJSON());
+        const json = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
         undoStackRef.current = undoStackRef.current.slice(-(MAX_UNDO - 1));
         undoStackRef.current.push(json);
         redoStackRef.current = [];
@@ -507,7 +558,7 @@ function SitePlanContent() {
     const prev = undoStackRef.current.pop();
     setCanUndo(undoStackRef.current.length > 0);
     if (prev) {
-      redoStackRef.current.push(JSON.stringify(canvas.toJSON()));
+      redoStackRef.current.push(JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS])));
       setCanRedo(true);
       canvas.loadFromJSON(prev, () => {
         canvas.renderAll();
@@ -530,7 +581,7 @@ function SitePlanContent() {
     const next = redoStackRef.current.pop();
     setCanRedo(redoStackRef.current.length > 0);
     if (next) {
-      undoStackRef.current.push(JSON.stringify(canvas.toJSON()));
+      undoStackRef.current.push(JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS])));
       setCanUndo(true);
       canvas.loadFromJSON(next, () => {
         canvas.renderAll();
@@ -551,8 +602,8 @@ function SitePlanContent() {
     if (!currentProjectId) return;
     const canvas = fabricRef.current;
     if (!canvas) return;
-    if (complianceDebounceRef.current) clearTimeout(complianceDebounceRef.current);
-    complianceDebounceRef.current = setTimeout(async () => {
+    if (complianceDebounceRef.current) window.clearTimeout(complianceDebounceRef.current);
+    complianceDebounceRef.current = window.setTimeout(async () => {
       complianceDebounceRef.current = null;
       const ppm = currentScale.pixelsPerMeter;
       const toM = (p: number) => p / ppm;
@@ -580,7 +631,7 @@ function SitePlanContent() {
         const d = await r.json();
         if (d.checks) { setComplianceChecks(d.checks); setShowCompliance(true); }
       } catch { /* ignore */ }
-    }, 800);
+    }, 1500); // 1.5s debounce — compliance is an API call, no need to hammer on every keystroke
   }, [currentProjectId, currentScale.pixelsPerMeter]);
 
   // Red highlight on violating objects (spec 2.8)
@@ -685,6 +736,22 @@ function SitePlanContent() {
     canvas.requestRenderAll();
   }, [buildingDetails, viewMode, currentScale.pixelsPerMeter]);
 
+  // Phase 8: Pencil path:created — tag freehand paths with a name so they pass save validation
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const onPathCreated = (e: any) => {
+      const path = e.path;
+      if (!path) return;
+      if (!(path as any).elementName) (path as any).elementName = "Freehand Drawing";
+      (path as any).isAnnotation = true;
+      updateLayers(canvas);
+      pushUndoState();
+    };
+    canvas.on("path:created", onPathCreated);
+    return () => { canvas.off("path:created", onPathCreated); };
+  }, [updateLayers, pushUndoState]);
+
 
   // ─── Grid ──────────────────────────────────────────────────────────────────
 
@@ -714,12 +781,14 @@ function SitePlanContent() {
 
   useEffect(() => { if (projectIdFromUrl) setCurrentProjectId(projectIdFromUrl); }, [projectIdFromUrl]);
 
-  useEffect(() => {
-    fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
-  }, []);
+  // NOTE: site-plan page does NOT need the full projects list at mount — removed.
+  // Projects are fetched only when the project switcher dropdown is opened.
 
+  // Perf: fetch project data on mount — canvas load waits for canvasReady, runs in parallel
   useEffect(() => {
     if (!currentProjectId) { setProjectData(null); return; }
+    // Fire both requests in parallel — project metadata + site-plan canvas data
+    // Site plan load is gated on canvasReady (separate effect), so we only need project metadata here
     fetch(`/api/projects/${currentProjectId}`)
       .then((r) => r.json())
       .then((d) => {
@@ -906,9 +975,34 @@ function SitePlanContent() {
             try {
               const json = typeof data.sitePlan.canvasData === "string" ? JSON.parse(data.sitePlan.canvasData) : data.sitePlan.canvasData;
               canvas.loadFromJSON(json, () => {
+                // ─── Pass 1: Remove orphaned measurement/overlay objects ─────────────
+                // Objects saved before CANVAS_PROPS was added lost their isMeasurement flag.
+                // Reliable heuristic: selectable=false + evented=false + no elementName
+                // = system-generated marker (dimension line, corner node, label text).
+                // We delete them so they don't pollute the canvas or trigger the naming warning.
+                const toRemove = canvas.getObjects().filter((o: any) => {
+                  if (o.isGrid || o.isPolygonPreview) return false; // keep explicit grid
+                  if (o.selectable === false && o.evented === false) {
+                    const name = String(o.elementName ?? o.name ?? "").trim();
+                    const hasUserMeaning = name || o.surfaceType || o.isParcel || o.isElevationPoint;
+                    if (!hasUserMeaning) return true; // orphaned measurement object → delete
+                  }
+                  return false;
+                });
+                toRemove.forEach((o: any) => canvas.remove(o));
+
+                // ─── Pass 2: Re-apply elementNames + rehydrate tags ──────────────────
                 const savedElements = Array.isArray(data.sitePlan?.elements) ? data.sitePlan.elements : [];
-                const objects = canvas.getObjects().filter((o: any) => !o.isGrid && !o.isMeasurement && !o.isPolygonPreview);
-                savedElements.forEach((el: any, i: number) => { if (objects[i] && el?.name) (objects[i] as any).elementName = el.name; });
+                const userObjects = canvas.getObjects().filter((o: any) => !o.isGrid && !o.isMeasurement && !o.isPolygonPreview);
+                savedElements.forEach((el: any, i: number) => { if (userObjects[i] && el?.name) (userObjects[i] as any).elementName = el.name; });
+                // Rehydrate flags for objects that DID preserve their data fields
+                canvas.getObjects().forEach((o: any) => {
+                  if (o.isMeasurement || o.isGrid) return;
+                  if (o.elevationValue != null) o.isElevationPoint = true;
+                  if (o.vegetationType != null) o.isVegetation = true;
+                  if (o.parentId && !String(o.elementName ?? "").trim()) o.isMeasurement = true;
+                });
+
                 canvas.renderAll();
                 updateLayers(canvas);
                 onLoaded?.();
@@ -962,17 +1056,49 @@ function SitePlanContent() {
     if (!canvas) return false;
     setUnnamedElementsWarning(null);
 
+    // Production-grade overlay/internal-object predicate.
+    // Any object produced by the system (markers, measurements, internal overlays)
+    // is excluded from the "must have a name" requirement.
     const isOverlay = (o: any) =>
-      o.isGrid || o.isMeasurement || o.isPolygonPreview ||
-      o.isBoundaryOverlay || o.isBoundaryDimension || o.isRegulatoryFootprint ||
-      o.isNorthArrow || o.isInteriorLayout || o.isBuildingOpening || o.isBuildingOverhang ||
-      o.isExteriorEnvelope || o.excludeFromExport;
+      o.isGrid ||
+      o.isMeasurement ||
+      o.isPolygonPreview ||
+      o.isBoundaryOverlay ||
+      o.isBoundaryDimension ||
+      o.isRegulatoryFootprint ||
+      o.isNorthArrow ||
+      o.isInteriorLayout ||
+      o.isBuildingOpening ||
+      o.isBuildingOverhang ||
+      o.isExteriorEnvelope ||
+      o.isElevationPoint ||
+      o.isVegetation ||
+      o.isViewpoint ||
+      o.isAnnotation ||
+      o.isVrd ||
+      o.isSectionLine ||
+      o.excludeFromExport === true;
     const drawable = canvas.getObjects().filter((o: any) => !isOverlay(o));
     const ppm = currentScale.pixelsPerMeter;
     const toM = (p: number) => p / ppm;
 
-    const elements = drawable.map((o: any, index: number) => {
-      const name = String(o.elementName ?? o.name ?? "").trim();
+    const elements = drawable.map((o: any) => {
+      // Auto-name fallback: if an object has a known type marker but no name, infer one.
+      const inferredName =
+        o.isParcel ? "Land Parcel" :
+        o.isVrd ? o.vrdType || "VRD" :
+        o.isSectionLine ? "Section line" :
+        o.isAnnotation ? (o.type === "i-text" ? "Text Label" : o.elementName || "Annotation") :
+        o.type === "i-text" ? "Text Label" :
+        o.type === "path" ? "Freehand Drawing" :
+        null;
+      const rawName = String(o.elementName ?? o.name ?? "").trim();
+      const name = rawName || inferredName || "Unnamed";
+      // Backfill the elementName so the layers panel and save both reflect it
+      if (!rawName && inferredName) {
+        o.elementName = inferredName;
+        o.name = inferredName;
+      }
       return {
         type: o.type, name: name || "Unnamed",
         category: o.templateType || o.surfaceType === "building" ? "building" : undefined,
@@ -980,7 +1106,6 @@ function SitePlanContent() {
           constructionType: o.constructionType,
         width: o.width, height: o.height,
         area: o.width != null && o.height != null ? toM(o.width * (o.scaleX || 1)) * toM(o.height * (o.scaleY || 1)) : undefined,
-        _index: index,
       };
     });
 
@@ -992,7 +1117,7 @@ function SitePlanContent() {
     setSaving(true);
     try {
       const elementsToSend = elements.map(({ _index, ...rest }: any) => rest);
-      const canvasData = canvas.toJSON();
+      const canvasData = (canvas as any).toJSON([...CANVAS_PROPS]);
       let projected = 0;
       elementsToSend.forEach((e: any) => { if (e.area && (e.templateType || e.surfaceType === "building")) projected += e.area; });
 
@@ -1181,7 +1306,8 @@ function SitePlanContent() {
 
     const handleMouseMove = (e: fabric.TPointerEventInfo) => {
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
-      setMousePos({ x: pointer.x, y: pointer.y });
+      // NOTE: setMousePos is intentionally NOT here — it lives in a separate
+      // lightweight useEffect below to prevent infinite re-render loops.
 
       if (isDrawing && drawingStart) {
         const distance = calculateDistance(drawingStart.x, drawingStart.y, pointer.x, pointer.y);
@@ -1233,8 +1359,64 @@ function SitePlanContent() {
         return;
       }
 
-      if (activeTool === "select" || activeTool === "pan") return;
-      if (activeTool === "elevation") {
+      if (activeTool === "select" || activeTool === "pan" || activeTool === "pencil") return;
+      if (activeTool === "text") {
+        // Phase 8: IText — editable text, immediately enters edit mode
+        const itext = new fabric.IText("Text", {
+          left: pointer.x,
+          top: pointer.y,
+          fontSize: 16,
+          fill: activeColor,
+          fontFamily: "sans-serif",
+          selectable: true,
+          editable: true,
+        });
+        (itext as any).elementName = "Text Label";
+        (itext as any).isAnnotation = true;
+        canvas.add(itext);
+        canvas.setActiveObject(itext);
+        itext.enterEditing();
+        itext.selectAll();
+        canvas.requestRenderAll();
+        pushUndoState();
+        return;
+      }
+      if (activeTool === "callout") {
+        // Phase 8: Callout bubble
+        const bx = pointer.x - 60, by = pointer.y - 30;
+        const bubble = new fabric.Rect({
+          left: bx, top: by, width: 120, height: 60,
+          rx: 10, ry: 10,
+          fill: "rgba(255,255,255,0.9)", stroke: activeColor, strokeWidth: 1.5,
+          selectable: false,
+        });
+        const itext = new fabric.IText("Note...", {
+          left: bx + 8, top: by + 12,
+          fontSize: 13, fill: "#1e293b", fontFamily: "sans-serif",
+          width: 104, selectable: false,
+        });
+        const group = new fabric.Group([bubble, itext], {
+          left: pointer.x - 60, top: pointer.y - 30,
+          selectable: true,
+        });
+        (group as any).elementName = "Callout";
+        (group as any).isAnnotation = true;
+        canvas.add(group);
+        canvas.setActiveObject(group);
+        canvas.requestRenderAll();
+        pushUndoState();
+        return;
+      }
+
+      // Phase 8: Arrow annotation — handled in mouseUp (needs start+end drag)
+      if (activeTool === "arrow" || activeTool === "elevation") {
+        if (activeTool === "arrow") {
+          // Arrow drawn on mouseUp from drawingStart - handled in mouseUp block
+          setIsDrawing(true);
+          return;
+        }
+
+        // If not arrow, then it must be elevation (due to the outer if condition)
         const raw = window.prompt("Elevation (m), e.g. 0.00 or +1.50 or -0.20:", "0.00");
         if (raw == null) return;
         const value = parseFloat(raw.replace(",", ".")) || 0;
@@ -1463,6 +1645,32 @@ function SitePlanContent() {
           canvas.add(circle);
           addCircleMeasurements(circle, shapeId);
         }
+      } else if (activeTool === "arrow") {
+        // Phase 8: Arrow annotation
+        const dx = pointer.x - drawingStart.x;
+        const dy = pointer.y - drawingStart.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len > 10) {
+          const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+            stroke: activeColor, strokeWidth: Math.max(2, strokeWidth),
+            selectable: false, evented: false,
+          });
+          const headSize = Math.max(12, strokeWidth * 4);
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          const head = new fabric.Triangle({
+            left: pointer.x, top: pointer.y,
+            width: headSize, height: headSize,
+            fill: activeColor, stroke: activeColor,
+            originX: "center", originY: "center",
+            angle: angle + 90,
+            selectable: false, evented: false,
+          });
+          const group = new fabric.Group([line, head], { selectable: true });
+          (group as any).id = shapeId;
+          (group as any).elementName = "Arrow";
+          (group as any).isAnnotation = true;
+          canvas.add(group);
+        }
       }
 
       canvas.renderAll();
@@ -1476,6 +1684,22 @@ function SitePlanContent() {
     canvas.on("mouse:up", handleMouseUp);
     return () => { canvas.off("mouse:move", handleMouseMove); canvas.off("mouse:down", handleMouseDown); canvas.off("mouse:up", handleMouseUp); };
   }, [activeTool, isDrawing, drawingStart, tempShape, activeColor, strokeWidth, activeVrdType, activeSurfaceType, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements, viewMode, placementMode, selectedPreset, updateLayers, pushUndoState]);
+
+  // ─── Mouse position tracking (isolated — runs once, never causes re-register) ────
+  // Kept separate from the drawing useEffect so that setMousePos does NOT
+  // cause the heavy drawing effect to re-run on every mouse move, which was
+  // creating the "Maximum update depth exceeded" cascade.
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const trackPos = (e: fabric.TPointerEventInfo) => {
+      const p = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
+      setMousePos({ x: p.x, y: p.y });
+    };
+    canvas.on("mouse:move", trackPos);
+    return () => { canvas.off("mouse:move", trackPos); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — register once and never re-register
 
   // ─── Polygon completion ────────────────────────────────────────────────────
 
@@ -1573,8 +1797,18 @@ function SitePlanContent() {
     setActiveTool(tool); setPolygonPoints([]); setCurrentMeasurement("");
     const canvas = fabricRef.current;
     if (!canvas) return;
-    canvas.isDrawingMode = false;
-    canvas.selection = tool === "select";
+    if (tool === "pencil") {
+      canvas.isDrawingMode = true;
+      // PencilBrush for freehand
+      const brush = new fabric.PencilBrush(canvas);
+      brush.color = activeColor;
+      brush.width = strokeWidth;
+      canvas.freeDrawingBrush = brush;
+      canvas.selection = false;
+    } else {
+      canvas.isDrawingMode = false;
+      canvas.selection = tool === "select";
+    }
   };
 
   const handleZoom = (delta: number) => {
@@ -2268,13 +2502,38 @@ function SitePlanContent() {
 
   const hasUnnamedElements = (() => {
     const canvas = fabricRef.current;
-    if (!canvas) return true;
+    if (!canvas) return false;
+    // Must be kept in sync with isOverlay in saveSitePlan
     const isOverlay = (o: any) =>
-      o.isGrid || o.isMeasurement || o.isPolygonPreview ||
-      o.isBoundaryOverlay || o.isBoundaryDimension || o.isRegulatoryFootprint ||
-      o.isNorthArrow || o.isInteriorLayout || o.isBuildingOpening || o.isBuildingOverhang ||
-      o.isExteriorEnvelope || o.excludeFromExport;
+      o.isGrid ||
+      o.isMeasurement ||
+      o.isPolygonPreview ||
+      o.isBoundaryOverlay ||
+      o.isBoundaryDimension ||
+      o.isRegulatoryFootprint ||
+      o.isNorthArrow ||
+      o.isInteriorLayout ||
+      o.isBuildingOpening ||
+      o.isBuildingOverhang ||
+      o.isExteriorEnvelope ||
+      o.isElevationPoint ||
+      o.isVegetation ||
+      o.isViewpoint ||
+      o.isAnnotation ||
+      o.isVrd ||
+      o.isSectionLine ||
+      o.excludeFromExport === true;
     return canvas.getObjects().filter((o: any) => !isOverlay(o)).some((o: any) => {
+      // Auto-name fallback (mirrors saveSitePlan logic)
+      const inferred =
+        o.isParcel ? "Land Parcel" :
+        o.type === "i-text" ? "Text Label" :
+        o.type === "path" ? "Freehand Drawing" :
+        null;
+      if (inferred && !String(o.elementName ?? "").trim()) {
+        o.elementName = inferred;
+        o.name = inferred;
+      }
       const name = String(o.elementName ?? o.name ?? "").trim();
       return !name || name === "Unnamed";
     });
@@ -2473,21 +2732,28 @@ function SitePlanContent() {
               <p className="text-[10px] font-semibold text-amber-600/90 uppercase tracking-wider">Free wall drawing</p>
               <p className="text-[10px] text-slate-500 mt-0.5">Line · Rect · Polygon</p>
             </div>
-            <div className="flex flex-col items-center gap-0.5">
-              {tools.map((tool) => {
-                const Icon = tool.icon;
-                const tooltip = (tool as { tooltip?: string }).tooltip || `${tool.label} (${tool.shortcut})`;
-                const isDrawTool = ["line", "rectangle", "polygon", "circle"].includes(tool.id);
-                return (
-                  <button key={tool.id} onClick={() => handleToolSelect(tool.id as Tool)}
-                    className={cn("w-full sm:w-auto min-w-[48px] h-10 rounded-xl flex items-center justify-center gap-2 sm:gap-2 px-2 transition-all",
-                      activeTool === tool.id ? "bg-gradient-to-br from-blue-500 to-purple-500 text-slate-900 shadow-lg shadow-blue-500/25" : "text-slate-400 hover:bg-slate-100 hover:text-slate-900"
-                    )} title={tooltip}>
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className={cn("text-xs font-medium truncate max-w-[88px]", isDrawTool ? "inline" : "hidden sm:inline")}>{tool.label}</span>
-                  </button>
-                );
-              })}
+            <div className="flex flex-col gap-0">
+              {TOOL_GROUPS.map((group) => (
+                <div key={group.label} className="mb-1">
+                  <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-2 py-0.5 hidden sm:block">{group.label}</p>
+                  {tools.filter((t) => group.ids.includes(t.id)).map((tool) => {
+                    const Icon = tool.icon;
+                    const tooltip = (tool as { tooltip?: string }).tooltip || `${tool.label} (${tool.shortcut})`;
+                    return (
+                      <button key={tool.id} onClick={() => handleToolSelect(tool.id as Tool)}
+                        className={cn("w-full h-9 rounded-lg flex items-center justify-center gap-2 px-2 transition-all",
+                          activeTool === tool.id
+                            ? "bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-md"
+                            : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                        )} title={tooltip}>
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="text-[11px] font-medium truncate max-w-[80px] hidden sm:inline">{tool.label}</span>
+                      </button>
+                    );
+                  })}
+                  <div className="h-px bg-slate-100 mx-2 my-0.5" />
+                </div>
+              ))}
             </div>
             <div className="w-8 h-px bg-white/10 my-1 self-center" />
             {templatesList.map((t) => {
@@ -2891,18 +3157,58 @@ function SitePlanContent() {
                           (selectedObject as any).name = e.target.value;
                           fabricRef.current?.requestRenderAll();
                           updateLayers(fabricRef.current!);
+                          forceUpdate((n) => n + 1);
                         }}
                         placeholder="e.g. Main building"
                         className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm" />
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {selectedObject.width != null && (
-                        <div><span className="text-slate-500">Width: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}</span></div>
-                      )}
-                      {selectedObject.height != null && (
-                        <div><span className="text-slate-500">Height: </span><span className="text-amber-600 font-mono">{formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}</span></div>
-                      )}
-                    </div>
+                    {/* Phase 8: Text formatting panel */}
+                    {(selectedObject as any).type === "i-text" || (selectedObject as any).type === "text" ? (
+                      <div className="space-y-2 pt-1 border-t border-slate-100">
+                        <label className="text-xs text-slate-500 block">Text Formatting</label>
+                        {/* Font size */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-500 w-14">Size</span>
+                          <input type="range" min={8} max={72} step={1}
+                            value={(selectedObject as any).fontSize || 16}
+                            onChange={(e) => {
+                              (selectedObject as any).set({ fontSize: Number(e.target.value) });
+                              fabricRef.current?.requestRenderAll();
+                              forceUpdate((n) => n + 1);
+                            }}
+                            className="flex-1 accent-blue-500" />
+                          <span className="text-[10px] font-mono text-slate-700 w-6">{(selectedObject as any).fontSize || 16}</span>
+                        </div>
+                        {/* Bold / Italic / Align */}
+                        <div className="flex gap-1">
+                          <button onClick={() => { (selectedObject as any).set({ fontWeight: (selectedObject as any).fontWeight === "bold" ? "normal" : "bold" }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
+                            className={cn("flex-1 h-7 rounded text-xs font-bold border transition-colors", (selectedObject as any).fontWeight === "bold" ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
+                            <Bold className="w-3 h-3 mx-auto" />
+                          </button>
+                          <button onClick={() => { (selectedObject as any).set({ fontStyle: (selectedObject as any).fontStyle === "italic" ? "normal" : "italic" }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
+                            className={cn("flex-1 h-7 rounded text-xs border transition-colors", (selectedObject as any).fontStyle === "italic" ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
+                            <Italic className="w-3 h-3 mx-auto" />
+                          </button>
+                          {(["left", "center", "right"] as const).map((align, i) => {
+                            const IconC = [AlignLeft, AlignCenter, AlignRight][i];
+                            return (
+                              <button key={align} onClick={() => { (selectedObject as any).set({ textAlign: align }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
+                                className={cn("flex-1 h-7 rounded text-xs border transition-colors", (selectedObject as any).textAlign === align ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
+                                <IconC className="w-3 h-3 mx-auto" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Font family */}
+                        <select value={(selectedObject as any).fontFamily || "sans-serif"}
+                          onChange={(e) => { (selectedObject as any).set({ fontFamily: e.target.value }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
+                          className="w-full text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-700">
+                          {["sans-serif", "serif", "monospace", "Georgia", "Arial Black"].map((f) => (
+                            <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="text-xs text-slate-500">Select an object</p>
