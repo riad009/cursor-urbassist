@@ -98,7 +98,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               <p className="text-[10px] text-slate-500 -mt-1 flex items-center gap-1.5">
                 UrbAssist
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
-                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "30"}
+                  Deploy #{process.env.NEXT_PUBLIC_DEPLOY_COUNT || "31"}
                 </span>
               </p>
             </div>
