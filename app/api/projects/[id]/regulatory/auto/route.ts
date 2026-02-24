@@ -128,11 +128,20 @@ export async function POST(
       );
     }
 
-    const regJson = await regRes.json();
-    const analysis =
+    const regJson = await regRes.json()
+    const deepAnalysis =
       regJson.analysis && typeof regJson.analysis === "object"
-        ? { ...regulations, ...regJson.analysis }
-        : regulations;
+        ? regJson.analysis
+        : {}
+    // Phase 4: merge structured pluRules (precise numbers) into aiAnalysis
+    // pluRules keys exactly match what the compliance engine reads:
+    // maxCoverageRatio, maxHeight, setbacks, greenSpaceRequirements, parkingRequirements
+    const pluRules =
+      regJson.pluRules && typeof regJson.pluRules === "object"
+        ? regJson.pluRules
+        : {}
+    const analysis = { ...regulations, ...deepAnalysis, ...pluRules }
+
 
     const regulatory = await prisma.regulatoryAnalysis.upsert({
       where: { projectId: id },

@@ -195,6 +195,7 @@ function RegulationsPageContent() {
   const [showUploadFallback, setShowUploadFallback] = useState(false);
   const [fallbackFile, setFallbackFile] = useState<File | null>(null);
   const [uploadingFallback, setUploadingFallback] = useState(false);
+  const [pluRules, setPluRules] = useState<Record<string, unknown> | null>(null);
 
   const runAutoRegulatory = async (uploadedContent?: string) => {
     if (!selectedProjectId) return;
@@ -220,9 +221,10 @@ function RegulationsPageContent() {
             data.analysis.article1_occupations_interdites ||
             data.analysis.summary);
         if (hasStructuredAnalysis) {
-          const deepResults = transformDeepAnalysis(data.analysis, data.zoneType);
+          const deepResults = transformDeepAnalysis(data.analysis, data.zoneType, data.pluRules || null);
           setResults(deepResults);
           setAnalysisComplete(true);
+          if (data.pluRules) setPluRules(data.pluRules);
         }
         setAutoMessage({ type: "success", text: `Deep PLU analysis completed (${creditsUsed} credits used). Zone: ${data.zoneType || "detected"}.` });
       } else if (res.status === 402) {
@@ -293,7 +295,11 @@ function RegulationsPageContent() {
   }
 
   /** Transform the deep analysis (sections + items or legacy articles) into AnalysisResult[] */
-  function transformDeepAnalysis(analysis: Record<string, unknown>, zoneType?: string | null): AnalysisResult[] {
+  function transformDeepAnalysis(
+    analysis: Record<string, unknown>,
+    zoneType?: string | null,
+    rules?: Record<string, unknown> | null
+  ): AnalysisResult[] {
     const results: AnalysisResult[] = [];
     const zone = (analysis.zoneClassification as string) || zoneType || "";
 
@@ -369,6 +375,49 @@ function RegulationsPageContent() {
           regulationSource: "Analyse PLU",
           zoneLabel: zone || undefined,
         });
+      }
+      // ── Phase 4: Inject structured pluRules as a dedicated rule engine row ──
+      if (rules && typeof rules === "object") {
+        const r = rules as {
+          maxCoverageRatio?: number | null;
+          maxHeight?: number | null;
+          maxRidgeHeight?: number | null;
+          setbacks?: { front?: number | null; side?: number | null; rear?: number | null };
+          greenSpaceRequirements?: string | null;
+          parkingRequirements?: string | null;
+          roofSlopes?: string | null;
+          allowedRoofMaterials?: string[];
+          forbiddenFacadeMaterials?: string[];
+          maxFenceHeight?: number | null;
+          architectRequired?: boolean;
+          notes?: string;
+        };
+        const ruleLines: string[] = [];
+        if (r.maxCoverageRatio != null) ruleLines.push(`CES max: ${Math.round(r.maxCoverageRatio * 100)}%`);
+        if (r.maxHeight != null) ruleLines.push(`Hauteur façade max: ${r.maxHeight}m`);
+        if (r.maxRidgeHeight != null) ruleLines.push(`Hauteur faîtage max: ${r.maxRidgeHeight}m`);
+        if (r.setbacks?.front != null) ruleLines.push(`Recul voie: ${r.setbacks.front}m`);
+        if (r.setbacks?.side != null) ruleLines.push(`Recul latéral: ${r.setbacks.side}m`);
+        if (r.setbacks?.rear != null) ruleLines.push(`Recul fond: ${r.setbacks.rear}m`);
+        if (r.greenSpaceRequirements) ruleLines.push(`Espaces verts min: ${r.greenSpaceRequirements}`);
+        if (r.parkingRequirements) ruleLines.push(`Stationnement: ${r.parkingRequirements}`);
+        if (r.roofSlopes) ruleLines.push(`Pente toiture: ${r.roofSlopes}`);
+        if (r.allowedRoofMaterials?.length) ruleLines.push(`Matériaux toiture: ${r.allowedRoofMaterials.join(", ")}`);
+        if (r.maxFenceHeight != null) ruleLines.push(`Hauteur clôture max: ${r.maxFenceHeight}m`);
+        if (r.architectRequired) ruleLines.push(`⚠ ABF approval required`);
+        if (ruleLines.length > 0) {
+          results.unshift({
+            category: "Zone",
+            title: "PLU Rule Engine — Règles extraites",
+            status: r.architectRequired ? "warning" : "info",
+            value: `${ruleLines.length} règles extraites`,
+            requirement: ruleLines.join(" | "),
+            regulationSource: "Extraction IA Phase 4 — valeurs numériques",
+            zoneLabel: zone || undefined,
+            fullRequirementText: ruleLines.join("\n"),
+            context: r.notes || undefined,
+          });
+        }
       }
       if (results.length > 0) return results;
     }
@@ -570,98 +619,106 @@ function RegulationsPageContent() {
       const data = await response.json();
       
       if (data.success && data.analysis) {
+        // Phase 4: prefer pluRules for numerical values
+        const pr = data.pluRules as Record<string, unknown> | undefined;
+        if (pr) setPluRules(pr);
+
         const zoneLabel = data.analysis.zoneClassification || undefined;
         const regulationSource = "Extracted from uploaded PLU document";
         const transformedResults: AnalysisResult[] = [];
 
-        if (data.analysis.maxHeight) {
-          const m = data.analysis.maxHeight;
+        // -- Use pluRules for precise numbers (Phase 4) --
+        const maxH = pr?.maxHeight as number | undefined;
+        const ces = pr?.maxCoverageRatio as number | undefined;
+        const setbacksNum = pr?.setbacks as { front?: number; side?: number; rear?: number } | undefined;
+
+        if (maxH != null) {
           transformedResults.push({
             category: "Height",
             title: "Maximum Building Height",
             status: "compliant",
-            value: `${m}m`,
-            requirement: `Max ${m}m allowed in zone ${zoneLabel || "N/A"}`,
-            recommendation: "Within the allowed height limit. Height is measured from natural ground to the highest point of the roof.",
+            value: `${maxH}m`,
+            requirement: `Max ${maxH}m allowed in zone ${zoneLabel || "N/A"}`,
+            recommendation: pr?.maxRidgeHeight ? `Ridge (faîtage): ${pr.maxRidgeHeight}m` : "Height measured from natural ground to eave.",
             regulationSource,
             zoneLabel,
-            maxValue: `${m}m`,
+            maxValue: `${maxH}m`,
             unit: "m",
           });
         }
-
-        if (data.analysis.setbacks) {
-          const front = data.analysis.setbacks.front;
+        if (setbacksNum?.front != null) {
           transformedResults.push({
             category: "Setback",
-            title: "Front Setback",
+            title: "Setbacks (reculs)",
             status: "compliant",
-            value: `${front}m`,
-            requirement: `Min ${front}m required from road`,
-            recommendation: "Compliant with local regulations. The front setback is measured from the road boundary to the façade.",
+            value: `F:${setbacksNum.front}m S:${setbacksNum.side ?? "??"}m R:${setbacksNum.rear ?? "??"}m`,
+            requirement: `Front ${setbacksNum.front}m / Side ${setbacksNum.side ?? "???"}m / Rear ${setbacksNum.rear ?? "????"}m`,
+            recommendation: "Distances from plot boundaries. Verify with PLU for exact measurement rules.",
             regulationSource,
             zoneLabel,
-            minValue: `${front}m`,
+            minValue: `${setbacksNum.front}m`,
             unit: "m",
           });
         }
-
-        if (data.analysis.maxCoverageRatio) {
-          const ratio = data.analysis.maxCoverageRatio * 100;
+        if (ces != null) {
+          const ratio = Math.round(ces * 100);
           transformedResults.push({
             category: "Coverage",
-            title: "Plot Coverage Ratio",
+            title: "Plot Coverage Ratio (CES)",
             status: ratio > 45 ? "warning" : "compliant",
             value: `${ratio}%`,
             requirement: `Max ${ratio}% allowed`,
-            recommendation: data.analysis.recommendations?.[0] || "The ratio is footprint (emprise au sol) divided by parcel area.",
+            recommendation: "The ratio is footprint (emprise au sol) divided by parcel area.",
             regulationSource,
             zoneLabel,
             maxValue: `${ratio}%`,
             unit: "%",
           });
         }
-
-        if (data.analysis.parkingRequirements) {
+        if (pr?.parkingRequirements) {
           transformedResults.push({
             category: "Parking",
-            title: "Parking Spaces",
+            title: "Parking Requirements",
             status: "info",
-            value: data.analysis.parkingRequirements,
-            requirement: data.analysis.parkingRequirements,
-            recommendation: "Verify that the number of spaces matches your floor area. Each space at least 2.50 m × 5.00 m.",
+            value: pr.parkingRequirements as string,
+            requirement: pr.parkingRequirements as string,
+            recommendation: "Each space at least 2.50 m × 5.00 m.",
             regulationSource,
             zoneLabel,
           });
         }
-
-        if (data.analysis.greenSpaceRequirements) {
+        if (pr?.greenSpaceRequirements) {
           transformedResults.push({
             category: "Green Space",
-            title: "Vegetated Area",
+            title: "Espaces verts (green space)",
             status: "info",
-            value: data.analysis.greenSpaceRequirements,
-            requirement: data.analysis.greenSpaceRequirements,
-            recommendation: "Plan landscaping accordingly. Semi-permeable and vegetated surfaces count toward the minimum.",
-            regulationSource,
+            value: pr.greenSpaceRequirements as string,
+            requirement: `Minimum ${pr.greenSpaceRequirements} permeable/vegetated surface`,
+            recommendation: "Semi-permeable surfaces count toward this minimum.",
+        regulationSource,
             zoneLabel,
           });
         }
-
-        if (data.analysis.architecturalConstraints?.length > 0) {
+        if (pr?.roofSlopes || (pr?.allowedRoofMaterials as string[])?.length) {
+          const roofParts: string[] = []
+          if (pr?.roofSlopes) roofParts.push(`Slope: ${pr.roofSlopes}`)
+          const allowedMats = (pr?.allowedRoofMaterials ?? []) as string[]
+          const forbiddenMats = (pr?.forbiddenFacadeMaterials ?? []) as string[]
+          if (allowedMats.length) roofParts.push(`Materials: ${allowedMats.join(", ")}`)
+          if (forbiddenMats.length) roofParts.push(`Forbidden: ${forbiddenMats.join(", ")}`)
           transformedResults.push({
             category: "Distance",
-            title: "Architectural Requirements",
+            title: "Architectural / roofing rules",
             status: "info",
-            value: `${data.analysis.architecturalConstraints.length} constraints`,
-            requirement: data.analysis.architecturalConstraints.join(", "),
-            recommendation: "Review all architectural constraints before finalising façades and roof design.",
+            value: roofParts[0] || "See details",
+            requirement: roofParts.join(" | "),
             regulationSource,
             zoneLabel,
           });
         }
-
-        setResults(transformedResults.length > 0 ? transformedResults : mockAnalysis);
+        // Also run transformDeepAnalysis for qualitative sections
+        const qualitativeResults = transformDeepAnalysis(data.analysis, zoneLabel, pr || null);
+        setResults(transformedResults.length > 0 ? transformedResults : (qualitativeResults.length > 0 ? qualitativeResults : mockAnalysis));
       } else {
         // Fallback to mock data if API fails
         setResults(mockAnalysis);

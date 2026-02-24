@@ -24,6 +24,11 @@ export interface ProjectPreset {
   surfaceType: "building" | "green" | "concrete" | "gravel";
   /** Category for footprint/compliance */
   category: "building" | "pool" | "terrace" | "parking" | "other";
+  /**
+   * Phase 5: links preset to the per-type regulatory rule engine.
+   * Used by compliance API to apply type-specific setbacks/height/CES rules.
+   */
+  constructionType?: "main_house" | "extension" | "shed" | "carport" | "pool" | "annex";
 }
 
 export const PROJECT_PRESETS: ProjectPreset[] = [
@@ -117,6 +122,50 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     roof: { type: "flat", pitch: 0, overhang: 0 },
     surfaceType: "concrete",
     category: "terrace",
+    constructionType: "main_house",
+  },
+  // ─── Phase 5: New types ───────────────────────────────────────────────────
+  {
+    id: "shed-small",
+    label: "Garden shed",
+    shortLabel: "Shed",
+    description: "Abri de jardin (e.g. 3×2 m). Side/rear: on boundary OK.",
+    icon: "🏚️",
+    width: 3,
+    depth: 2,
+    wallHeights: { ground: 2.2, first: 0, second: 0 },
+    roof: { type: "shed", pitch: 10, overhang: 0.2 },
+    surfaceType: "building",
+    category: "building",
+    constructionType: "shed",
+  },
+  {
+    id: "carport",
+    label: "Carport",
+    shortLabel: "Carport",
+    description: "Open carport / auvent (e.g. 5×3 m). Can be on boundary.",
+    icon: "🅿️",
+    width: 5,
+    depth: 3,
+    wallHeights: { ground: 2.5, first: 0, second: 0 },
+    roof: { type: "shed", pitch: 5, overhang: 0.3 },
+    surfaceType: "building",
+    category: "building",
+    constructionType: "carport",
+  },
+  {
+    id: "annex",
+    label: "Annex",
+    shortLabel: "Annex",
+    description: "Annexe détachée (e.g. 4×3 m). Side/rear: on boundary OK.",
+    icon: "🏗️",
+    width: 4,
+    depth: 3,
+    wallHeights: { ground: 2.5, first: 0, second: 0 },
+    roof: { type: "gable", pitch: 30, overhang: 0.3 },
+    surfaceType: "building",
+    category: "building",
+    constructionType: "annex",
   },
   {
     id: "green",

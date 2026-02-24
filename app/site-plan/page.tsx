@@ -551,6 +551,8 @@ function SitePlanContent() {
           type: o.type,
           category: o.templateType || o.surfaceType === "building" ? "building" : undefined,
           templateType: o.templateType, surfaceType: o.surfaceType, vrdType: o.vrdType,
+          // Phase 5: pass constructionType so compliance engine can apply per-type rules
+          constructionType: o.constructionType,
           left: o.left, top: o.top,
           width: o.width != null ? o.width * (o.scaleX || 1) : undefined,
           height: o.height != null ? o.height * (o.scaleY || 1) : undefined,
@@ -934,6 +936,7 @@ function SitePlanContent() {
         type: o.type, name: name || "Unnamed",
         category: o.templateType || o.surfaceType === "building" ? "building" : undefined,
         templateType: o.templateType, surfaceType: o.surfaceType, vrdType: o.vrdType,
+          constructionType: o.constructionType,
         width: o.width, height: o.height,
         area: o.width != null && o.height != null ? toM(o.width * (o.scaleX || 1)) * toM(o.height * (o.scaleY || 1)) : undefined,
         _index: index,

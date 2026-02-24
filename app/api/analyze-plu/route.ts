@@ -3,6 +3,38 @@ import { NextRequest, NextResponse } from "next/server"
 // Deep PLU analysis using Gemini — structured compliance analysis per project
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
+// ─── Structured machine-readable rule schema (Phase 4) ──────────────────────
+export interface PluRules {
+  /** CES: max coverage ratio as decimal (e.g. 0.4 for 40%) */
+  maxCoverageRatio: number | null
+  /** Max height at eave / facade in metres */
+  maxHeight: number | null
+  /** Max height at ridge in metres */
+  maxRidgeHeight: number | null
+  /** Required setbacks in metres */
+  setbacks: {
+    front: number | null
+    side: number | null
+    rear: number | null
+  }
+  /** Minimum green/permeable surface e.g. "20%" */
+  greenSpaceRequirements: string | null
+  /** Parking requirement description e.g. "1 place per 60m²" */
+  parkingRequirements: string | null
+  /** Roof slope range e.g. "30 à 45 degrés" */
+  roofSlopes: string | null
+  /** Explicitly allowed roof materials */
+  allowedRoofMaterials: string[]
+  /** Explicitly forbidden facade materials */
+  forbiddenFacadeMaterials: string[]
+  /** Max fence height in metres */
+  maxFenceHeight: number | null
+  /** ABF / architect-des-Batiments sign-off required */
+  architectRequired: boolean
+  /** Any important qualitative note */
+  notes: string
+}
+
 interface AnalysisRequest {
   documentContent: string
   parcelAddress?: string
@@ -62,45 +94,68 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         analysis: generateFallbackAnalysis(body),
+        pluRules: generateFallbackPluRules(),
         source: "fallback",
       })
     }
 
-    const prompt = buildInDepthAnalysisPrompt(body)
+    const qualitativePrompt = buildInDepthAnalysisPrompt(body)
+    const extractionPrompt = buildRuleExtractionPrompt(body)
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 16384,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    )
+    // Run both Gemini calls in parallel for performance
+    const [qualResponse, extractResponse] = await Promise.allSettled([
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: qualitativePrompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 16384,
+              responseMimeType: "application/json",
+            },
+          }),
+        }
+      ),
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: extractionPrompt }] }],
+            generationConfig: {
+              temperature: 0.0,
+              maxOutputTokens: 2048,
+              responseMimeType: "application/json",
+            },
+          }),
+        }
+      ),
+    ])
 
-    if (!response.ok) {
-      const errorData = await response.text()
-      console.error("Gemini API error:", response.status, errorData)
-      return NextResponse.json({
-        success: true,
-        analysis: generateFallbackAnalysis(body),
-        source: "fallback",
-      })
+    // Parse qualitative analysis
+    let analysis: DeepPluAnalysis & Record<string, unknown> = generateFallbackAnalysis(body)
+    if (qualResponse.status === "fulfilled" && qualResponse.value.ok) {
+      const data = await qualResponse.value.json()
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      if (rawText) analysis = parseGeminiResponse(rawText)
     }
 
-    const data = await response.json()
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-    const analysis = parseGeminiResponse(rawText)
+    // Parse structured rule extraction
+    let pluRules: PluRules = generateFallbackPluRules()
+    if (extractResponse.status === "fulfilled" && extractResponse.value.ok) {
+      const data = await extractResponse.value.json()
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      if (rawText) pluRules = parsePluRules(rawText)
+    }
 
     return NextResponse.json({
       success: true,
       analysis,
+      pluRules,
       source: "gemini",
     })
   } catch (error) {
@@ -299,5 +354,111 @@ function generateFallbackAnalysis(body: AnalysisRequest): DeepPluAnalysis {
     },
     zoneClassification: zone,
     zoneDescription: "Résultats par défaut — document PLU requis pour une analyse complète.",
+  }
+}
+
+// ─── Phase 4: Structured Rule Extraction ─────────────────────────────────────
+
+/**
+ * Builds a strictly numerical extraction prompt.
+ * Temperature 0.0 + responseMimeType application/json → deterministic output.
+ */
+function buildRuleExtractionPrompt(body: AnalysisRequest): string {
+  const address = body.parcelAddress || "non précisée"
+  const zone = body.zoneType || "non spécifiée"
+  const docContent = body.documentContent.slice(0, 80000)
+
+  return `You are an expert French urban planning rule parser. Extract ONLY precise, machine-readable numerical and categorical values from the PLU regulation document below.
+
+Project context:
+- Address: ${address}
+- PLU zone: ${zone}
+
+Output a SINGLE JSON object with EXACTLY this structure. Use null for any value not found in the document. All distances in metres, ratios as decimals (e.g. 0.4 for 40%).
+
+{
+  "maxCoverageRatio": <number|null>,
+  "maxHeight": <number|null>,
+  "maxRidgeHeight": <number|null>,
+  "setbacks": {
+    "front": <number|null>,
+    "side": <number|null>,
+    "rear": <number|null>
+  },
+  "greenSpaceRequirements": <"X%" string|null>,
+  "parkingRequirements": <"N place par Xm²" string|null>,
+  "roofSlopes": <"X à Y degrés" string|null>,
+  "allowedRoofMaterials": [<string>, ...],
+  "forbiddenFacadeMaterials": [<string>, ...],
+  "maxFenceHeight": <number|null>,
+  "architectRequired": <boolean>,
+  "notes": "<any critical qualitative constraint in one sentence>"
+}
+
+Rules:
+- maxCoverageRatio: CES (coefficient d'emprise au sol) as decimal. E.g. if PLU says "40%" → 0.4
+- maxHeight: height at eave/façade/égout in metres. NOT ridge height.
+- maxRidgeHeight: height at faîtage/ridge in metres.
+- setbacks.front: recul voie publique in metres (minimum)
+- setbacks.side: recul limites séparatives latérales in metres
+- setbacks.rear: recul limite fond de parcelle in metres
+- greenSpaceRequirements: minimum permeable/green surface as percentage string e.g. "20%"
+- parkingRequirements: parking rule as string e.g. "1 place par logement" or "1 place par 60m² SHON"
+- architectRequired: true ONLY if the zone explicitly requires ABF (Architecte des Bâtiments de France) approval
+- Do NOT include commentary, markdown, or any text outside the JSON object.
+
+PLU document:
+${docContent}`
+}
+
+/**
+ * Parse the structured extraction response — strict JSON only.
+ */
+function parsePluRules(text: string): PluRules {
+  const fallback = generateFallbackPluRules()
+  try {
+    const cleaned = text.replace(/```(?:json)?\s*/gi, "").replace(/```\s*/g, "").trim()
+    const start = cleaned.indexOf("{")
+    const end = cleaned.lastIndexOf("}")
+    if (start < 0 || end < 0) return fallback
+    const parsed = JSON.parse(cleaned.slice(start, end + 1)) as Partial<PluRules>
+
+    return {
+      maxCoverageRatio: typeof parsed.maxCoverageRatio === "number" ? parsed.maxCoverageRatio : null,
+      maxHeight: typeof parsed.maxHeight === "number" ? parsed.maxHeight : null,
+      maxRidgeHeight: typeof parsed.maxRidgeHeight === "number" ? parsed.maxRidgeHeight : null,
+      setbacks: {
+        front: parsed.setbacks?.front ?? null,
+        side: parsed.setbacks?.side ?? null,
+        rear: parsed.setbacks?.rear ?? null,
+      },
+      greenSpaceRequirements: parsed.greenSpaceRequirements ?? null,
+      parkingRequirements: parsed.parkingRequirements ?? null,
+      roofSlopes: parsed.roofSlopes ?? null,
+      allowedRoofMaterials: Array.isArray(parsed.allowedRoofMaterials) ? parsed.allowedRoofMaterials : [],
+      forbiddenFacadeMaterials: Array.isArray(parsed.forbiddenFacadeMaterials) ? parsed.forbiddenFacadeMaterials : [],
+      maxFenceHeight: typeof parsed.maxFenceHeight === "number" ? parsed.maxFenceHeight : null,
+      architectRequired: parsed.architectRequired === true,
+      notes: typeof parsed.notes === "string" ? parsed.notes : "",
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function generateFallbackPluRules(): PluRules {
+  return {
+    maxCoverageRatio: null,
+    maxHeight: null,
+    maxRidgeHeight: null,
+    setbacks: { front: null, side: null, rear: null },
+    greenSpaceRequirements: null,
+    parkingRequirements: null,
+    roofSlopes: null,
+    allowedRoofMaterials: [],
+    forbiddenFacadeMaterials: [],
+    maxFenceHeight: null,
+    architectRequired: false,
+    notes: "",
   }
 }

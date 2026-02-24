@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  CONSTRUCTION_TYPE_RULES,
+  PRESET_TO_CONSTRUCTION_TYPE,
+  resolveSetback,
+  resolveMaxHeight,
+  type ConstructionType,
+} from "@/lib/constructionTypes";
 
 // Real-time compliance checking API - Section 3.2 of specifications
-// Checks drawn elements against PLU regulations
+// Checks drawn elements against PLU regulations — Phase 5: per-construction-type rules
 
 interface ComplianceCheck {
   rule: string;
@@ -49,11 +56,10 @@ export async function POST(request: NextRequest) {
     const parcelArea = project.parcelArea || 500;
     const maxCoverageRatio = (rules.maxCoverageRatio as number) ?? 0.5;
     const maxCoverage = maxCoverageRatio * 100;
-    const maxFootprintM2 = parcelArea * maxCoverageRatio; // CES × parcel area
 
-    const maxHeight = (rules.maxHeight as number) || 10;
+    const pluMaxHeight = (rules.maxHeight as number) || 10;
     const minGreenPct = parseGreenPct(rules.greenSpaceRequirements as string | undefined) ?? 20;
-    const setbacks = (rules.setbacks as {
+    const pluSetbacks = (rules.setbacks as {
       front?: number;
       side?: number;
       rear?: number;
@@ -76,19 +82,56 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Calculate total built area
-    const buildings = elements.filter(
-      (e: { category?: string; type?: string }) =>
-        e.category === "building" || e.type === "rect" || e.type === "polygon"
+    // ── Phase 5: helper to resolve constructionType from element ──────────────
+    type ElementIn = {
+      type?: string;
+      category?: string;
+      templateType?: string;
+      constructionType?: string;
+      surfaceType?: string;
+      area?: number;
+      width?: number;
+      height?: number;
+      height3d?: number;
+      left?: number;
+      top?: number;
+      name?: string;
+    };
+
+    function getConstructionType(el: ElementIn): ConstructionType {
+      // Direct assignment wins (placed via GuidedCreation with constructionType set)
+      if (el.constructionType && el.constructionType in CONSTRUCTION_TYPE_RULES) {
+        return el.constructionType as ConstructionType;
+      }
+      // Fall back to preset lookup
+      const presetId = el.templateType;
+      if (presetId && presetId in PRESET_TO_CONSTRUCTION_TYPE) {
+        return PRESET_TO_CONSTRUCTION_TYPE[presetId];
+      }
+      // Pool surfaceType override
+      if (el.category === "pool" || el.templateType === "pool") return "pool";
+      return "main_house";
+    }
+
+    // ── Separate buildings from pools (different CES rules) ──────────────────
+    const allBuildingEls = (elements as ElementIn[]).filter(
+      (e) => e.category === "building" || e.type === "rect" || e.type === "polygon"
     );
-    const totalBuiltArea = buildings.reduce(
-      (sum: number, b: { area?: number; width?: number; height?: number }) =>
-        sum + (b.area || (b.width || 0) * (b.height || 0)),
+
+    // Pools excluded from CES per type rule
+    const cesBuildings = allBuildingEls.filter((e) => {
+      const ct = getConstructionType(e);
+      return CONSTRUCTION_TYPE_RULES[ct].countInCES;
+    });
+
+    const maxFootprintM2 = parcelArea * maxCoverageRatio;
+    const totalBuiltArea = cesBuildings.reduce(
+      (sum, b) => sum + (b.area || (b.width || 0) * (b.height || 0)),
       0
     );
     const coverageRatio = (totalBuiltArea / parcelArea) * 100;
 
-    // 1. Coverage check (max footprint = CES × parcel area from PLU)
+    // 1. Coverage check (CES) — pools excluded
     checks.push({
       rule: "Coverage Ratio (CES)",
       status:
@@ -99,134 +142,148 @@ export async function POST(request: NextRequest) {
             : "compliant",
       message:
         coverageRatio > maxCoverage
-          ? `Coverage ${coverageRatio.toFixed(1)}% exceeds maximum ${maxCoverage}% (max footprint ${maxFootprintM2.toFixed(0)}m²)`
+          ? `Coverage ${coverageRatio.toFixed(1)}% exceeds maximum ${maxCoverage}% (max ${maxFootprintM2.toFixed(0)}m²)`
           : `Coverage ${coverageRatio.toFixed(1)}% within limit of ${maxCoverage}%`,
-      details: `Built: ${totalBuiltArea.toFixed(1)}m² / Max: ${maxFootprintM2.toFixed(0)}m² (parcel ${parcelArea}m² × CES ${maxCoverageRatio})`,
+      details: `Built area (excl. pools): ${totalBuiltArea.toFixed(1)}m² / Max: ${maxFootprintM2.toFixed(0)}m² (parcel ${parcelArea}m² × CES ${maxCoverageRatio})`,
       suggestion:
         totalBuiltArea > maxFootprintM2
           ? `Reduce built area by ${(totalBuiltArea - maxFootprintM2).toFixed(1)}m²`
           : undefined,
     });
 
-    // 2. Height checks
-    for (const building of buildings) {
-      const bHeight = (building as { height3d?: number }).height3d || 0;
-      if (bHeight > 0) {
+    // 2. Height checks — per-type max height
+    for (const building of allBuildingEls) {
+      const bHeight3d = building.height3d || 0;
+      if (bHeight3d > 0) {
+        const ct = getConstructionType(building);
+        const effectiveMaxHeight = resolveMaxHeight(ct, pluMaxHeight);
+        const typeRule = CONSTRUCTION_TYPE_RULES[ct];
         checks.push({
-          rule: "Maximum Height",
+          rule: `Maximum Height — ${typeRule.label}`,
           status:
-            bHeight > maxHeight
+            bHeight3d > effectiveMaxHeight
               ? "violation"
-              : bHeight > maxHeight * 0.9
+              : bHeight3d > effectiveMaxHeight * 0.9
                 ? "warning"
                 : "compliant",
           message:
-            bHeight > maxHeight
-              ? `Height ${bHeight}m exceeds maximum ${maxHeight}m`
-              : `Height ${bHeight}m within limit of ${maxHeight}m`,
-          details: `Element "${(building as { name?: string }).name || "Building"}" height: ${bHeight}m / Max: ${maxHeight}m`,
+            bHeight3d > effectiveMaxHeight
+              ? `Height ${bHeight3d}m exceeds ${typeRule.label} max of ${effectiveMaxHeight}m`
+              : `Height ${bHeight3d}m within ${typeRule.label} limit of ${effectiveMaxHeight}m`,
+          details: `"${building.name || typeRule.label}" height: ${bHeight3d}m / Type max: ${effectiveMaxHeight}m${typeRule.maxHeight !== null ? ` (type rule)` : ` (PLU zone)`}`,
           suggestion:
-            bHeight > maxHeight
-              ? `Reduce height by ${(bHeight - maxHeight).toFixed(1)}m`
+            bHeight3d > effectiveMaxHeight
+              ? `Reduce height by ${(bHeight3d - effectiveMaxHeight).toFixed(1)}m`
               : undefined,
         });
       }
     }
 
-    // 3. Setback checks with height-dependent rules (e.g. side setback = max(fixed, H/2))
+    // 3. Setback checks — per-type overrides (shed/carport/annex → 0m side/rear OK)
     if (parcelBounds) {
-      for (const building of buildings) {
-        const b = building as {
-          left?: number;
-          top?: number;
-          width?: number;
-          height?: number;
-          name?: string;
-          height3d?: number;
-        };
+      for (const building of allBuildingEls) {
+        const b = building;
+        const ct = getConstructionType(b);
+        const typeRule = CONSTRUCTION_TYPE_RULES[ct];
+
         const bLeft = b.left || 0;
         const bTop = b.top || 0;
         const bWidth = b.width || 0;
         const bHeight = b.height || 0;
         const buildingHeightM = b.height3d || 0;
-        const requiredSide = Math.max(
-          setbacks.side ?? 3,
-          buildingHeightM > 0 ? buildingHeightM / 2 : 0
-        );
-        const requiredRear = Math.max(
-          setbacks.rear ?? 4,
-          buildingHeightM > 0 ? buildingHeightM * 0.25 : 0
-        );
 
-        const distFront =
-          parcelBounds.front !== undefined
-            ? Math.abs(bTop - parcelBounds.front)
-            : null;
-        const distLeft =
-          parcelBounds.left !== undefined
-            ? Math.abs(bLeft - parcelBounds.left)
-            : null;
-        const distRight =
-          parcelBounds.right !== undefined
-            ? Math.abs(bLeft + bWidth - parcelBounds.right)
-            : null;
-        const distRear =
-          parcelBounds.rear !== undefined
-            ? Math.abs(bTop + bHeight - parcelBounds.rear)
-            : null;
+        // Resolve effective setbacks via type rule (overrides PLU zone value)
+        const frontSetback = resolveSetback("front", ct, pluSetbacks.front ?? 5);
+        const rawSide = resolveSetback("side", ct, pluSetbacks.side ?? 3);
+        const rawRear = resolveSetback("rear", ct, pluSetbacks.rear ?? 4);
 
-        if (distFront !== null && distFront < (setbacks.front ?? 5)) {
-          const required = setbacks.front ?? 5;
+        // Height-dependent adjustment (only for types that use PLU setback)
+        const requiredSide = typeRule.setbacks.side !== null
+          ? rawSide // type override: use exactly
+          : Math.max(rawSide, buildingHeightM > 0 ? buildingHeightM / 2 : 0);
+        const requiredRear = typeRule.setbacks.rear !== null
+          ? rawRear
+          : Math.max(rawRear, buildingHeightM > 0 ? buildingHeightM * 0.25 : 0);
+
+        const distFront = parcelBounds.front !== undefined ? Math.abs(bTop - parcelBounds.front) : null;
+        const distLeft = parcelBounds.left !== undefined ? Math.abs(bLeft - parcelBounds.left) : null;
+        const distRight = parcelBounds.right !== undefined ? Math.abs(bLeft + bWidth - parcelBounds.right) : null;
+        const distRear = parcelBounds.rear !== undefined ? Math.abs(bTop + bHeight - parcelBounds.rear) : null;
+
+        const typeSuffix = typeRule.label !== "Main house" ? ` (${typeRule.label})` : "";
+
+        if (distFront !== null && distFront < frontSetback) {
           checks.push({
-            rule: "Front Setback",
+            rule: `Front Setback${typeSuffix}`,
             status: "violation",
-            message: `Current distance: ${distFront.toFixed(1)} m. Minimum required (${zoneLabel}): ${required} m`,
-            details: `"${b.name || "Building"}" is ${distFront.toFixed(1)} m from front boundary. Minimum: ${required} m (zone ${zoneLabel})`,
-            suggestion: `Move building ${(required - distFront).toFixed(1)} m back from front boundary`,
+            message: `Distance: ${distFront.toFixed(1)}m — minimum ${frontSetback}m required`,
+            details: `"${b.name || typeRule.label}" is ${distFront.toFixed(1)}m from front boundary. Min: ${frontSetback}m (zone ${zoneLabel})`,
+            suggestion: `Move ${(frontSetback - distFront).toFixed(1)}m back from front boundary`,
           });
         }
 
-        if (distLeft !== null && distLeft < requiredSide) {
+        if (distLeft !== null && requiredSide > 0 && distLeft < requiredSide) {
           checks.push({
-            rule: "Side Setback (Left)",
+            rule: `Side Setback Left${typeSuffix}`,
             status: "violation",
-            message: `Current distance: ${distLeft.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredSide.toFixed(1)} m`,
-            details: `"${b.name || "Building"}" is ${distLeft.toFixed(1)} m from left boundary. Minimum: ${requiredSide.toFixed(1)} m (zone ${zoneLabel})`,
-            suggestion: `Move building ${(requiredSide - distLeft).toFixed(1)} m from left boundary`,
+            message: `Distance: ${distLeft.toFixed(1)}m — minimum ${requiredSide.toFixed(1)}m required`,
+            details: `"${b.name || typeRule.label}" is ${distLeft.toFixed(1)}m from left boundary. Min: ${requiredSide.toFixed(1)}m`,
+            suggestion: `Move ${(requiredSide - distLeft).toFixed(1)}m from left boundary`,
+          });
+        } else if (distLeft !== null && requiredSide === 0 && distLeft >= 0) {
+          // Type allows boundary — show as info/compliant, no push needed
+        }
+
+        if (distRight !== null && requiredSide > 0 && distRight < requiredSide) {
+          checks.push({
+            rule: `Side Setback Right${typeSuffix}`,
+            status: "violation",
+            message: `Distance: ${distRight.toFixed(1)}m — minimum ${requiredSide.toFixed(1)}m required`,
+            details: `"${b.name || typeRule.label}" is ${distRight.toFixed(1)}m from right boundary. Min: ${requiredSide.toFixed(1)}m`,
+            suggestion: `Move ${(requiredSide - distRight).toFixed(1)}m from right boundary`,
           });
         }
 
-        if (distRight !== null && distRight < requiredSide) {
+        if (distRear !== null && requiredRear > 0 && distRear < requiredRear) {
           checks.push({
-            rule: "Side Setback (Right)",
+            rule: `Rear Setback${typeSuffix}`,
             status: "violation",
-            message: `Current distance: ${distRight.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredSide.toFixed(1)} m`,
-            details: `"${b.name || "Building"}" is ${distRight.toFixed(1)} m from right boundary. Minimum: ${requiredSide.toFixed(1)} m (zone ${zoneLabel})`,
-            suggestion: `Move building ${(requiredSide - distRight).toFixed(1)} m from right boundary`,
-          });
-        }
-
-        if (distRear !== null && distRear < requiredRear) {
-          checks.push({
-            rule: "Rear Setback",
-            status: "violation",
-            message: `Current distance: ${distRear.toFixed(1)} m. Minimum required (${zoneLabel}): ${requiredRear.toFixed(1)} m`,
-            details: `"${b.name || "Building"}" is ${distRear.toFixed(1)} m from rear boundary. Minimum: ${requiredRear.toFixed(1)} m (zone ${zoneLabel})`,
-            suggestion: `Move building ${(requiredRear - distRear).toFixed(1)} m from rear boundary`,
+            message: `Distance: ${distRear.toFixed(1)}m — minimum ${requiredRear.toFixed(1)}m required`,
+            details: `"${b.name || typeRule.label}" is ${distRear.toFixed(1)}m from rear boundary. Min: ${requiredRear.toFixed(1)}m`,
+            suggestion: `Move ${(requiredRear - distRear).toFixed(1)}m from rear boundary`,
           });
         }
       }
     }
 
+    // ── Phase 5: Permit threshold checks (per-type exemptions) ───────────────
+    for (const building of allBuildingEls) {
+      const ct = getConstructionType(building);
+      const typeRule = CONSTRUCTION_TYPE_RULES[ct];
+      if (typeRule.exemptUpToM2 === null) continue; // no threshold for main house etc.
+
+      const elArea = building.area || ((building.width || 0) * (building.height || 0));
+      if (elArea <= 0) continue;
+
+      const isExempt = elArea <= typeRule.exemptUpToM2;
+      const requiresPermit = !isExempt && typeRule.permitAboveExempt;
+
+      checks.push({
+        rule: `Permit Threshold — ${typeRule.label}`,
+        status: isExempt ? "compliant" : "warning",
+        message: isExempt
+          ? `${typeRule.label} ${elArea.toFixed(1)}m² ≤ ${typeRule.exemptUpToM2}m² — no permit required`
+          : `${typeRule.label} ${elArea.toFixed(1)}m² > ${typeRule.exemptUpToM2}m² — ${requiresPermit} required`,
+        details: typeRule.note,
+        suggestion: !isExempt ? `Verify permit requirement with mairie (${typeRule.permitAboveExempt})` : undefined,
+      });
+    }
+
     // 4. Green space check
-    const greenAreas = elements.filter(
-      (e: { category?: string; surfaceType?: string }) =>
-        e.category === "vegetation" || e.surfaceType === "green"
+    const greenAreas = (elements as ElementIn[]).filter(
+      (e) => e.category === "vegetation" || e.surfaceType === "green"
     );
-    const totalGreen = greenAreas.reduce(
-      (sum: number, g: { area?: number }) => sum + (g.area || 0),
-      0
-    );
+    const totalGreen = greenAreas.reduce((sum, g) => sum + (g.area || 0), 0);
     const greenPct = (totalGreen / parcelArea) * 100;
 
     checks.push({
@@ -249,9 +306,8 @@ export async function POST(request: NextRequest) {
     });
 
     // 5. Parking check
-    const parkingSpaces = elements.filter(
-      (e: { category?: string; templateType?: string }) =>
-        e.category === "parking" || e.templateType === "parking"
+    const parkingSpaces = (elements as ElementIn[]).filter(
+      (e) => e.category === "parking" || e.templateType === "parking"
     );
     const totalFloorArea = totalBuiltArea * 1.5; // Approximate multi-story
     const requiredParkingMatch = parkingReq.match(/(\d+)\s*place.*?(\d+)\s*m/i);
@@ -261,10 +317,7 @@ export async function POST(request: NextRequest) {
 
     checks.push({
       rule: "Parking Requirements",
-      status:
-        parkingSpaces.length < requiredParking
-          ? "violation"
-          : "compliant",
+      status: parkingSpaces.length < requiredParking ? "violation" : "compliant",
       message:
         parkingSpaces.length < requiredParking
           ? `${parkingSpaces.length} parking spaces, need ${requiredParking}`
@@ -276,7 +329,7 @@ export async function POST(request: NextRequest) {
           : undefined,
     });
 
-    // 6. Protected areas (ABF, heritage, classified) – inform and constrain
+    // 6. Protected areas (ABF, heritage, classified)
     const highSeverity = project.protectedAreas?.filter(
       (a: { type: string }) => a.type === "ABF" || a.type === "HERITAGE" || a.type === "CLASSIFIED"
     ) || [];
