@@ -69,10 +69,17 @@ import {
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
 import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
+import { ParcelManagementPanel, type DetectedRoad, type ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
 import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
+import {
+  drawOverhangOverlay,
+  drawInteriorLayout,
+  drawBuildingOpenings,
+  clearBuildingOverlays,
+} from "@/lib/buildingCanvasOverlays";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -268,8 +275,8 @@ function SitePlanContent() {
   const [showCompliance, setShowCompliance] = useState(false);
   const [unnamedElementsWarning, setUnnamedElementsWarning] = useState<{ index: number; type: string }[] | null>(null);
 
-  // Right panel tabs
-  const [rightTab, setRightTab] = useState<"layers" | "buildings" | "footprint">("layers");
+  // Right panel tabs — Phase 6 adds 'parcel' tab
+  const [rightTab, setRightTab] = useState<"layers" | "buildings" | "footprint" | "parcel">("layers");
   const [selectedBuildingId3d, setSelectedBuildingId3d] = useState<string | null>(null);
   const [customDimensions, setCustomDimensions] = useState({ width: 10, depth: 8, groundHeight: 3 });
 
@@ -280,6 +287,11 @@ function SitePlanContent() {
   const [selectedPreset, setSelectedPreset] = useState<ProjectPreset | null>(null);
   const [placementMode, setPlacementMode] = useState(false);
   const [lastPlacedBuildingId, setLastPlacedBuildingId] = useState<string | null>(null);
+
+  // Phase 6: Parcel Management state
+  const [parcelRoads, setParcelRoads] = useState<DetectedRoad[]>([]);
+  const [isLoadingRoads, setIsLoadingRoads] = useState(false);
+  const [isMergingParcels, setIsMergingParcels] = useState(false);
 
   // Full-screen mode & paper size (Step 2 spec: full-screen, A4/A3 validation)
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -650,6 +662,30 @@ function SitePlanContent() {
     canvas.requestRenderAll();
   }, [projectData?.includeOverhangInFootprint, buildingDetails, viewMode, currentScale.pixelsPerMeter]);
 
+  // Phase 7: Draw building canvas overlays (overhang, interior layout, openings)
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || viewMode !== "2d") return;
+    // Store ppm on canvas so overlay utilities can read it without prop drilling
+    (canvas as any)._pixelsPerMeter = currentScale.pixelsPerMeter;
+
+    // Re-draw overlays for every building
+    buildingDetails.forEach((building) => {
+      // Find the Fabric rect that represents this building
+      const obj = canvas.getObjects().find((o: any) => o.buildingDetailId === building.id);
+      if (!obj) return;
+      // Clear old overlays for this building
+      clearBuildingOverlays(canvas, building.id);
+      // Draw new overlays
+      drawOverhangOverlay(canvas, fabric, obj, building);
+      drawInteriorLayout(canvas, fabric, obj, building as any);
+      drawBuildingOpenings(canvas, fabric, obj, building as any, currentScale.pixelsPerMeter);
+    });
+
+    canvas.requestRenderAll();
+  }, [buildingDetails, viewMode, currentScale.pixelsPerMeter]);
+
+
   // ─── Grid ──────────────────────────────────────────────────────────────────
 
   const drawGrid = useCallback(
@@ -926,7 +962,12 @@ function SitePlanContent() {
     if (!canvas) return false;
     setUnnamedElementsWarning(null);
 
-    const drawable = canvas.getObjects().filter((o: any) => !o.isGrid && !o.isMeasurement && !o.isPolygonPreview);
+    const isOverlay = (o: any) =>
+      o.isGrid || o.isMeasurement || o.isPolygonPreview ||
+      o.isBoundaryOverlay || o.isBoundaryDimension || o.isRegulatoryFootprint ||
+      o.isNorthArrow || o.isInteriorLayout || o.isBuildingOpening || o.isBuildingOverhang ||
+      o.isExteriorEnvelope || o.excludeFromExport;
+    const drawable = canvas.getObjects().filter((o: any) => !isOverlay(o));
     const ppm = currentScale.pixelsPerMeter;
     const toM = (p: number) => p / ppm;
 
@@ -1464,6 +1505,10 @@ function SitePlanContent() {
         addPolygonMeasurements(polygon, shapeId);
         canvas.renderAll();
         setPolygonPoints([]);
+        // Phase 6: Auto-switch to parcel management tab when parcel drawn
+        if (activeTool === "parcel" && creationMode === "free") {
+          setRightTab("parcel");
+        }
       }
     };
 
@@ -1891,6 +1936,252 @@ function SitePlanContent() {
     canvas.renderAll();
   };
 
+  // ─── Phase 6: Parcel Management & Geometry ───────────────────────────────
+
+  /** Build a summary of all isParcel objects on the canvas. */
+  const getParcelSummary = (): ParcelSummary => {
+    const canvas = fabricRef.current;
+    if (!canvas) return { count: 0, totalAreaM2: 0, parcelIds: [] };
+    const parcels = canvas.getObjects().filter((o: any) => o.isParcel);
+    const ppm = currentScale.pixelsPerMeter;
+    let totalAreaM2 = 0;
+    let sumX = 0, sumY = 0, ptCount = 0;
+    const ids: string[] = [];
+    parcels.forEach((p: any) => {
+      const area = p.area || (() => {
+        const w = (p.width || 0) * (p.scaleX || 1);
+        const h = (p.height || 0) * (p.scaleY || 1);
+        return (w / ppm) * (h / ppm);
+      })();
+      totalAreaM2 += area;
+      if (p.id) ids.push(p.id);
+      const c = (p as fabric.Object).getCenterPoint();
+      sumX += c.x; sumY += c.y; ptCount++;
+    });
+    // Convert canvas centre to geo if project has parcel geometry
+    let centroid: { lat: number; lng: number } | undefined;
+    if (projectData?.parcelGeometry && ptCount > 0) {
+      try {
+        const geo = typeof projectData.parcelGeometry === "string"
+          ? JSON.parse(projectData.parcelGeometry) : projectData.parcelGeometry;
+        // Use first coordinate as approximate centre
+        const coords: number[][] = geo?.coordinates?.[0] || geo?.features?.[0]?.geometry?.coordinates?.[0] || [];
+        if (coords.length > 0) {
+          const lats = coords.map((c: number[]) => c[1]);
+          const lngs = coords.map((c: number[]) => c[0]);
+          centroid = {
+            lat: lats.reduce((a: number, b: number) => a + b, 0) / lats.length,
+            lng: lngs.reduce((a: number, b: number) => a + b, 0) / lngs.length,
+          };
+        }
+      } catch {
+        // ignore
+      }
+    }
+    // Fallback: use project location
+    if (!centroid && (projectData as any)?.latitude && (projectData as any)?.longitude) {
+      centroid = { lat: (projectData as any).latitude, lng: (projectData as any).longitude };
+    }
+    return { count: parcels.length, totalAreaM2, parcelIds: ids, centroid };
+  };
+
+  /** Fetch road types from Overpass around the parcel centroid. */
+  const fetchParcelRoads = async () => {
+    const summary = getParcelSummary();
+    if (!summary.centroid) {
+      alert("No parcel location found. Ensure your project has an address and parcel geometry.");
+      return;
+    }
+    setIsLoadingRoads(true);
+    try {
+      const res = await fetch("/api/cadastre/road-type", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: summary.centroid.lat, lng: summary.centroid.lng, radius: 120 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setParcelRoads(data.roads || []);
+        // Draw overlay on canvas after fetching roads
+        if (data.roads?.length > 0) drawBoundaryOverlay(data.roads);
+      }
+    } catch (err) {
+      console.error("Road type fetch error:", err);
+    } finally {
+      setIsLoadingRoads(false);
+    }
+  };
+
+  /**
+   * Draw colour-coded boundary edge overlay on canvas.
+   * Darkens the parcel edges based on adjacent road type.
+   * Order: front (nearest road) = road colour, sides/rear = private green.
+   */
+  const drawBoundaryOverlay = (roads: DetectedRoad[]) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+
+    // Remove old overlay
+    canvas.getObjects().filter((o: any) => o.isBoundaryOverlay).forEach(o => canvas.remove(o));
+
+    const parcels = canvas.getObjects().filter((o: any) => o.isParcel);
+    if (parcels.length === 0) return;
+
+    const frontRoad = roads.find(r => r.classification !== "voie_privee" && r.classification !== "inconnu");
+    const COLORS: Record<string, string> = {
+      autoroute: "#b91c1c",
+      voie_nationale: "#c2410c",
+      voie_departementale: "#dc2626",
+      voie_communale: "#d97706",
+      chemin_rural: "#ca8a04",
+      voie_privee: "#16a34a",
+      inconnu: "#6b7280",
+    };
+    const frontColor = frontRoad ? (COLORS[frontRoad.classification] ?? "#d97706") : "#16a34a";
+    const sideColor = "#16a34a"; // private/neighbor = green
+
+    parcels.forEach((parcel: any, pi: number) => {
+      const pts: { x: number; y: number }[] = parcel.points?.map((p: { x: number; y: number }) => {
+        const pt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), parcel.calcTransformMatrix());
+        return { x: pt.x, y: pt.y };
+      }) || [];
+      if (pts.length < 3) return;
+
+      // Find the "front" edge — closest to canvas top (street side heuristic)
+      let frontIdx = 0;
+      let minY = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const midY = (pts[i].y + pts[i + 1].y) / 2;
+        if (midY < minY) { minY = midY; frontIdx = i; }
+      }
+
+      pts.forEach((pt, i) => {
+        if (i >= pts.length - 1) return;
+        const next = pts[i + 1];
+        const color = i === frontIdx ? frontColor : sideColor;
+        const line = new fabric.Line([pt.x, pt.y, next.x, next.y], {
+          stroke: color,
+          strokeWidth: 4,
+          strokeDashArray: i === frontIdx ? undefined : [6, 4],
+          selectable: false,
+          evented: false,
+          opacity: 0.85,
+        });
+        (line as any).isBoundaryOverlay = true;
+        (line as any).parentParcelIdx = pi;
+        canvas.add(line);
+
+        // Edge label
+        const mx = (pt.x + next.x) / 2;
+        const my = (pt.y + next.y) / 2;
+        const lbl = i === frontIdx
+          ? (frontRoad?.classificationLabel || "Voie publique")
+          : "Limite privée";
+        const tag = new fabric.Text(lbl, {
+          left: mx, top: my - 16,
+          fontSize: 9, fontFamily: "sans-serif",
+          fill: color,
+          backgroundColor: "rgba(255,255,255,0.9)",
+          padding: 2,
+          originX: "center", originY: "bottom",
+          selectable: false, evented: false,
+          opacity: 0.95,
+        });
+        (tag as any).isBoundaryOverlay = true;
+        canvas.add(tag);
+      });
+    });
+
+    canvas.renderAll();
+  };
+
+  /** Merge all isParcel polygons into one using the cadastre/merge API. */
+  const handleMergeParcels = async () => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const summary = getParcelSummary();
+    if (summary.count < 2) return;
+
+    setIsMergingParcels(true);
+    try {
+      // Use project parcelIds from the DB if available
+      const projectParcelIds = (projectData as any)?.parcelIds
+        ? String((projectData as any).parcelIds).split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
+      if (projectParcelIds.length >= 2) {
+        // Call the API with real IGN parcel IDs
+        const res = await fetch("/api/cadastre/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parcelIds: projectParcelIds }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.merged?.geometry) {
+            // Remove existing parcel polygons
+            canvas.getObjects().filter((o: any) => o.isParcel).forEach(o => canvas.remove(o));
+            canvas.getObjects().filter((o: any) => o.isBoundaryOverlay).forEach(o => canvas.remove(o));
+            // Draw merged polygon using parcelGeometryToShapes
+            const { parcelGeometryToShapes } = await import("@/lib/parcelGeometryToCanvas");
+            const shapes = parcelGeometryToShapes(
+              JSON.stringify(data.merged.geometry),
+              { canvasWidth: canvasSize.width, canvasHeight: canvasSize.height, pixelsPerMeter: currentScale.pixelsPerMeter }
+            );
+            shapes.forEach((shape, idx) => {
+              const poly = new fabric.Polygon(shape.points, {
+                left: shape.left, top: shape.top,
+                fill: "rgba(34, 197, 94, 0.1)",
+                stroke: "#22c55e", strokeWidth: 2, strokeDashArray: [4, 2],
+              });
+              const pid = `parcel-merged-${currentProjectId}-${idx}`;
+              (poly as any).id = pid;
+              (poly as any).elementName = "Merged Parcel";
+              (poly as any).isParcel = true;
+              (poly as any).isMerged = true;
+              canvas.add(poly);
+              canvas.sendObjectToBack(poly);
+            });
+            canvas.renderAll();
+            updateLayers(canvas);
+            // Re-classify boundaries after merge
+            if (parcelRoads.length > 0) drawBoundaryOverlay(parcelRoads);
+          }
+        }
+      } else {
+        // Fallback: visual-only merge using convex hull of canvas parcel points
+        const allPts: { x: number; y: number }[] = [];
+        canvas.getObjects().filter((o: any) => o.isParcel).forEach((parcel: any) => {
+          (parcel.points || []).forEach((p: { x: number; y: number }) => {
+            const wpt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), parcel.calcTransformMatrix());
+            allPts.push({ x: wpt.x, y: wpt.y });
+          });
+        });
+        if (allPts.length >= 3) {
+          canvas.getObjects().filter((o: any) => o.isParcel).forEach(o => canvas.remove(o));
+          const cx = allPts.reduce((s, p) => s + p.x, 0) / allPts.length;
+          const cy = allPts.reduce((s, p) => s + p.y, 0) / allPts.length;
+          const merged = new fabric.Polygon(allPts.map(p => new fabric.Point(p.x - cx, p.y - cy)), {
+            left: cx, top: cy,
+            fill: "rgba(34, 197, 94, 0.1)", stroke: "#22c55e", strokeWidth: 2, strokeDashArray: [4, 2],
+            originX: "center", originY: "center",
+          });
+          (merged as any).isParcel = true;
+          (merged as any).isMerged = true;
+          (merged as any).elementName = "Merged Parcel";
+          canvas.add(merged);
+          canvas.sendObjectToBack(merged);
+          canvas.renderAll();
+          updateLayers(canvas);
+        }
+      }
+    } catch (err) {
+      console.error("Parcel merge error:", err);
+    } finally {
+      setIsMergingParcels(false);
+    }
+  };
+
   const addBuildingToCanvas = (b: BuildingDetail, isExisting: boolean) => {
     const canvas = fabricRef.current;
     if (!canvas) return;
@@ -1978,7 +2269,12 @@ function SitePlanContent() {
   const hasUnnamedElements = (() => {
     const canvas = fabricRef.current;
     if (!canvas) return true;
-    return canvas.getObjects().filter((o: any) => !o.isGrid && !o.isMeasurement && !o.isPolygonPreview).some((o: any) => {
+    const isOverlay = (o: any) =>
+      o.isGrid || o.isMeasurement || o.isPolygonPreview ||
+      o.isBoundaryOverlay || o.isBoundaryDimension || o.isRegulatoryFootprint ||
+      o.isNorthArrow || o.isInteriorLayout || o.isBuildingOpening || o.isBuildingOverhang ||
+      o.isExteriorEnvelope || o.excludeFromExport;
+    return canvas.getObjects().filter((o: any) => !isOverlay(o)).some((o: any) => {
       const name = String(o.elementName ?? o.name ?? "").trim();
       return !name || name === "Unnamed";
     });
@@ -2421,14 +2717,15 @@ function SitePlanContent() {
             />
           ) : (
             <>
-              <div className="flex border-b border-slate-200">
+              <div className="flex border-b border-slate-200 overflow-x-auto">
                 {([
                   { id: "layers" as const, label: "Layers", icon: Layers },
                   { id: "buildings" as const, label: "Buildings", icon: Building2 },
                   { id: "footprint" as const, label: "Footprint", icon: LayoutGrid },
+                  { id: "parcel" as const, label: "Parcel", icon: MapPin },
                 ]).map((tab) => (
                   <button key={tab.id} onClick={() => setRightTab(tab.id)}
-                    className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors",
+                    className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap",
                       rightTab === tab.id ? "text-slate-900 border-b-2 border-blue-500 bg-white" : "text-slate-400 hover:text-slate-900"
                     )}>
                     <tab.icon className="w-3.5 h-3.5" />{tab.label}
@@ -2561,6 +2858,22 @@ function SitePlanContent() {
                 {rightTab === "footprint" && (
                   <div className="p-3">
                     <FootprintTable data={footprintData} />
+                  </div>
+                )}
+
+                {/* Phase 6: Parcel Management Tab */}
+                {rightTab === "parcel" && (
+                  <div className="flex-1 overflow-y-auto">
+                    <ParcelManagementPanel
+                      parcelSummary={getParcelSummary()}
+                      roads={parcelRoads}
+                      isLoadingRoads={isLoadingRoads}
+                      isMerging={isMergingParcels}
+                      onClassifyBoundaries={fetchParcelRoads}
+                      onMergeParcels={handleMergeParcels}
+                      onAddDimensions={autoAddBoundaryDimensions}
+                      projectId={currentProjectId}
+                    />
                   </div>
                 )}
               </div>

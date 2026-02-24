@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 
 export interface BuildingOpening {
   id: string;
-  type: "window" | "door" | "garage_door" | "skylight" | "french_window";
+  type: "window" | "door" | "sliding_door" | "garage_door" | "skylight" | "french_window";
   facade: "north" | "south" | "east" | "west";
   width: number; // meters
   height: number; // meters
@@ -46,6 +46,8 @@ export interface BuildingDetail {
   color: string;
   /** Altitude (m) for placement on terrain, e.g. 0.00 or +1.50 */
   altitudeM?: number;
+  /** Phase 7: interior layout preset */
+  layoutPreset?: "open_plan" | "corridor" | "room_per_floor" | null;
 }
 
 const ROOF_TYPES = [
@@ -79,11 +81,12 @@ const ROOF_MATERIALS = [
 ];
 
 const OPENING_TYPES = [
-  { id: "window", label: "Window" },
-  { id: "door", label: "Door" },
-  { id: "french_window", label: "French Window" },
-  { id: "garage_door", label: "Garage Door" },
-  { id: "skylight", label: "Skylight" },
+  { id: "window",        label: "Window (Fenêtre)",          emoji: "🪟" },
+  { id: "door",          label: "Door (Porte)",               emoji: "🚪" },
+  { id: "sliding_door",  label: "Sliding Door (Coulissante)", emoji: "↔️" },
+  { id: "french_window", label: "French Window (Baie vitrée)",emoji: "🏠" },
+  { id: "garage_door",   label: "Garage Door (Garage)",       emoji: "🔳" },
+  { id: "skylight",      label: "Skylight (Velux)",           emoji: "☀️" },
 ];
 
 const FACADES = [
@@ -94,9 +97,11 @@ const FACADES = [
 ];
 
 const SHUTTER_OPTIONS = [
-  { id: "none", label: "None" },
-  { id: "hinged", label: "Hinged (Battants)" },
-  { id: "rolling", label: "Rolling (Roulants)" },
+  { id: "none",                 label: "None",                      icon: "—" },
+  { id: "roller_shutter",       label: "Roller (Volet roulant)",    icon: "≡" },
+  { id: "traditional_shutter",  label: "Traditional (Volet battant)",icon: "◫" },
+  { id: "venetian",             label: "Venetian (Store vénitien)", icon: "☰" },
+  { id: "hinged",               label: "Hinged (Battant)",          icon: "◨" },
 ];
 
 interface BuildingDetailPanelProps {
@@ -292,73 +297,56 @@ export function BuildingDetailPanel({
                   </option>
                 ))}
               </select>
-              {building.roof.type !== "flat" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">
-                      Pitch (deg)
-                    </label>
-                    <input
-                      type="number"
-                      min={5}
-                      max={60}
-                      value={building.roof.pitch}
-                      onChange={(e) =>
-                        update({
-                          roof: {
-                            ...building.roof,
-                            pitch: Number(e.target.value) || 35,
-                          },
-                        })
-                      }
-                      className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">
-                      Overhang (m)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={2}
-                      step={0.1}
-                      value={building.roof.overhang}
-                      onChange={(e) =>
-                        update({
-                          roof: {
-                            ...building.roof,
-                            overhang: Number(e.target.value) || 0,
-                          },
-                        })
-                      }
-                      className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
-                    />
-                  </div>
+              {/* Pitch + Overhang always shown; pitch is disabled for flat roofs */}
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-0.5">
+                    {building.roof.type !== "flat" ? "Pitch (deg)" : "Pitch (n/a)"}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={building.roof.type === "flat" ? 0 : building.roof.pitch}
+                    disabled={building.roof.type === "flat"}
+                    onChange={(e) =>
+                      update({ roof: { ...building.roof, pitch: Number(e.target.value) || 35 } })
+                    }
+                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm disabled:opacity-40"
+                  />
                 </div>
-              )}
-              <div>
-                <label className="block text-[10px] text-slate-500 mb-0.5">
-                  Roof Material
-                </label>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-0.5">Overhang (m)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={building.roof.overhang}
+                    onChange={(e) =>
+                      update({ roof: { ...building.roof, overhang: Number(e.target.value) || 0 } })
+                    }
+                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                  />
+                </div>
+              </div>
+              <div className="mt-2">
+                <label className="block text-[10px] text-slate-500 mb-0.5">Roof Material</label>
                 <select
                   value={building.roof.material || ROOF_MATERIALS[0]}
                   onChange={(e) =>
-                    update({
-                      roof: { ...building.roof, material: e.target.value },
-                    })
+                    update({ roof: { ...building.roof, material: e.target.value } })
                   }
                   className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
                 >
                   {ROOF_MATERIALS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
+                    <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
               </div>
             </div>
           </div>
+
 
           {/* Materials */}
           <div>
@@ -381,6 +369,36 @@ export function BuildingDetailPanel({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Interior Layout */}
+          <div>
+            <label className="block text-xs text-slate-500 mb-2 flex items-center gap-1">
+              <Layers className="w-3 h-3" />
+              Interior Layout
+            </label>
+            <div className="grid grid-cols-3 gap-1">
+              {([
+                { id: "open_plan",     label: "Open",     emoji: "□" },
+                { id: "corridor",      label: "Corridor", emoji: "⊟" },
+                { id: "room_per_floor",label: "Rooms",    emoji: "⊞" },
+              ] as const).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => update({ layoutPreset: p.id })}
+                  className={cn(
+                    "py-1.5 text-[10px] rounded border transition-colors",
+                    (building.layoutPreset ?? "open_plan") === p.id
+                      ? "border-blue-400 bg-blue-500/20 text-blue-300"
+                      : "border-white/10 bg-slate-800/40 text-slate-400 hover:text-white"
+                  )}
+                >
+                  <span className="block text-sm">{p.emoji}</span>
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Openings */}
