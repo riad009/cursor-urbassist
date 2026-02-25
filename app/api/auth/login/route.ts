@@ -89,6 +89,41 @@ export async function POST(request: NextRequest) {
     }
 
     if (email === HARDCODED_EMAIL && password === HARDCODED_PASSWORD) {
+      // Find-or-create in DB so project ownership and credit transactions work
+      if (process.env.DATABASE_URL) {
+        let dbUser = await prisma.user.findUnique({ where: { email: HARDCODED_EMAIL } });
+        if (!dbUser) {
+          dbUser = await prisma.user.create({
+            data: {
+              email: HARDCODED_EMAIL,
+              passwordHash: await hashPassword(HARDCODED_PASSWORD),
+              name: "Example User",
+              role: "USER",
+              credits: 10,
+            },
+          });
+        }
+        const token = await createToken({
+          id: dbUser.id,
+          email: dbUser.email,
+          name: dbUser.name,
+          role: dbUser.role,
+          credits: dbUser.credits,
+        });
+        const response = NextResponse.json({
+          user: { id: dbUser.id, email: dbUser.email, name: dbUser.name, role: dbUser.role, credits: dbUser.credits },
+          token,
+        });
+        response.cookies.set("auth-token", token, {
+          httpOnly: true,
+          path: "/",
+          maxAge: 60 * 60 * 24 * 7,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+        });
+        return response;
+      }
+      // No DB: fallback to in-memory (limited functionality)
       const user = getHardcodedUser();
       const token = await createToken(user);
       const response = NextResponse.json({

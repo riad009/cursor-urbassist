@@ -347,6 +347,15 @@ export const translations: Record<string, Record<Locale, string>> = {
     "pay.buyAndActivate": { fr: "Acheter et activer", en: "Buy and activate" },
     "pay.securePayment": { fr: "Paiement sécurisé", en: "Secure payment" },
     "pay.paymentError": { fr: "Une erreur est survenue lors du paiement", en: "An error occurred during payment" },
+    "pay.creditBalance": { fr: "Solde de crédits", en: "Credit balance" },
+    "pay.creditsNeeded": { fr: "Crédits nécessaires", en: "Credits needed" },
+    "pay.payWithCredits": { fr: "Payer avec des crédits", en: "Pay with credits" },
+    "pay.buyCreditsFirst": { fr: "Acheter des crédits", en: "Buy credits first" },
+    "pay.insufficientCredits": { fr: "Crédits insuffisants", en: "Insufficient credits" },
+    "pay.creditPackages": { fr: "Packs de crédits", en: "Credit packages" },
+    "pay.costInCredits": { fr: "Coût en crédits", en: "Cost in credits" },
+    "pay.creditsPurchased": { fr: "Crédits achetés !", en: "Credits purchased!" },
+    "pay.creditsAdded": { fr: "Vos crédits ont été ajoutés.", en: "Your credits have been added." },
 
     // ─── Overview Page ───────────────────────────────────────────────────────────
     "overview.pluCompleted": { fr: "Analyse PLU effectuée", en: "PLU analysis completed" },

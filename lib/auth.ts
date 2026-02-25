@@ -59,6 +59,13 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { id: string };
     if (payload.id === HARDCODED_USER_ID) {
+      // Old token — try to look up the real DB user by email
+      if (process.env.DATABASE_URL) {
+        const dbUser = await prisma.user.findUnique({ where: { email: HARDCODED_EMAIL } });
+        if (dbUser) {
+          return { id: dbUser.id, email: dbUser.email, name: dbUser.name, role: dbUser.role, credits: dbUser.credits };
+        }
+      }
       return getHardcodedUser();
     }
     if (payload.id === HARDCODED_ADMIN_ID) {

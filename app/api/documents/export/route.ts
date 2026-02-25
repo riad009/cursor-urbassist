@@ -7,16 +7,9 @@ import {
   type PDFExportOptions,
 } from "@/lib/pdf-generator";
 import { fetchStaticMapBase64, fetchThreeMapViews } from "@/lib/fetchStaticMap";
+import { CREDIT_COSTS, getDocumentExportCost } from "@/lib/credit-costs";
 
-const CREDIT_COSTS: Record<string, number> = {
-  LOCATION_PLAN: 2,
-  SITE_PLAN: 3,
-  SECTION: 2,
-  ELEVATION: 2,
-  LANDSCAPE_INSERTION: 5,
-  DESCRIPTIVE_STATEMENT: 2,
-  FULL_PACKAGE: 10,
-};
+const CREDIT_COSTS_MAP = CREDIT_COSTS.DOCUMENT_EXPORT;
 
 export async function POST(request: NextRequest) {
   const user = await getSession();
@@ -33,7 +26,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cost = CREDIT_COSTS[documentType] ?? 2;
+    const cost = CREDIT_COSTS_MAP[documentType] ?? 2;
     if (!isUnrestrictedAdmin(user) && user.credits < cost) {
       return NextResponse.json(
         {
@@ -90,7 +83,7 @@ export async function POST(request: NextRequest) {
         orderBy: { createdAt: "desc" },
       });
       if (existingLandscape?.fileData) {
-        const cost = CREDIT_COSTS.LANDSCAPE_INSERTION ?? 5;
+        const cost = CREDIT_COSTS_MAP.LANDSCAPE_INSERTION ?? 5;
         if (!isUnrestrictedAdmin(user) && user.credits < cost) {
           return NextResponse.json(
             { error: `Insufficient credits. Need ${cost}, have ${user.credits}` },

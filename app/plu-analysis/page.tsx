@@ -55,6 +55,8 @@ function PluAnalysisPageContent() {
   const [runningDetection, setRunningDetection] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
+  const [pluFirstCreditCost, setPluFirstCreditCost] = useState(3);
+  const [pluRelaunchCreditCost, setPluRelaunchCreditCost] = useState(1);
   const [pluFirstPrice, setPluFirstPrice] = useState(15);
   const [pluRelaunchPrice, setPluRelaunchPrice] = useState(5);
   const [pluFootprintDifferent, setPluFootprintDifferent] = useState(false);
@@ -89,6 +91,10 @@ function PluAnalysisPageContent() {
       .then((d) => {
         setPluFirstPrice(d.pluFirstAnalysisPriceEur ?? 15);
         setPluRelaunchPrice(d.pluRelaunchPriceEur ?? 5);
+        if (d.creditCosts) {
+          setPluFirstCreditCost(d.creditCosts.pluFirstAnalysis ?? 3);
+          setPluRelaunchCreditCost(d.creditCosts.pluRelaunch ?? 1);
+        }
       })
       .catch(() => { });
   }, []);
@@ -315,8 +321,8 @@ function PluAnalysisPageContent() {
                   <h3 className="text-lg font-semibold text-slate-900 mb-2">Launch PLU analysis?</h3>
                   <p className="text-sm text-slate-400 mb-6">
                     {project.regulatoryAnalysis
-                      ? `This is a relaunch. The updated analysis will cost €${pluRelaunchPrice}.`
-                      : `The first PLU analysis will cost €${pluFirstPrice}. Any additional analysis after modifications will cost €${pluRelaunchPrice}.`}
+                      ? `This is a relaunch. The updated analysis will cost ${pluRelaunchCreditCost} credit${pluRelaunchCreditCost > 1 ? "s" : ""}.`
+                      : `The first PLU analysis will cost ${pluFirstCreditCost} credits. Any additional analysis after modifications will cost ${pluRelaunchCreditCost} credit.`}
                   </p>
                   <div className="flex gap-3 justify-end">
                     <button

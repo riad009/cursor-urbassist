@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 import { fetchPdfText } from "@/lib/fetchPdfText";
+import { getPluAnalysisCost } from "@/lib/credit-costs";
 
 /**
  * Deep PLU analysis pipeline:
@@ -22,15 +23,26 @@ export async function POST(
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Payment gate: project must be paid for (unless admin)
-  if (!isUnrestrictedAdmin(user) && !project.paidAt) {
-    return NextResponse.json(
-      {
-        error: "Payment required. Please complete payment before running PLU analysis.",
-        code: "PAYMENT_REQUIRED",
-      },
-      { status: 402 }
-    );
+  // Payment gate: user must have sufficient credits (unless admin)
+  const creditCost = getPluAnalysisCost(project.pluAnalysisCount);
+  if (!isUnrestrictedAdmin(user)) {
+    // Re-fetch latest credit balance
+    const freshUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { credits: true },
+    });
+    const currentCredits = freshUser?.credits ?? user.credits;
+    if (currentCredits < creditCost) {
+      return NextResponse.json(
+        {
+          error: "Insufficient credits. Please purchase credits before running PLU analysis.",
+          code: "INSUFFICIENT_CREDITS",
+          creditsNeeded: creditCost,
+          creditsAvailable: currentCredits,
+        },
+        { status: 402 }
+      );
+    }
   }
 
   try {
@@ -162,30 +174,42 @@ export async function POST(
 
     if (!isUnrestrictedAdmin(user)) {
       const isRelaunch = project.pluAnalysisCount > 0;
-      const priceEur = isRelaunch
-        ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
-        : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
 
-      // Increment analysis count
-      await prisma.project.update({
-        where: { id },
-        data: { pluAnalysisCount: { increment: 1 } },
-      });
+      // Atomic: deduct credits + increment analysis count + mark paid + audit trail
+      await prisma.$transaction(async (tx) => {
+        const updatedUser = await tx.user.update({
+          where: { id: user.id },
+          data: { credits: { decrement: creditCost } },
+          select: { credits: true },
+        });
 
-      // Audit trail (no credits deducted — payment was handled by Stripe checkout)
-      await prisma.creditTransaction.create({
-        data: {
-          userId: user.id,
-          amount: 0,
-          type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
-          description: `Deep PLU analysis for project ${project.name?.slice(0, 40) || id} — €${priceEur}`,
-          metadata: {
-            projectId: id,
-            zoneType,
-            source: bodyDocumentContent ? "upload" : pluSource,
-            priceEur,
+        // Race condition guard
+        if (updatedUser.credits < 0) {
+          throw new Error("INSUFFICIENT_CREDITS_RACE");
+        }
+
+        await tx.project.update({
+          where: { id },
+          data: {
+            pluAnalysisCount: { increment: 1 },
+            paidAt: project.paidAt ?? new Date(),
           },
-        },
+        });
+
+        await tx.creditTransaction.create({
+          data: {
+            userId: user.id,
+            amount: -creditCost,
+            type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
+            description: `PLU analysis for "${project.name?.slice(0, 40) || id}" (${creditCost} credit${creditCost > 1 ? "s" : ""})`,
+            metadata: {
+              projectId: id,
+              zoneType,
+              source: bodyDocumentContent ? "upload" : pluSource,
+              creditsSpent: creditCost,
+            },
+          },
+        });
       });
     }
 
@@ -195,12 +219,7 @@ export async function POST(
       pdfUrl: regulatory.pdfUrl,
       zoneType: regulatory.zoneType,
       analysis: regulatory.aiAnalysis,
-      creditsUsed: 0,
-      priceEur: isUnrestrictedAdmin(user) ? 0 : (
-        project.pluAnalysisCount > 0
-          ? parseFloat(process.env.PLU_RELAUNCH_PRICE || "5")
-          : parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15")
-      ),
+      creditsUsed: isUnrestrictedAdmin(user) ? 0 : creditCost,
     });
   } catch (error) {
     console.error("Regulatory auto:", error);
