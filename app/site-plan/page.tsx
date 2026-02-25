@@ -208,7 +208,7 @@ const CANVAS_PROPS = [
   // Data fields
   "parentId", "elevationValue", "vegetationType", "vrdType",
   "surfaceType", "templateType", "buildingId", "constructionType",
-  "isExisting", "_buildingDetailId", "_overlayBuildingId",
+  "isExisting", "_buildingDetailId", "_overlayBuildingId", "buildingDetailId",
 ] as const;
 
 const SURFACE_TYPES = [
@@ -289,8 +289,10 @@ function SitePlanContent() {
   const [canvasSize] = useState({ width: 1400, height: 900 });
   const [currentScale, setCurrentScale] = useState(SCALES[1]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
   const [drawingStart, setDrawingStart] = useState<{ x: number; y: number } | null>(null);
-  const [tempShape, setTempShape] = useState<fabric.FabricObject | null>(null);
+  const drawingStartRef = useRef<{ x: number; y: number } | null>(null);
+  const tempShapeRef = useRef<fabric.FabricObject | null>(null);
   const [currentMeasurement, setCurrentMeasurement] = useState("");
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
@@ -311,6 +313,9 @@ function SitePlanContent() {
 
   // Buildings state
   const [buildingDetails, setBuildingDetails] = useState<BuildingDetail[]>([]);
+  // Always-fresh ref — undo/redo callbacks read this directly (no stale-closure issues)
+  const buildingDetailsSnapshotRef = useRef<BuildingDetail[]>([]);
+  useEffect(() => { buildingDetailsSnapshotRef.current = buildingDetails; }, [buildingDetails]);
   const [existingBuildingsLoaded, setExistingBuildingsLoaded] = useState(false);
   const [loadingExistingBuildings, setLoadingExistingBuildings] = useState(false);
 
@@ -348,9 +353,8 @@ function SitePlanContent() {
   // Section line: user-placed line for section cut (spec 2.9)
   const [previewMode, setPreviewMode] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
-  // Undo/redo: history of canvas states
-  const undoStackRef = useRef<string[]>([]);
-  const redoStackRef = useRef<string[]>([]);
+  // Undo/redo: history of canvas+buildingDetails states
+  // (typed in pushUndoState block below)
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   // Perf: debounce updateLayers so rapid canvas events don't spam O(n) layer recomputes
@@ -535,6 +539,12 @@ function SitePlanContent() {
   const undoDebounceRef = useRef<number | null>(null);
   const MAX_UNDO = 50;
 
+  // Each undo/redo entry stores BOTH the canvas JSON *and* the buildingDetails array
+  // so `guided` buildings fully round-trip through undo/redo.
+  type UndoEntry = { canvas: string; buildings: BuildingDetail[] };
+  const undoStackRef = useRef<UndoEntry[]>([]);
+  const redoStackRef = useRef<UndoEntry[]>([]);
+
   const pushUndoState = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
@@ -543,8 +553,10 @@ function SitePlanContent() {
       undoDebounceRef.current = null;
       try {
         const json = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
+        // Snapshot current buildingDetails via a ref so the callback stays stable
+        const buildings = buildingDetailsSnapshotRef.current;
         undoStackRef.current = undoStackRef.current.slice(-(MAX_UNDO - 1));
-        undoStackRef.current.push(json);
+        undoStackRef.current.push({ canvas: json, buildings });
         redoStackRef.current = [];
         setCanUndo(undoStackRef.current.length > 0);
         setCanRedo(false);
@@ -552,28 +564,37 @@ function SitePlanContent() {
     }, 300);
   }, []);
 
+  const restoreUndoEntry = useCallback((entry: { canvas: string; buildings: BuildingDetail[] }, afterFn: () => void) => {
+    const canvas = fabricRef.current;
+    if (!canvas || !entry) return;
+    canvas.loadFromJSON(entry.canvas, () => {
+      canvas.renderAll();
+      updateLayers(canvas);
+      setBuildingDetails(entry.buildings);
+      const pts: { id: string; x: number; y: number; value: number }[] = [];
+      canvas.getObjects().forEach((o: any) => {
+        if (o.isElevationPoint && o.elevationValue != null) {
+          const c = (o as fabric.Object).getCenterPoint();
+          pts.push({ id: o.id || `ep-${Date.now()}-${pts.length}`, x: c.x, y: c.y, value: o.elevationValue });
+        }
+      });
+      setElevationPoints(pts);
+      afterFn();
+    });
+  }, [updateLayers]);
+
   const handleUndo = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas || undoStackRef.current.length === 0) return;
     const prev = undoStackRef.current.pop();
     setCanUndo(undoStackRef.current.length > 0);
     if (prev) {
-      redoStackRef.current.push(JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS])));
+      const currentJson = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
+      redoStackRef.current.push({ canvas: currentJson, buildings: buildingDetailsSnapshotRef.current });
       setCanRedo(true);
-      canvas.loadFromJSON(prev, () => {
-        canvas.renderAll();
-        updateLayers(canvas);
-        const pts: { id: string; x: number; y: number; value: number }[] = [];
-        canvas.getObjects().forEach((o: any) => {
-          if (o.isElevationPoint != null && o.elevationValue != null) {
-            const c = (o as fabric.Object).getCenterPoint();
-            pts.push({ id: o.id || `ep-${Date.now()}-${pts.length}`, x: c.x, y: c.y, value: o.elevationValue });
-          }
-        });
-        setElevationPoints(pts);
-      });
+      restoreUndoEntry(prev, () => {});
     }
-  }, [updateLayers]);
+  }, [restoreUndoEntry]);
 
   const handleRedo = useCallback(() => {
     const canvas = fabricRef.current;
@@ -581,22 +602,12 @@ function SitePlanContent() {
     const next = redoStackRef.current.pop();
     setCanRedo(redoStackRef.current.length > 0);
     if (next) {
-      undoStackRef.current.push(JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS])));
+      const currentJson = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
+      undoStackRef.current.push({ canvas: currentJson, buildings: buildingDetailsSnapshotRef.current });
       setCanUndo(true);
-      canvas.loadFromJSON(next, () => {
-        canvas.renderAll();
-        updateLayers(canvas);
-        const pts: { id: string; x: number; y: number; value: number }[] = [];
-        canvas.getObjects().forEach((o: any) => {
-          if (o.isElevationPoint != null && o.elevationValue != null) {
-            const c = (o as fabric.Object).getCenterPoint();
-            pts.push({ id: o.id || `ep-${Date.now()}-${pts.length}`, x: c.x, y: c.y, value: o.elevationValue });
-          }
-        });
-        setElevationPoints(pts);
-      });
+      restoreUndoEntry(next, () => {});
     }
-  }, [updateLayers]);
+  }, [restoreUndoEntry]);
 
   const runComplianceCheck = useCallback(() => {
     if (!currentProjectId) return;
@@ -723,7 +734,7 @@ function SitePlanContent() {
     // Re-draw overlays for every building
     buildingDetails.forEach((building) => {
       // Find the Fabric rect that represents this building
-      const obj = canvas.getObjects().find((o: any) => o.buildingDetailId === building.id);
+      const obj = canvas.getObjects().find((o: any) => o.id === building.id || o.buildingDetailId === building.id);
       if (!obj) return;
       // Clear old overlays for this building
       clearBuildingOverlays(canvas, building.id);
@@ -1000,6 +1011,7 @@ function SitePlanContent() {
                   if (o.isMeasurement || o.isGrid) return;
                   if (o.elevationValue != null) o.isElevationPoint = true;
                   if (o.vegetationType != null) o.isVegetation = true;
+                  if (o.buildingDetailId != null) o.buildingDetailId = o.buildingDetailId;
                   if (o.parentId && !String(o.elementName ?? "").trim()) o.isMeasurement = true;
                 });
 
@@ -1305,29 +1317,34 @@ function SitePlanContent() {
     if (!canvas || viewMode !== "2d") return;
 
     const handleMouseMove = (e: fabric.TPointerEventInfo) => {
+      // Avoid null {0,0} fallback on spurious events
+      if (!e.scenePoint && !e.viewportPoint) return;
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
       // NOTE: setMousePos is intentionally NOT here — it lives in a separate
       // lightweight useEffect below to prevent infinite re-render loops.
 
-      if (isDrawing && drawingStart) {
-        const distance = calculateDistance(drawingStart.x, drawingStart.y, pointer.x, pointer.y);
+      if (isDrawingRef.current && drawingStartRef.current) {
+        const distance = calculateDistance(drawingStartRef.current.x, drawingStartRef.current.y, pointer.x, pointer.y);
         if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd" || activeTool === "section") {
           setCurrentMeasurement(formatMeasurement(distance));
         } else if (activeTool === "rectangle") {
-          const w = pixelsToMeters(Math.abs(pointer.x - drawingStart.x));
-          const h = pixelsToMeters(Math.abs(pointer.y - drawingStart.y));
+          const w = pixelsToMeters(Math.abs(pointer.x - drawingStartRef.current.x));
+          const h = pixelsToMeters(Math.abs(pointer.y - drawingStartRef.current.y));
           setCurrentMeasurement(`${formatMeasurement(w)} x ${formatMeasurement(h)}`);
         } else if (activeTool === "circle") {
           setCurrentMeasurement(`\u00D8 ${formatMeasurement(distance * 2)}`);
         }
 
-        if (tempShape) canvas.remove(tempShape);
+        if (tempShapeRef.current) {
+          canvas.remove(tempShapeRef.current);
+          tempShapeRef.current = null;
+        }
         let newTemp: fabric.FabricObject | null = null;
 
         if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd" || activeTool === "section") {
           const vrdColor = activeTool === "vrd" ? activeVrdType.color : undefined;
           const sectionColor = activeTool === "section" ? "#ec4899" : undefined;
-          newTemp = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+          newTemp = new fabric.Line([drawingStartRef.current.x, drawingStartRef.current.y, pointer.x, pointer.y], {
             stroke: sectionColor || (activeTool === "measure" ? "#22c55e" : vrdColor || activeColor),
             strokeWidth: activeTool === "measure" ? 2 : strokeWidth,
             strokeDashArray: activeTool === "section" ? [12, 6] : (activeTool === "measure" || activeTool === "vrd" ? [8, 4] : undefined),
@@ -1335,19 +1352,19 @@ function SitePlanContent() {
           });
         } else if (activeTool === "rectangle") {
           newTemp = new fabric.Rect({
-            left: Math.min(drawingStart.x, pointer.x), top: Math.min(drawingStart.y, pointer.y),
-            width: Math.abs(pointer.x - drawingStart.x), height: Math.abs(pointer.y - drawingStart.y),
+            left: Math.min(drawingStartRef.current.x, pointer.x), top: Math.min(drawingStartRef.current.y, pointer.y),
+            width: Math.abs(pointer.x - drawingStartRef.current.x), height: Math.abs(pointer.y - drawingStartRef.current.y),
             fill: "transparent", stroke: activeColor, strokeWidth, selectable: false, evented: false,
           });
         } else if (activeTool === "circle") {
-          const r = Math.sqrt(Math.pow(pointer.x - drawingStart.x, 2) + Math.pow(pointer.y - drawingStart.y, 2));
+          const r = Math.sqrt(Math.pow(pointer.x - drawingStartRef.current.x, 2) + Math.pow(pointer.y - drawingStartRef.current.y, 2));
           newTemp = new fabric.Circle({
-            left: drawingStart.x - r, top: drawingStart.y - r, radius: r,
+            left: drawingStartRef.current.x - r, top: drawingStartRef.current.y - r, radius: r,
             fill: "transparent", stroke: activeColor, strokeWidth, selectable: false, evented: false,
           });
         }
 
-        if (newTemp) { canvas.add(newTemp); setTempShape(newTemp); }
+        if (newTemp) { canvas.add(newTemp); tempShapeRef.current = newTemp; }
       }
     };
 
@@ -1360,6 +1377,17 @@ function SitePlanContent() {
       }
 
       if (activeTool === "select" || activeTool === "pan" || activeTool === "pencil") return;
+
+      // If user clicked on an existing canvas object (to move/select it), don't start drawing a new shape.
+      // Only skip for tools that draw shapes via drag (not point-click tools like text/callout/elevation/vegetation/viewpoint).
+      const DRAG_DRAW_TOOLS = ["line", "rectangle", "circle", "measure", "vrd", "section", "arrow"];
+      if (DRAG_DRAW_TOOLS.includes(activeTool)) {
+        const hitTarget = (e as any).target;
+        if (hitTarget && !(hitTarget as any).isMeasurement && !(hitTarget as any).isGrid && !(hitTarget as any).isPolygonPreview) {
+          // Clicked on an existing real object — let Fabric handle move/select, don't draw.
+          return;
+        }
+      }
       if (activeTool === "text") {
         // Phase 8: IText — editable text, immediately enters edit mode
         const itext = new fabric.IText("Text", {
@@ -1524,18 +1552,25 @@ function SitePlanContent() {
         return;
       }
       setIsDrawing(true);
-      setDrawingStart({ x: pointer.x, y: pointer.y });
+      isDrawingRef.current = true;
+      const startPt = { x: pointer.x, y: pointer.y };
+      setDrawingStart(startPt);
+      drawingStartRef.current = startPt;
     };
 
     const handleMouseUp = (e: fabric.TPointerEventInfo) => {
-      if (!isDrawing || !drawingStart) return;
-      const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
-      if (tempShape) { canvas.remove(tempShape); setTempShape(null); }
+      if (!isDrawingRef.current || !drawingStartRef.current) return;
+      const pointer = (e.scenePoint || e.viewportPoint) ? (e.scenePoint || e.viewportPoint) : drawingStartRef.current;
+      if (!pointer) return;
+      
+      const currentStart = drawingStartRef.current;
+      
+      if (tempShapeRef.current) { canvas.remove(tempShapeRef.current); tempShapeRef.current = null; }
 
       const shapeId = `shape-${Date.now()}`;
 
       if (activeTool === "line") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+        const line = new fabric.Line([currentStart.x, currentStart.y, pointer.x, pointer.y], {
           stroke: activeColor, strokeWidth,
         });
         (line as any).id = shapeId;
@@ -1543,7 +1578,7 @@ function SitePlanContent() {
         canvas.add(line);
         addLineMeasurement(line, shapeId);
       } else if (activeTool === "section") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+        const line = new fabric.Line([currentStart.x, currentStart.y, pointer.x, pointer.y], {
           stroke: "#ec4899", strokeWidth: 2.5, strokeDashArray: [12, 6],
         });
         (line as any).id = shapeId;
@@ -1553,8 +1588,8 @@ function SitePlanContent() {
         addLineMeasurement(line, shapeId);
 
         // Archicad-style section markers at endpoints
-        const dx = pointer.x - drawingStart.x;
-        const dy = pointer.y - drawingStart.y;
+        const dx = pointer.x - currentStart.x;
+        const dy = pointer.y - currentStart.y;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len > 10) {
           const nx = -dy / len; // normal direction (viewing direction)
@@ -1563,9 +1598,9 @@ function SitePlanContent() {
 
           // Start marker (A) - triangle pointing in viewing direction
           const mkA = new fabric.Polygon([
-            { x: drawingStart.x + nx * ms, y: drawingStart.y + ny * ms },
-            { x: drawingStart.x - nx * ms * 0.3 - (dx / len) * ms * 0.5, y: drawingStart.y - ny * ms * 0.3 - (dy / len) * ms * 0.5 },
-            { x: drawingStart.x - nx * ms * 0.3 + (dx / len) * ms * 0.5, y: drawingStart.y - ny * ms * 0.3 + (dy / len) * ms * 0.5 },
+            { x: currentStart.x + nx * ms, y: currentStart.y + ny * ms },
+            { x: currentStart.x - nx * ms * 0.3 - (dx / len) * ms * 0.5, y: currentStart.y - ny * ms * 0.3 - (dy / len) * ms * 0.5 },
+            { x: currentStart.x - nx * ms * 0.3 + (dx / len) * ms * 0.5, y: currentStart.y - ny * ms * 0.3 + (dy / len) * ms * 0.5 },
           ], { fill: "#ec4899", selectable: false, evented: false });
           (mkA as any).isMeasurement = true;
           (mkA as any).parentId = shapeId;
@@ -1583,7 +1618,7 @@ function SitePlanContent() {
 
           // Labels A and B
           const lblA = new fabric.Text("A", {
-            left: drawingStart.x + nx * ms * 1.5, top: drawingStart.y + ny * ms * 1.5,
+            left: currentStart.x + nx * ms * 1.5, top: currentStart.y + ny * ms * 1.5,
             fontSize: 12, fontFamily: "sans-serif", fontWeight: "bold", fill: "#ec4899",
             originX: "center", originY: "center", selectable: false, evented: false,
           });
@@ -1601,7 +1636,7 @@ function SitePlanContent() {
           canvas.add(lblB);
         }
       } else if (activeTool === "vrd") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+        const line = new fabric.Line([currentStart.x, currentStart.y, pointer.x, pointer.y], {
           stroke: activeVrdType.color, strokeWidth, strokeDashArray: [8, 4],
         });
         (line as any).id = shapeId;
@@ -1611,7 +1646,7 @@ function SitePlanContent() {
         canvas.add(line);
         addLineMeasurement(line, shapeId);
       } else if (activeTool === "measure") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+        const line = new fabric.Line([currentStart.x, currentStart.y, pointer.x, pointer.y], {
           stroke: "#22c55e", strokeWidth: 2, strokeDashArray: [5, 5],
         });
         (line as any).id = shapeId;
@@ -1619,8 +1654,8 @@ function SitePlanContent() {
         canvas.add(line);
         addLineMeasurement(line, shapeId);
       } else if (activeTool === "rectangle") {
-        const left = Math.min(drawingStart.x, pointer.x), top = Math.min(drawingStart.y, pointer.y);
-        const w = Math.abs(pointer.x - drawingStart.x), h = Math.abs(pointer.y - drawingStart.y);
+        const left = Math.min(currentStart.x, pointer.x), top = Math.min(currentStart.y, pointer.y);
+        const w = Math.abs(pointer.x - currentStart.x), h = Math.abs(pointer.y - currentStart.y);
         if (w > 5 && h > 5) {
           const rect = new fabric.Rect({
             left, top, width: w, height: h,
@@ -1633,10 +1668,10 @@ function SitePlanContent() {
           addRectMeasurements(rect, shapeId);
         }
       } else if (activeTool === "circle") {
-        const r = Math.sqrt(Math.pow(pointer.x - drawingStart.x, 2) + Math.pow(pointer.y - drawingStart.y, 2));
+        const r = Math.sqrt(Math.pow(pointer.x - currentStart.x, 2) + Math.pow(pointer.y - currentStart.y, 2));
         if (r > 5) {
           const circle = new fabric.Circle({
-            left: drawingStart.x - r, top: drawingStart.y - r, radius: r,
+            left: currentStart.x - r, top: currentStart.y - r, radius: r,
             fill: activeSurfaceType.fill, stroke: activeSurfaceType.color, strokeWidth,
           });
           (circle as any).surfaceType = activeSurfaceType.id;
@@ -1647,11 +1682,11 @@ function SitePlanContent() {
         }
       } else if (activeTool === "arrow") {
         // Phase 8: Arrow annotation
-        const dx = pointer.x - drawingStart.x;
-        const dy = pointer.y - drawingStart.y;
+        const dx = pointer.x - currentStart.x;
+        const dy = pointer.y - currentStart.y;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len > 10) {
-          const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
+          const line = new fabric.Line([currentStart.x, currentStart.y, pointer.x, pointer.y], {
             stroke: activeColor, strokeWidth: Math.max(2, strokeWidth),
             selectable: false, evented: false,
           });
@@ -1675,7 +1710,9 @@ function SitePlanContent() {
 
       canvas.renderAll();
       setIsDrawing(false);
+      isDrawingRef.current = false;
       setDrawingStart(null);
+      drawingStartRef.current = null;
       setCurrentMeasurement("");
     };
 
@@ -1683,7 +1720,7 @@ function SitePlanContent() {
     canvas.on("mouse:down", handleMouseDown);
     canvas.on("mouse:up", handleMouseUp);
     return () => { canvas.off("mouse:move", handleMouseMove); canvas.off("mouse:down", handleMouseDown); canvas.off("mouse:up", handleMouseUp); };
-  }, [activeTool, isDrawing, drawingStart, tempShape, activeColor, strokeWidth, activeVrdType, activeSurfaceType, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements, viewMode, placementMode, selectedPreset, updateLayers, pushUndoState]);
+  }, [activeTool, activeColor, strokeWidth, activeVrdType, activeSurfaceType, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements, viewMode, placementMode, selectedPreset, updateLayers, pushUndoState]);
 
   // ─── Mouse position tracking (isolated — runs once, never causes re-register) ────
   // Kept separate from the drawing useEffect so that setMousePos does NOT
@@ -1700,6 +1737,50 @@ function SitePlanContent() {
     return () => { canvas.off("mouse:move", trackPos); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — register once and never re-register
+
+  // ─── Delete selected ────────────────────────────────────────────────────────
+  const handleDelete = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObjects();
+    if (active.length === 0) return;
+    const deletedIds = new Set<string>();
+    active.forEach((obj) => {
+      const id = (obj as any).id;
+      if (id) { removeMeasurements(id); deletedIds.add(id); }
+      canvas.getObjects().filter((o: any) => o._overlayBuildingId === id).forEach((o) => canvas.remove(o));
+      canvas.remove(obj);
+    });
+    canvas.discardActiveObject();
+    canvas.renderAll();
+    if (deletedIds.size > 0) {
+      setBuildingDetails((prev) => prev.filter((b) => !deletedIds.has(b.id)));
+    }
+    pushUndoState();
+    setIsDirty(true);
+  }, [removeMeasurements, pushUndoState]);
+
+  // ─── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Ignore when user is typing in an input, textarea, or editable element
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        handleDelete();
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.shiftKey && e.key === "z") || (e.shiftKey && e.key === "Z"))) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleDelete, handleUndo, handleRedo]);
 
   // ─── Polygon completion ────────────────────────────────────────────────────
 
@@ -1816,13 +1897,6 @@ function SitePlanContent() {
     setZoom(nz);
     const canvas = fabricRef.current;
     if (canvas) { canvas.setZoom(nz / 100); canvas.renderAll(); }
-  };
-
-  const handleDelete = () => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    canvas.getActiveObjects().forEach((obj) => { const id = (obj as any).id; if (id) removeMeasurements(id); canvas.remove(obj); });
-    canvas.discardActiveObject(); canvas.renderAll();
   };
 
   const handleClearAll = () => {
@@ -2903,8 +2977,22 @@ function SitePlanContent() {
           ) : (
             <div className="absolute inset-0 bg-white">
               <Inline3DViewer
-                buildings={buildingDetails}
+                buildings={buildingDetails.map((b) => {
+                  const canvas = fabricRef.current;
+                  let canvasX, canvasY, canvasAngle;
+                  if (canvas) {
+                    const obj = canvas.getObjects().find((o: any) => o.id === b.id || o.buildingDetailId === b.id);
+                    if (obj) {
+                      const center = obj.getCenterPoint();
+                      canvasX = center.x;
+                      canvasY = center.y;
+                      canvasAngle = obj.angle || 0;
+                    }
+                  }
+                  return { ...b, canvasX, canvasY, canvasAngle } as any;
+                })}
                 elevationPoints={elevationPoints}
+                pixelsPerMeter={currentScale.pixelsPerMeter}
                 selectedBuildingId={selectedBuildingId3d}
                 onBuildingSelect={(id) => {
                   setSelectedBuildingId3d(id ?? null);
@@ -3304,11 +3392,13 @@ function Inline3DViewer({
   buildings,
   elevationPoints = [],
   selectedBuildingId = null,
+  pixelsPerMeter = 20,
   onBuildingSelect,
 }: {
   buildings: BuildingDetail[];
   elevationPoints?: { id: string; x: number; y: number; value: number }[];
   selectedBuildingId?: string | null;
+  pixelsPerMeter?: number;
   onBuildingSelect?: (buildingId: string | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -3338,7 +3428,8 @@ function Inline3DViewer({
         camera.position.set(30, 20, 30);
         camera.lookAt(0, 0, 0);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        // Clear explicitly to avoid WebGL memory leaks on repeated unmounts
         renderer.setSize(width, height);
         renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
         renderer.shadowMap.enabled = true;
@@ -3380,22 +3471,53 @@ function Inline3DViewer({
         scene.add(new THREE.AmbientLight(0xa8b4c4, 0.6));
 
         // Ground
-        const groundGeom = new THREE.PlaneGeometry(80, 80);
+        const groundGeom = new THREE.PlaneGeometry(200, 200);
         const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7c4e, roughness: 0.95 });
         const ground = new THREE.Mesh(groundGeom, groundMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         scene.add(ground);
 
-        // Buildings
+        // Center calculation
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const buildingsToRender = buildings.length > 0 ? buildings : [createDefaultBuilding({ name: "Main Building" })];
 
-        buildingsToRender.forEach((b, i) => {
+        buildingsToRender.forEach((b: any) => {
+          if (b.canvasX !== undefined) {
+             minX = Math.min(minX, b.canvasX);
+             maxX = Math.max(maxX, b.canvasX);
+             minY = Math.min(minY, b.canvasY);
+             maxY = Math.max(maxY, b.canvasY);
+          }
+        });
+        elevationPoints.forEach((pt) => {
+          minX = Math.min(minX, pt.x);
+          maxX = Math.max(maxX, pt.x);
+          minY = Math.min(minY, pt.y);
+          maxY = Math.max(maxY, pt.y);
+        });
+
+        const centerX = minX !== Infinity ? (minX + maxX) / 2 : 400;
+        const centerY = minY !== Infinity ? (minY + maxY) / 2 : 300;
+
+        // Buildings
+        buildingsToRender.forEach((b: any, i) => {
           const totalH = b.wallHeights.ground + b.wallHeights.first + b.wallHeights.second;
           const baseY = b.altitudeM ?? 0;
           const w = b.width, d = b.depth;
           const boxColor = b.isExisting ? 0xb0b0b0 : 0xe8e4dc;
           const isSelected = selectedBuildingId === b.id;
+
+          let posX = i * (w + 3);
+          let posZ = 0;
+          let rotY = 0;
+
+          if (b.canvasX !== undefined) {
+             posX = (b.canvasX - centerX) / pixelsPerMeter;
+             posZ = (b.canvasY - centerY) / pixelsPerMeter;
+             rotY = b.canvasAngle ? -b.canvasAngle * (Math.PI / 180) : 0;
+          }
+
           const boxGeom = new THREE.BoxGeometry(w, totalH, d);
           const boxMat = new THREE.MeshStandardMaterial({
             color: boxColor,
@@ -3404,7 +3526,8 @@ function Inline3DViewer({
             emissiveIntensity: isSelected ? 0.25 : 0,
           });
           const box = new THREE.Mesh(boxGeom, boxMat);
-          box.position.set(i * (w + 3), baseY + totalH / 2, 0);
+          box.position.set(posX, baseY + totalH / 2, posZ);
+          box.rotation.y = rotY;
           box.castShadow = true;
           box.receiveShadow = true;
           (box as any).userData = { buildingId: b.id };
@@ -3415,36 +3538,54 @@ function Inline3DViewer({
           if (b.roof.type === "flat") {
             const flatGeom = new THREE.BoxGeometry(w + overhang * 2, 0.25, d + overhang * 2);
             const roof = new THREE.Mesh(flatGeom, new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.92 }));
-            roof.position.set(i * (w + 3), baseY + totalH + 0.125, 0);
+            roof.position.set(posX, baseY + totalH + 0.125, posZ);
+            roof.rotation.y = rotY;
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
           } else if (b.roof.type === "gable") {
             const pitch = (b.roof.pitch || 35) * (Math.PI / 180);
-            const roofH = (w / 2) * Math.tan(pitch);
-            const halfW = w / 2 + overhang, halfD = d / 2 + overhang;
-            const vertices = new Float32Array([
-              -halfW, baseY + totalH, -halfD, halfW, baseY + totalH, -halfD, 0, baseY + totalH + roofH, 0,
-              halfW, baseY + totalH, -halfD, halfW, baseY + totalH, halfD, 0, baseY + totalH + roofH, 0,
-              halfW, baseY + totalH, halfD, -halfW, baseY + totalH, halfD, 0, baseY + totalH + roofH, 0,
-              -halfW, baseY + totalH, halfD, -halfW, baseY + totalH, -halfD, 0, baseY + totalH + roofH, 0,
+            const over = overhang;
+            const halfW = w / 2 + over;
+            const halfD = d / 2 + over;
+            const isSpanX = w < d;
+            const roofH = isSpanX ? (w / 2) * Math.tan(pitch) : (d / 2) * Math.tan(pitch);
+            
+            const r1 = isSpanX ? [0, roofH, -halfD] : [-halfW, roofH, 0];
+            const r2 = isSpanX ? [0, roofH, halfD] : [halfW, roofH, 0];
+            const p1 = [-halfW, 0, halfD];
+            const p2 = [halfW, 0, halfD];
+            const p3 = [halfW, 0, -halfD];
+            const p4 = [-halfW, 0, -halfD];
+
+            const vertices = isSpanX ? new Float32Array([
+              ...p4, ...p1, ...r1,   ...p1, ...r2, ...r1,
+              ...p2, ...p3, ...r2,   ...p3, ...r1, ...r2,
+              ...p1, ...p2, ...r2,   ...p3, ...p4, ...r1
+            ]) : new Float32Array([
+              ...p1, ...p2, ...r1,   ...p2, ...r2, ...r1,
+              ...p3, ...p4, ...r2,   ...p4, ...r1, ...r2,
+              ...p4, ...p1, ...r1,   ...p2, ...p3, ...r2
             ]);
+
             const geom = new THREE.BufferGeometry();
             geom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
             geom.computeVertexNormals();
             const roof = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 }));
-            roof.position.x = i * (w + 3);
+            roof.position.set(posX, baseY + totalH, posZ);
+            roof.rotation.y = rotY;
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
           } else {
             const pitch = (b.roof.pitch || 35) * (Math.PI / 180);
             const roofH = (Math.max(w, d) / 2) * Math.tan(pitch);
-            const size = Math.sqrt(w * w + d * d) / 2 + overhang;
-            const roofGeom = new THREE.ConeGeometry(size, roofH, 4);
+            const size = Math.max(w, d) / 2 + overhang; // Use regular hip pyramid based on Square size. 
+            // In Threejs ConeGeometry: radius, height, radialSegments
+            const roofGeom = new THREE.ConeGeometry(size * Math.SQRT2, roofH, 4);
             const roof = new THREE.Mesh(roofGeom, new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 }));
-            roof.rotation.y = Math.PI / 4;
-            roof.position.set(i * (w + 3), baseY + totalH + roofH / 2, 0);
+            roof.rotation.y = rotY + Math.PI / 4;
+            roof.position.set(posX, baseY + totalH + roofH / 2, posZ);
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
@@ -3459,17 +3600,58 @@ function Inline3DViewer({
           for (let fi = 0; fi < floorHeights.length; fi++) {
             const floorBase = baseY + floorHeights.slice(0, fi).reduce((a, b2) => a + b2, 0);
             const cy = floorBase + floorHeights[fi] / 2;
+            
+            // X-axis mapping for windows (Front/Back)
             for (let wi = 0; wi < nWinX; wi++) {
               const cx = ((wi + 1) / (nWinX + 1)) * w - w / 2;
-              const g = new THREE.PlaneGeometry(winW, winH);
-              const w1 = new THREE.Mesh(g, winMat); w1.position.set(i * (w + 3) + cx, cy, d / 2 + 0.02); (w1 as any).userData = { buildingId: b.id }; scene.add(w1);
-              const w2 = new THREE.Mesh(g.clone(), winMat); w2.position.set(i * (w + 3) + cx, cy, -d / 2 - 0.02); w2.rotation.y = Math.PI; (w2 as any).userData = { buildingId: b.id }; scene.add(w2);
+              
+              const g1 = new THREE.PlaneGeometry(winW, winH);
+              const w1 = new THREE.Mesh(g1, winMat); 
+              w1.position.set(cx, cy, d / 2 + 0.02); 
+              (w1 as any).userData = { buildingId: b.id }; 
+              scene.add(w1);
+              
+              const g2 = new THREE.PlaneGeometry(winW, winH);
+              const w2 = new THREE.Mesh(g2, winMat); 
+              w2.position.set(cx, cy, -d / 2 - 0.02); 
+              w2.rotation.y = Math.PI; 
+              (w2 as any).userData = { buildingId: b.id }; 
+              scene.add(w2);
+
+              // Position them relative to the root building center
+              w1.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+              w1.position.x += posX; w1.position.z += posZ;
+              w1.rotation.y += rotY;
+
+              w2.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+              w2.position.x += posX; w2.position.z += posZ;
+              w2.rotation.y += rotY;
             }
+            // Z-axis mapping for windows (Left/Right)
             for (let wi = 0; wi < nWinZ; wi++) {
               const cz = ((wi + 1) / (nWinZ + 1)) * d - d / 2;
-              const g = new THREE.PlaneGeometry(winW, winH);
-              const w1 = new THREE.Mesh(g, winMat); w1.position.set(i * (w + 3) + w / 2 + 0.02, cy, cz); w1.rotation.y = -Math.PI / 2; (w1 as any).userData = { buildingId: b.id }; scene.add(w1);
-              const w2 = new THREE.Mesh(g.clone(), winMat); w2.position.set(i * (w + 3) - w / 2 - 0.02, cy, cz); w2.rotation.y = Math.PI / 2; (w2 as any).userData = { buildingId: b.id }; scene.add(w2);
+              
+              const g1 = new THREE.PlaneGeometry(winW, winH);
+              const w1 = new THREE.Mesh(g1, winMat); 
+              w1.position.set(w / 2 + 0.02, cy, cz); 
+              w1.rotation.y = -Math.PI / 2; 
+              (w1 as any).userData = { buildingId: b.id }; 
+              scene.add(w1);
+
+              const g2 = new THREE.PlaneGeometry(winW, winH);
+              const w2 = new THREE.Mesh(g2, winMat); 
+              w2.position.set(-w / 2 - 0.02, cy, cz); 
+              w2.rotation.y = Math.PI / 2; 
+              (w2 as any).userData = { buildingId: b.id }; 
+              scene.add(w2);
+
+              w1.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+              w1.position.x += posX; w1.position.z += posZ;
+              w1.rotation.y += rotY;
+
+              w2.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+              w2.position.x += posX; w2.position.z += posZ;
+              w2.rotation.y += rotY;
             }
           }
         });
@@ -3481,16 +3663,16 @@ function Inline3DViewer({
         northArrow.position.set(-15, 0.4, -15);
         scene.add(northArrow);
 
-        // Elevation points as markers (spec 2.5) — canvas coords normalized to -20..20, height = value
-        const canvasW = 800, canvasH = 600;
+        // Elevation points as markers
         elevationPoints.forEach((pt) => {
-          const nx = (pt.x / canvasW) * 40 - 20;
-          const nz = (pt.y / canvasH) * 40 - 20;
+          const nx = (pt.x - centerX) / pixelsPerMeter;
+          const nz = (pt.y - centerY) / pixelsPerMeter;
           const geom = new THREE.ConeGeometry(0.25, 0.6, 6);
           const mat = new THREE.MeshStandardMaterial({ color: 0x0ea5e9 });
           const mesh = new THREE.Mesh(geom, mat);
           mesh.position.set(nx, pt.value + 0.3, nz);
           scene.add(mesh);
+          
           const labelGeom = new THREE.SphereGeometry(0.15, 8, 8);
           const labelMat = new THREE.MeshStandardMaterial({ color: 0x0284c7 });
           const labelMesh = new THREE.Mesh(labelGeom, labelMat);

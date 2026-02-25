@@ -21,7 +21,7 @@ export interface BuildingOpening {
   sillHeight: number; // meters from floor
   count: number;
   /** Shutter type (spec 2.6: hinged or rolling) */
-  shutter?: "hinged" | "rolling" | "none";
+  shutter?: "none" | "roller_shutter" | "traditional_shutter" | "venetian" | "hinged";
 }
 
 export interface BuildingDetail {

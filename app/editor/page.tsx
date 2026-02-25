@@ -45,6 +45,11 @@ import {
   ToggleLeft,
   ToggleRight,
   MessageSquare,
+  Undo,
+  Redo,
+  Copy,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep } from "@/lib/step-flow";
@@ -237,6 +242,19 @@ function EditorPageContent() {
   const [currentMeasurement, setCurrentMeasurement] = useState<string>("");
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
+
+  // ──── Refs for drawing state (avoids stale closures in fabric event handlers) ────
+  const isDrawingRef = useRef(false);
+  const drawingStartRef = useRef<{ x: number; y: number } | null>(null);
+  const tempShapeRef = useRef<fabric.FabricObject | null>(null);
+  const activeToolRef = useRef<Tool>("select");
+  const activeColorRef = useRef("#3b82f6");
+  const strokeWidthRef = useRef(2);
+  const snapEnabledRef = useRef(true);
+  const scaleRef = useRef(SCALES[1]);
+  const activeSurfaceTypeRef = useRef(SURFACE_TYPES[4]);
+  const activeVrdTypeRef = useRef(VRD_TYPES[0]);
+  const parcelBoundaryRestrictionRef = useRef(true);
   const measurementLabelsRef = useRef<Map<string, fabric.FabricObject[]>>(new Map());
   const [activeSurfaceType, setActiveSurfaceType] = useState(SURFACE_TYPES[4]); // building default
   const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
@@ -263,6 +281,28 @@ function EditorPageContent() {
   const elevationMarkerCounterRef = useRef(0);
   const sectionLineCounterRef = useRef(0);
 
+  // Ref to hold overlay sync functions (populated later, called from early useEffects)
+  const overlayFnsRef = useRef<{
+    drawOverhangOverlay: (obj: fabric.FabricObject) => void;
+    drawShutterIndicator: (obj: fabric.FabricObject) => void;
+    drawInteriorPartitions: (obj: fabric.FabricObject) => void;
+  } | null>(null);
+
+  // ──── Undo / Redo history system ────
+  const undoStackRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const isRestoringRef = useRef(false); // flag to stop saveState during undo/redo restore
+  const MAX_HISTORY = 50;
+
+  // Helper: filter only user-drawn objects (not grid, measurements, overlays, previews)
+  const isUserObject = useCallback((obj: fabric.FabricObject): boolean => {
+    const o = obj as any;
+    return !o.isGrid && !o.isMeasurement && !o.isPolygonPreview
+      && !o.isOverhangOverlay && !o.isShutterIndicator && !o.isInteriorPartition
+      && !o.excludeFromExport
+      && obj.selectable !== false; // temp shapes are selectable:false
+  }, []);
+
   const updateLayers = useCallback((canvas: fabric.Canvas) => {
     const objects = canvas.getObjects().filter(obj => {
       const customObj = obj as any;
@@ -277,6 +317,150 @@ function EditorPageContent() {
     }));
     setLayers(newLayers.reverse());
   }, []);
+
+  const saveState = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || isRestoringRef.current) return;
+    // Serialize only user objects with their custom properties
+    const userObjects = canvas.getObjects().filter(isUserObject);
+    const serialized = userObjects.map(obj => {
+      const json = obj.toJSON();
+      // Preserve custom properties
+      const custom = obj as any;
+      const props: Record<string, any> = {};
+      const customKeys = ['id', 'elementName', 'name', 'surfaceType', 'isParcel', 'isVrd', 'vrdType',
+        'templateType', 'roofType', 'roofPitch', 'roofOverhang', 'shutterType', 'showInteriorLayout',
+        'interiorRoomCount'];
+      customKeys.forEach(k => { if (custom[k] !== undefined) props[k] = custom[k]; });
+      return { ...json, _custom: props };
+    });
+    undoStackRef.current.push(JSON.stringify(serialized));
+    if (undoStackRef.current.length > MAX_HISTORY) undoStackRef.current.shift();
+    redoStackRef.current = []; // clear redo when new action happens
+  }, [isUserObject]);
+
+  const restoreSnapshot = useCallback(async (snapshotJson: string) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    isRestoringRef.current = true;
+
+    // Remove current user objects only
+    const currentUserObjs = canvas.getObjects().filter(isUserObject);
+    currentUserObjs.forEach(obj => canvas.remove(obj));
+
+    // Also remove measurement labels
+    measurementLabelsRef.current.clear();
+    const measObjs = canvas.getObjects().filter(obj => (obj as any).isMeasurement);
+    measObjs.forEach(obj => canvas.remove(obj));
+
+    // Remove overlay objects
+    const overlayObjs = canvas.getObjects().filter(obj => {
+      const o = obj as any;
+      return o.isOverhangOverlay || o.isShutterIndicator || o.isInteriorPartition;
+    });
+    overlayObjs.forEach(obj => canvas.remove(obj));
+
+    // Restore from snapshot
+    const parsed: any[] = JSON.parse(snapshotJson);
+    for (const data of parsed) {
+      const customProps = data._custom || {};
+      delete data._custom;
+
+      try {
+        const objects = await fabric.util.enlivenObjects([data]);
+        if (objects.length > 0) {
+          const obj = objects[0] as fabric.FabricObject;
+          // Re-apply custom properties
+          Object.entries(customProps).forEach(([k, v]) => {
+            (obj as any)[k] = v;
+          });
+          canvas.add(obj);
+        }
+      } catch (err) {
+        console.warn('Failed to restore object:', err);
+      }
+    }
+
+    canvas.renderAll();
+    updateLayers(canvas);
+    isRestoringRef.current = false;
+  }, [isUserObject, updateLayers]);
+
+  const handleUndo = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || undoStackRef.current.length === 0) return;
+    // Save current state to redo stack
+    const userObjects = canvas.getObjects().filter(isUserObject);
+    const currentJson = JSON.stringify(userObjects.map(obj => {
+      const json = obj.toJSON();
+      const custom = obj as any;
+      const props: Record<string, any> = {};
+      const customKeys = ['id', 'elementName', 'name', 'surfaceType', 'isParcel', 'isVrd', 'vrdType',
+        'templateType', 'roofType', 'roofPitch', 'roofOverhang', 'shutterType', 'showInteriorLayout',
+        'interiorRoomCount'];
+      customKeys.forEach(k => { if (custom[k] !== undefined) props[k] = custom[k]; });
+      return { ...json, _custom: props };
+    }));
+    redoStackRef.current.push(currentJson);
+    const prevState = undoStackRef.current.pop()!;
+    restoreSnapshot(prevState);
+  }, [isUserObject, restoreSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || redoStackRef.current.length === 0) return;
+    // Save current state to undo stack
+    const userObjects = canvas.getObjects().filter(isUserObject);
+    const currentJson = JSON.stringify(userObjects.map(obj => {
+      const json = obj.toJSON();
+      const custom = obj as any;
+      const props: Record<string, any> = {};
+      const customKeys = ['id', 'elementName', 'name', 'surfaceType', 'isParcel', 'isVrd', 'vrdType',
+        'templateType', 'roofType', 'roofPitch', 'roofOverhang', 'shutterType', 'showInteriorLayout',
+        'interiorRoomCount'];
+      customKeys.forEach(k => { if (custom[k] !== undefined) props[k] = custom[k]; });
+      return { ...json, _custom: props };
+    }));
+    undoStackRef.current.push(currentJson);
+    const nextState = redoStackRef.current.pop()!;
+    restoreSnapshot(nextState);
+  }, [isUserObject, restoreSnapshot]);
+
+  const toggleLayerVisibility = useCallback((layerId: string) => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const obj = canvas.getObjects().find((o: fabric.FabricObject) => (o as any).id === layerId);
+    if (obj) {
+      obj.visible = !obj.visible;
+      canvas.renderAll();
+      updateLayers(canvas);
+    }
+  }, [updateLayers]);
+
+  const handleDuplicate = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || !selectedObject) return;
+    saveState();
+    selectedObject.clone().then((cloned: fabric.FabricObject) => {
+      cloned.set({ left: (cloned.left || 0) + 20, top: (cloned.top || 0) + 20 });
+      const newId = `clone-${Date.now()}`;
+      (cloned as any).id = newId;
+      (cloned as any).elementName = ((selectedObject as any).elementName || 'Object') + ' Copy';
+      canvas.add(cloned);
+      canvas.setActiveObject(cloned);
+      canvas.renderAll();
+    });
+  }, [selectedObject, saveState]);
+
+  const handleToggleLock = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || !selectedObject) return;
+    const isLocked = !selectedObject.selectable;
+    selectedObject.set({ selectable: !isLocked, evented: !isLocked });
+    canvas.discardActiveObject();
+    canvas.renderAll();
+    updateLayers(canvas);
+  }, [selectedObject, updateLayers]);
 
   // Sync project from URL
   useEffect(() => {
@@ -952,17 +1136,31 @@ function EditorPageContent() {
       setSelectedObject(null);
     });
 
-    // Object modification events - update measurements and run real-time compliance
+    // Object modification events - update measurements, overlays, and run compliance
     canvas.on("object:modified", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
+        // Sync overlays that need to follow the object
+        const fns = overlayFnsRef.current;
+        if (fns) {
+          if ((e.target as any).roofOverhang !== undefined) fns.drawOverhangOverlay(e.target);
+          if ((e.target as any).shutterType && (e.target as any).shutterType !== 'none') fns.drawShutterIndicator(e.target);
+          if ((e.target as any).showInteriorLayout) fns.drawInteriorPartitions(e.target);
+        }
       }
+      saveState();
       runComplianceCheck();
     });
 
     canvas.on("object:scaling", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
+        const fns = overlayFnsRef.current;
+        if (fns) {
+          if ((e.target as any).roofOverhang !== undefined) fns.drawOverhangOverlay(e.target);
+          if ((e.target as any).shutterType && (e.target as any).shutterType !== 'none') fns.drawShutterIndicator(e.target);
+          if ((e.target as any).showInteriorLayout) fns.drawInteriorPartitions(e.target);
+        }
       }
       runComplianceCheck();
     });
@@ -970,6 +1168,12 @@ function EditorPageContent() {
     canvas.on("object:moving", (e) => {
       if (e.target) {
         updateObjectMeasurements(e.target);
+        const fns = overlayFnsRef.current;
+        if (fns) {
+          if ((e.target as any).roofOverhang !== undefined) fns.drawOverhangOverlay(e.target);
+          if ((e.target as any).shutterType && (e.target as any).shutterType !== 'none') fns.drawShutterIndicator(e.target);
+          if ((e.target as any).showInteriorLayout) fns.drawInteriorPartitions(e.target);
+        }
       }
       runComplianceCheck();
     });
@@ -988,9 +1192,20 @@ function EditorPageContent() {
       setCanvasReady(false);
       canvas.dispose();
     };
-  }, [canvasSize, showGrid, drawGrid, updateObjectMeasurements, updateLayers, runComplianceCheck]);
+  }, [canvasSize, showGrid, drawGrid, updateObjectMeasurements, updateLayers, runComplianceCheck, saveState]);
+
+  // ──── Keep refs in sync with state (so fabric handlers always see latest values) ────
+  activeToolRef.current = activeTool;
+  activeColorRef.current = activeColor;
+  strokeWidthRef.current = strokeWidth;
+  snapEnabledRef.current = snapEnabled;
+  scaleRef.current = currentScale;
+  activeSurfaceTypeRef.current = activeSurfaceType;
+  activeVrdTypeRef.current = activeVrdType;
+  parcelBoundaryRestrictionRef.current = parcelBoundaryRestriction;
 
   // Mouse event handlers for drawing with live measurements
+  // Uses REFS for all drawing state to avoid stale closures - binds ONCE
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
@@ -999,59 +1214,66 @@ function EditorPageContent() {
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
       setMousePos({ x: pointer.x, y: pointer.y });
 
-      if (isDrawing && drawingStart) {
-        const distance = calculateDistance(drawingStart.x, drawingStart.y, pointer.x, pointer.y);
+      const drawing = isDrawingRef.current;
+      const start = drawingStartRef.current;
+      const tool = activeToolRef.current;
+
+      if (drawing && start) {
+        const distance = calculateDistance(start.x, start.y, pointer.x, pointer.y);
 
         // Update live measurement display based on tool
-        if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd") {
+        if (tool === "line" || tool === "measure" || tool === "vrd") {
           setCurrentMeasurement(formatMeasurement(distance));
-        } else if (activeTool === "rectangle") {
-          const width = pixelsToMeters(Math.abs(pointer.x - drawingStart.x));
-          const height = pixelsToMeters(Math.abs(pointer.y - drawingStart.y));
+        } else if (tool === "rectangle") {
+          const width = pixelsToMeters(Math.abs(pointer.x - start.x));
+          const height = pixelsToMeters(Math.abs(pointer.y - start.y));
           setCurrentMeasurement(`${formatMeasurement(width)} × ${formatMeasurement(height)}`);
-        } else if (activeTool === "circle") {
+        } else if (tool === "circle") {
           setCurrentMeasurement(`Ø ${formatMeasurement(distance * 2)}`);
         }
 
         // Update temporary shape preview
-        if (tempShape) {
-          canvas.remove(tempShape);
+        const oldTemp = tempShapeRef.current;
+        if (oldTemp) {
+          canvas.remove(oldTemp);
         }
 
         let newTempShape: fabric.FabricObject | null = null;
+        const color = activeColorRef.current;
+        const sw = strokeWidthRef.current;
 
-        if (activeTool === "line" || activeTool === "measure" || activeTool === "vrd") {
-          const vrdColor = activeTool === "vrd" ? activeVrdType.color : undefined;
-          newTempShape = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
-            stroke: activeTool === "measure" ? "#22c55e" : vrdColor || activeColor,
-            strokeWidth: activeTool === "measure" ? 2 : strokeWidth,
-            strokeDashArray: activeTool === "measure" || activeTool === "vrd" ? [8, 4] : undefined,
+        if (tool === "line" || tool === "measure" || tool === "vrd") {
+          const vrdColor = tool === "vrd" ? activeVrdTypeRef.current.color : undefined;
+          newTempShape = new fabric.Line([start.x, start.y, pointer.x, pointer.y], {
+            stroke: tool === "measure" ? "#22c55e" : vrdColor || color,
+            strokeWidth: tool === "measure" ? 2 : sw,
+            strokeDashArray: tool === "measure" || tool === "vrd" ? [8, 4] : undefined,
             selectable: false,
             evented: false,
           });
-        } else if (activeTool === "rectangle") {
-          const left = Math.min(drawingStart.x, pointer.x);
-          const top = Math.min(drawingStart.y, pointer.y);
+        } else if (tool === "rectangle") {
+          const left = Math.min(start.x, pointer.x);
+          const top = Math.min(start.y, pointer.y);
           newTempShape = new fabric.Rect({
             left,
             top,
-            width: Math.abs(pointer.x - drawingStart.x),
-            height: Math.abs(pointer.y - drawingStart.y),
+            width: Math.abs(pointer.x - start.x),
+            height: Math.abs(pointer.y - start.y),
             fill: "transparent",
-            stroke: activeColor,
-            strokeWidth: strokeWidth,
+            stroke: color,
+            strokeWidth: sw,
             selectable: false,
             evented: false,
           });
-        } else if (activeTool === "circle") {
-          const radiusPx = Math.sqrt(Math.pow(pointer.x - drawingStart.x, 2) + Math.pow(pointer.y - drawingStart.y, 2));
+        } else if (tool === "circle") {
+          const radiusPx = Math.sqrt(Math.pow(pointer.x - start.x, 2) + Math.pow(pointer.y - start.y, 2));
           newTempShape = new fabric.Circle({
-            left: drawingStart.x - radiusPx,
-            top: drawingStart.y - radiusPx,
+            left: start.x - radiusPx,
+            top: start.y - radiusPx,
             radius: radiusPx,
             fill: "transparent",
-            stroke: activeColor,
-            strokeWidth: strokeWidth,
+            stroke: color,
+            strokeWidth: sw,
             selectable: false,
             evented: false,
           });
@@ -1059,49 +1281,52 @@ function EditorPageContent() {
 
         if (newTempShape) {
           canvas.add(newTempShape);
+          tempShapeRef.current = newTempShape;
           setTempShape(newTempShape);
+        } else {
+          tempShapeRef.current = null;
+          setTempShape(null);
         }
       }
     };
 
     const handleMouseDown = (e: fabric.TPointerEventInfo) => {
-      if (activeTool === "select" || activeTool === "pan" || activeTool === "pencil") return;
+      const tool = activeToolRef.current;
+      if (tool === "select" || tool === "pan" || tool === "pencil") return;
 
       const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
 
       // Check parcel boundary restriction if enabled
-      if (parcelBoundaryRestriction && activeTool !== "parcel") {
+      if (parcelBoundaryRestrictionRef.current && tool !== "parcel") {
         const parcels = canvas.getObjects().filter((o: fabric.FabricObject) => (o as any).isParcel);
         if (parcels.length > 0) {
           const isInsideAnyParcel = parcels.some((parcel) => {
             return parcel.containsPoint(new fabric.Point(pointer.x, pointer.y));
           });
           if (!isInsideAnyParcel) {
-            // Show warning but don't block completely
             console.warn("Drawing outside parcel boundary");
           }
         }
       }
 
       // Elevation marker mode - place elevation marker on click
-      if (activeTool === "elevation-marker") {
+      if (tool === "elevation-marker") {
         addElevationMarker(pointer.x, pointer.y);
         return;
       }
 
       // Access point mode - place access point on click
-      if (activeTool === "access-point") {
+      if (tool === "access-point") {
         addAccessPoint(pointer.x, pointer.y);
         return;
       }
 
       // Section line mode - draw section line
-      if (activeTool === "section-line") {
+      if (tool === "section-line") {
         setPolygonPoints(prev => {
           if (prev.length === 0) {
             return [{ x: pointer.x, y: pointer.y }];
           } else if (prev.length === 1) {
-            // Complete section line with second point
             addSectionLine(prev[0].x, prev[0].y, pointer.x, pointer.y);
             return [];
           }
@@ -1111,25 +1336,25 @@ function EditorPageContent() {
       }
 
       // Freeform shape mode - add points on click
-      if (activeTool === "freeform") {
+      if (tool === "freeform") {
         setPolygonPoints(prev => [...prev, { x: pointer.x, y: pointer.y }]);
         return;
       }
 
       // Annotation mode - place annotation on click
-      if (activeTool === "annotation") {
+      if (tool === "annotation") {
         addAnnotation(pointer.x, pointer.y);
         return;
       }
 
       // Text tool - place editable text on click
-      if (activeTool === "text") {
+      if (tool === "text") {
         const textObj = new fabric.IText("Text", {
           left: pointer.x,
           top: pointer.y,
           fontSize: 16,
           fontFamily: "sans-serif",
-          fill: activeColor,
+          fill: activeColorRef.current,
           editable: true,
         });
         const shapeId = `text-${Date.now()}`;
@@ -1143,65 +1368,107 @@ function EditorPageContent() {
       }
 
       // Polygon/Parcel mode - add points on click
-      if (activeTool === "polygon" || activeTool === "parcel") {
+      if (tool === "polygon" || tool === "parcel") {
         setPolygonPoints(prev => [...prev, { x: pointer.x, y: pointer.y }]);
         return;
       }
 
+      // Don't start a new drawing if already drawing
+      if (isDrawingRef.current) return;
+
+      // Snap to grid if enabled
+      let startX = pointer.x;
+      let startY = pointer.y;
+      if (snapEnabledRef.current) {
+        const gridSize = scaleRef.current.pixelsPerMeter;
+        startX = Math.round(startX / gridSize) * gridSize;
+        startY = Math.round(startY / gridSize) * gridSize;
+      }
+      isDrawingRef.current = true;
+      drawingStartRef.current = { x: startX, y: startY };
       setIsDrawing(true);
-      setDrawingStart({ x: pointer.x, y: pointer.y });
+      setDrawingStart({ x: startX, y: startY });
     };
 
     const handleMouseUp = (e: fabric.TPointerEventInfo) => {
-      if (!isDrawing || !drawingStart) return;
+      if (!isDrawingRef.current || !drawingStartRef.current) return;
 
-      const pointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
+      const rawPointer = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
+      const tool = activeToolRef.current;
+      const start = drawingStartRef.current;
+      const surfType = activeSurfaceTypeRef.current;
+      const color = activeColorRef.current;
+      const sw = strokeWidthRef.current;
+
+      // Snap end point to grid if enabled
+      const pointer = snapEnabledRef.current ? {
+        x: Math.round(rawPointer.x / scaleRef.current.pixelsPerMeter) * scaleRef.current.pixelsPerMeter,
+        y: Math.round(rawPointer.y / scaleRef.current.pixelsPerMeter) * scaleRef.current.pixelsPerMeter,
+      } : { x: rawPointer.x, y: rawPointer.y };
 
       // Remove temp shape
-      if (tempShape) {
-        canvas.remove(tempShape);
+      const oldTemp = tempShapeRef.current;
+      if (oldTemp) {
+        canvas.remove(oldTemp);
+        tempShapeRef.current = null;
         setTempShape(null);
       }
+
+      // Track if a shape was actually created
+      let createdShape: fabric.FabricObject | null = null;
 
       // Create final shape with unique ID for measurement tracking
       const shapeId = `shape-${Date.now()}`;
 
-      if (activeTool === "line") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
-          stroke: activeColor,
-          strokeWidth: strokeWidth,
-        });
-        (line as any).id = shapeId;
-        (line as any).elementName = "Line";
-        canvas.add(line);
-        addLineMeasurement(line, shapeId);
-      } else if (activeTool === "vrd") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
-          stroke: activeVrdType.color,
-          strokeWidth: strokeWidth,
-          strokeDashArray: [8, 4],
-        });
-        (line as any).id = shapeId;
-        (line as any).isVrd = true;
-        (line as any).vrdType = activeVrdType.id;
-        (line as any).elementName = activeVrdType.label;
-        canvas.add(line);
-        addLineMeasurement(line, shapeId);
-      } else if (activeTool === "measure") {
-        const line = new fabric.Line([drawingStart.x, drawingStart.y, pointer.x, pointer.y], {
-          stroke: "#22c55e",
-          strokeWidth: 2,
-          strokeDashArray: [5, 5],
-        });
-        (line as any).id = shapeId;
-        (line as any).elementName = "Measure";
-        canvas.add(line);
-        addLineMeasurement(line, shapeId);
-      } else if (activeTool === "rectangle") {
-        const left = Math.min(drawingStart.x, pointer.x);
-        const top = Math.min(drawingStart.y, pointer.y);
-        const width = Math.abs(pointer.x - drawingStart.x);
-        const height = Math.abs(pointer.y - drawingStart.y);
+      if (tool === "line") {
+        const dist = Math.sqrt(Math.pow(pointer.x - start.x, 2) + Math.pow(pointer.y - start.y, 2));
+        if (dist > 5) {
+          const line = new fabric.Line([start.x, start.y, pointer.x, pointer.y], {
+            stroke: color,
+            strokeWidth: sw,
+          });
+          (line as any).id = shapeId;
+          (line as any).elementName = "Line";
+          canvas.add(line);
+          addLineMeasurement(line, shapeId);
+          createdShape = line;
+        }
+      } else if (tool === "vrd") {
+        const dist = Math.sqrt(Math.pow(pointer.x - start.x, 2) + Math.pow(pointer.y - start.y, 2));
+        if (dist > 5) {
+          const vrdType = activeVrdTypeRef.current;
+          const line = new fabric.Line([start.x, start.y, pointer.x, pointer.y], {
+            stroke: vrdType.color,
+            strokeWidth: sw,
+            strokeDashArray: [8, 4],
+          });
+          (line as any).id = shapeId;
+          (line as any).isVrd = true;
+          (line as any).vrdType = vrdType.id;
+          (line as any).elementName = vrdType.label;
+          canvas.add(line);
+          addLineMeasurement(line, shapeId);
+          createdShape = line;
+        }
+      } else if (tool === "measure") {
+        const dist = Math.sqrt(Math.pow(pointer.x - start.x, 2) + Math.pow(pointer.y - start.y, 2));
+        if (dist > 5) {
+          const line = new fabric.Line([start.x, start.y, pointer.x, pointer.y], {
+            stroke: "#22c55e",
+            strokeWidth: 2,
+            strokeDashArray: [5, 5],
+          });
+          (line as any).id = shapeId;
+          (line as any).elementName = "Measure";
+          canvas.add(line);
+          addLineMeasurement(line, shapeId);
+          createdShape = line;
+        }
+      } else if (tool === "rectangle") {
+        const left = Math.min(start.x, pointer.x);
+        const top = Math.min(start.y, pointer.y);
+        const width = Math.abs(pointer.x - start.x);
+        const height = Math.abs(pointer.y - start.y);
 
         if (width > 5 && height > 5) {
           const rect = new fabric.Rect({
@@ -1209,36 +1476,55 @@ function EditorPageContent() {
             top,
             width,
             height,
-            fill: activeSurfaceType.fill,
-            stroke: activeSurfaceType.color,
-            strokeWidth: strokeWidth,
+            fill: surfType.fill,
+            stroke: surfType.color,
+            strokeWidth: sw,
           });
           (rect as any).id = shapeId;
-          (rect as any).surfaceType = activeSurfaceType.id;
-          (rect as any).elementName = activeSurfaceType.label || "Building";
+          (rect as any).surfaceType = surfType.id;
+          (rect as any).elementName = surfType.label || "Building";
           canvas.add(rect);
           addRectMeasurements(rect, shapeId);
+          createdShape = rect;
         }
-      } else if (activeTool === "circle") {
-        const radiusPx = Math.sqrt(Math.pow(pointer.x - drawingStart.x, 2) + Math.pow(pointer.y - drawingStart.y, 2));
+      } else if (tool === "circle") {
+        const radiusPx = Math.sqrt(Math.pow(pointer.x - start.x, 2) + Math.pow(pointer.y - start.y, 2));
         if (radiusPx > 5) {
           const circle = new fabric.Circle({
-            left: drawingStart.x - radiusPx,
-            top: drawingStart.y - radiusPx,
+            left: start.x - radiusPx,
+            top: start.y - radiusPx,
             radius: radiusPx,
-            fill: activeSurfaceType.fill,
-            stroke: activeSurfaceType.color,
-            strokeWidth: strokeWidth,
+            fill: surfType.fill,
+            stroke: surfType.color,
+            strokeWidth: sw,
           });
-          (circle as any).surfaceType = activeSurfaceType.id;
+          (circle as any).surfaceType = surfType.id;
           (circle as any).id = shapeId;
-          (circle as any).elementName = activeSurfaceType.label || "Circle";
+          (circle as any).elementName = surfType.label || "Circle";
           canvas.add(circle);
           addCircleMeasurements(circle, shapeId);
+          createdShape = circle;
         }
       }
 
+      // Only save state if a shape was actually created
+      if (createdShape) {
+        saveState();
+        // Auto-select the new shape and switch to select tool
+        canvas.setActiveObject(createdShape);
+        setSelectedObject(createdShape);
+        // Auto-switch back to select mode after drawing
+        activeToolRef.current = "select";
+        setActiveTool("select");
+        canvas.isDrawingMode = false;
+        canvas.selection = true;
+      }
+
       canvas.renderAll();
+
+      // Reset drawing state via refs
+      isDrawingRef.current = false;
+      drawingStartRef.current = null;
       setIsDrawing(false);
       setDrawingStart(null);
       setCurrentMeasurement("");
@@ -1253,7 +1539,8 @@ function EditorPageContent() {
       canvas.off("mouse:down", handleMouseDown);
       canvas.off("mouse:up", handleMouseUp);
     };
-  }, [activeTool, isDrawing, drawingStart, tempShape, activeColor, strokeWidth, activeVrdType, activeSurfaceType, calculateDistance, formatMeasurement, pixelsToMeters, addLineMeasurement, addRectMeasurements, addCircleMeasurements]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasReady]); // Only rebind when canvas is ready - all other state accessed via refs
 
   // Handle polygon completion with double-click
   useEffect(() => {
@@ -1681,6 +1968,7 @@ function EditorPageContent() {
   const handleDelete = () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+    saveState();
 
     const activeObjects = canvas.getActiveObjects();
     activeObjects.forEach(obj => {
@@ -1697,12 +1985,16 @@ function EditorPageContent() {
   const handleClearAll = () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+    if (!window.confirm('Clear all objects from the canvas? This cannot be undone.')) return;
+    saveState();
 
     // Remove all non-grid objects
     const objects = canvas.getObjects().filter(obj => !(obj as any).isGrid);
     objects.forEach(obj => canvas.remove(obj));
 
     measurementLabelsRef.current.clear();
+    undoStackRef.current = [];
+    redoStackRef.current = [];
     canvas.renderAll();
   };
 
@@ -1914,12 +2206,16 @@ function EditorPageContent() {
     });
   }, []);
 
+  // Populate overlay functions ref so early useEffects can call them
+  overlayFnsRef.current = { drawOverhangOverlay, drawShutterIndicator, drawInteriorPartitions };
+
   const addTemplate = (templateId: string) => {
     const canvas = fabricRef.current;
     if (!canvas) return;
 
     const template = templates.find(t => t.id === templateId);
     if (!template) return;
+    saveState();
 
     const center = canvas.getCenterPoint();
     const shapeId = `${templateId}-${Date.now()}`;
@@ -2194,6 +2490,85 @@ function EditorPageContent() {
     greenPct >= requiredGreenPct &&
     hasContent;
 
+  // ──── Keyboard Shortcuts ────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't fire shortcuts when typing in inputs/textareas or fabric IText
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+
+      // Check if we're editing text in fabric
+      const activeObj = canvas.getActiveObject();
+      if (activeObj && (activeObj as any).isEditing) return;
+
+      // Ctrl+Z / Cmd+Z → Undo
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      // Ctrl+Shift+Z / Ctrl+Y → Redo
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      // Ctrl+D → Duplicate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        handleDuplicate();
+        return;
+      }
+
+      // Delete / Backspace → Delete selected
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleDelete();
+        return;
+      }
+
+      // Escape → Cancel drawing / switch to select
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setPolygonPoints([]);
+        setIsDrawing(false);
+        setDrawingStart(null);
+        setCurrentMeasurement('');
+        if (tempShape) {
+          canvas.remove(tempShape);
+          setTempShape(null);
+        }
+        handleToolSelect('select' as Tool);
+        return;
+      }
+
+      // Tool shortcuts (single key, no modifiers)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toUpperCase();
+      const toolMap: Record<string, Tool> = {
+        'V': 'select', 'R': 'rectangle', 'C': 'circle', 'L': 'line',
+        'P': 'polygon', 'F': 'freeform', 'B': 'pencil', 'M': 'measure',
+        'A': 'parcel', 'D': 'vrd', 'E': 'elevation-marker',
+        'G': 'access-point', 'S': 'section-line', 'T': 'text',
+        'N': 'annotation', 'H': 'pan',
+      };
+      if (toolMap[key]) {
+        e.preventDefault();
+        handleToolSelect(toolMap[key]);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo, handleDuplicate, handleDelete, handleToolSelect, tempShape]);
+
   return (
     <div className="h-screen bg-white flex flex-col overflow-hidden">
       {/* Top Bar */}
@@ -2371,9 +2746,26 @@ function EditorPageContent() {
           <div className="h-6 w-px bg-white/10" />
 
           <button
-            onClick={handleClearAll}
+            onClick={handleUndo}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-            title="Clear All"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo className="w-5 h-5" />
+          </button>
+          <button
+            onClick={handleRedo}
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo className="w-5 h-5" />
+          </button>
+
+          <div className="h-6 w-px bg-slate-200" />
+
+          <button
+            onClick={handleClearAll}
+            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            title="Clear All (Reset)"
           >
             <RotateCcw className="w-5 h-5" />
           </button>
@@ -2609,7 +3001,7 @@ function EditorPageContent() {
                       <p className="text-sm text-slate-900 truncate capitalize">{layer.name}</p>
                       <p className="text-xs text-slate-500">{layer.type}</p>
                     </div>
-                    <button className="p-1 text-slate-400 hover:text-slate-900">
+                    <button onClick={() => toggleLayerVisibility(layer.id)} className="p-1 text-slate-400 hover:text-slate-900">
                       {layer.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                     </button>
                   </div>
@@ -2647,22 +3039,144 @@ function EditorPageContent() {
                   <label className="text-xs text-slate-500 block mb-1">Type</label>
                   <p className="text-sm text-slate-900 capitalize">{selectedObject.type}</p>
                 </div>
-                {selectedObject.width && (
+
+                {/* Precision dimension inputs */}
+                <div className="grid grid-cols-2 gap-2">
+                  {selectedObject.width != null && (
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Width (m)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={parseFloat(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)).toFixed(2))}
+                        onChange={(e) => {
+                          const meters = parseFloat(e.target.value);
+                          if (isNaN(meters) || meters <= 0) return;
+                          saveState();
+                          const px = metersToPixels(meters);
+                          const baseWidth = selectedObject.width || 1;
+                          selectedObject.set({ scaleX: px / baseWidth });
+                          selectedObject.setCoords();
+                          updateObjectMeasurements(selectedObject);
+                          fabricRef.current?.requestRenderAll();
+                        }}
+                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+                  {selectedObject.height != null && (
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Height (m)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        value={parseFloat(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)).toFixed(2))}
+                        onChange={(e) => {
+                          const meters = parseFloat(e.target.value);
+                          if (isNaN(meters) || meters <= 0) return;
+                          saveState();
+                          const px = metersToPixels(meters);
+                          const baseHeight = selectedObject.height || 1;
+                          selectedObject.set({ scaleY: px / baseHeight });
+                          selectedObject.setCoords();
+                          updateObjectMeasurements(selectedObject);
+                          fabricRef.current?.requestRenderAll();
+                        }}
+                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Position inputs */}
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">Width</label>
-                    <p className="text-sm text-amber-600 font-mono font-bold">
-                      {formatMeasurement(pixelsToMeters((selectedObject.width || 0) * (selectedObject.scaleX || 1)))}
-                    </p>
+                    <label className="text-xs text-slate-500 block mb-1">X (m)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={parseFloat(pixelsToMeters(selectedObject.left || 0).toFixed(2))}
+                      onChange={(e) => {
+                        const meters = parseFloat(e.target.value);
+                        if (isNaN(meters)) return;
+                        saveState();
+                        selectedObject.set({ left: metersToPixels(meters) });
+                        selectedObject.setCoords();
+                        updateObjectMeasurements(selectedObject);
+                        fabricRef.current?.requestRenderAll();
+                      }}
+                      className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
                   </div>
-                )}
-                {selectedObject.height && (
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">Height</label>
-                    <p className="text-sm text-amber-600 font-mono font-bold">
-                      {formatMeasurement(pixelsToMeters((selectedObject.height || 0) * (selectedObject.scaleY || 1)))}
-                    </p>
+                    <label className="text-xs text-slate-500 block mb-1">Y (m)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={parseFloat(pixelsToMeters(selectedObject.top || 0).toFixed(2))}
+                      onChange={(e) => {
+                        const meters = parseFloat(e.target.value);
+                        if (isNaN(meters)) return;
+                        saveState();
+                        selectedObject.set({ top: metersToPixels(meters) });
+                        selectedObject.setCoords();
+                        updateObjectMeasurements(selectedObject);
+                        fabricRef.current?.requestRenderAll();
+                      }}
+                      className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
                   </div>
-                )}
+                </div>
+
+                {/* Rotation */}
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Rotation: {Math.round(selectedObject.angle || 0)}°</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    value={Math.round(selectedObject.angle || 0)}
+                    onChange={(e) => {
+                      saveState();
+                      selectedObject.set({ angle: Number(e.target.value) });
+                      selectedObject.setCoords();
+                      updateObjectMeasurements(selectedObject);
+                      fabricRef.current?.requestRenderAll();
+                    }}
+                    className="w-full accent-blue-500"
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-1 pt-1 border-t border-slate-100">
+                  <button
+                    onClick={handleDuplicate}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-600 hover:bg-slate-100 transition-colors"
+                    title="Duplicate (Ctrl+D)"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Duplicate
+                  </button>
+                  <button
+                    onClick={handleToggleLock}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors",
+                      !selectedObject.selectable ? "bg-amber-100 text-amber-600" : "text-slate-600 hover:bg-slate-100"
+                    )}
+                    title="Lock/Unlock"
+                  >
+                    {!selectedObject.selectable ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                    {!selectedObject.selectable ? 'Locked' : 'Lock'}
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-50 transition-colors ml-auto"
+                    title="Delete (Del)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
 
                 {/* Roof Properties – for house/garage/building templates */}
                 {["house", "garage"].includes((selectedObject as any).templateType || "") && (

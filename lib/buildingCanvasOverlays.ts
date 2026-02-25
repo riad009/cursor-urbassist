@@ -284,12 +284,47 @@ export function drawBuildingOpenings(
       (openingRect as any)._overlayBuildingId = building.id;
       canvas.add(openingRect);
 
+      // Shutter graphics
+      if (op.shutter && op.shutter !== "none") {
+        const isHinged = op.shutter === "hinged" || op.shutter === "traditional_shutter";
+        if (isHinged) {
+          const shutterW = w / 2;
+          if (edge.axis === "h") {
+            const yStart = rectTop + (facade === "south" ? thickness : 0);
+            const yEnd = facade === "south" ? rectTop + thickness + shutterW : rectTop - shutterW;
+            const leftShutter = new fabric.Line([rectLeft, yStart, rectLeft - shutterW * 0.5, yEnd], { stroke: style.stroke, strokeWidth: 1.5, selectable: false, evented: false });
+            const rightShutter = new fabric.Line([rectLeft + w, yStart, rectLeft + w + shutterW * 0.5, yEnd], { stroke: style.stroke, strokeWidth: 1.5, selectable: false, evented: false });
+            (leftShutter as any).isBuildingOpening = true; (leftShutter as any)._overlayBuildingId = building.id;
+            (rightShutter as any).isBuildingOpening = true; (rightShutter as any)._overlayBuildingId = building.id;
+            canvas.add(leftShutter); canvas.add(rightShutter);
+          } else {
+            const xStart = rectLeft + (facade === "east" ? thickness : 0);
+            const xEnd = facade === "east" ? rectLeft + thickness + shutterW : rectLeft - shutterW;
+            const topShutter = new fabric.Line([xStart, rectTop, xEnd, rectTop - shutterW * 0.5], { stroke: style.stroke, strokeWidth: 1.5, selectable: false, evented: false });
+            const bottomShutter = new fabric.Line([xStart, rectTop + w, xEnd, rectTop + w + shutterW * 0.5], { stroke: style.stroke, strokeWidth: 1.5, selectable: false, evented: false });
+            (topShutter as any).isBuildingOpening = true; (topShutter as any)._overlayBuildingId = building.id;
+            (bottomShutter as any).isBuildingOpening = true; (bottomShutter as any)._overlayBuildingId = building.id;
+            canvas.add(topShutter); canvas.add(bottomShutter);
+          }
+        } else {
+          // Roller/venetian: draw a thicker line on outside edge
+          const rRect = new fabric.Rect({
+            left: edge.axis === "h" ? rectLeft : (facade === "east" ? rectLeft + thickness : rectLeft - 2),
+            top: edge.axis === "h" ? (facade === "south" ? rectTop + thickness : rectTop - 2) : rectTop,
+            width: edge.axis === "h" ? w : 2,
+            height: edge.axis === "h" ? 2 : w,
+            fill: style.stroke,
+            selectable: false, evented: false
+          });
+          (rRect as any).isBuildingOpening = true; (rRect as any)._overlayBuildingId = building.id;
+          canvas.add(rRect);
+        }
+      }
+
       // Sliding door: draw a diagonal "track" line
       if (op.type === "sliding_door") {
         const trackLine = new fabric.Line(
-          edge.axis === "h"
-            ? [rectLeft, rectTop, rectLeft + rectWidth, rectTop + rectHeight]
-            : [rectLeft, rectTop, rectLeft + rectWidth, rectTop + rectHeight],
+          [rectLeft, rectTop, rectLeft + rectWidth, rectTop + rectHeight],
           {
             stroke: style.stroke,
             strokeWidth: 1,
