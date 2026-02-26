@@ -145,14 +145,15 @@ export default function NewProjectPage() {
 
     const createProject = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newName.trim()) return;
+        if (!selectedAddress) return;
+        const projectName = newName.trim() || selectedAddress.label || "Mon projet";
         setCreating(true);
         try {
             let projectType: string | undefined;
             try { const raw = sessionStorage.getItem(DOSSIER_STORAGE_KEY); const dossier = raw ? (JSON.parse(raw) as { step2?: { projectTypes?: string[] } }) : {}; const types = dossier?.step2?.projectTypes ?? []; if (types.includes("new_construction")) projectType = "construction"; else if (types.includes("existing_extension")) projectType = "extension"; else if (types.includes("outdoor")) projectType = "outdoor"; } catch { /* ignore */ }
             const parcelIds = selectedParcelIds.length > 0 ? selectedParcelIds : parcels.map((p) => p.id);
             const parcelArea = selectedParcelIds.length > 0 ? parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((s, p) => s + p.area, 0) : parcels.reduce((s, p) => s + p.area, 0) || parcels[0]?.area;
-            const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newName.trim(), description: newName.trim() || undefined, address: newAddress.trim() || undefined, municipality: selectedAddress?.city, coordinates: selectedAddress?.coordinates, parcelIds: parcelIds.length ? parcelIds : undefined, parcelArea, northAngle: northAngleDegrees != null ? northAngleDegrees : undefined, zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName, projectType: projectType || undefined, protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined }) });
+            const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: projectName, description: projectName || undefined, address: newAddress.trim() || undefined, municipality: selectedAddress?.city, coordinates: selectedAddress?.coordinates, parcelIds: parcelIds.length ? parcelIds : undefined, parcelArea, northAngle: northAngleDegrees != null ? northAngleDegrees : undefined, zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName, projectType: projectType || undefined, protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined }) });
             const data = await res.json();
             if (data.project) { router.push(`/projects/${data.project.id}/authorization`); return; }
         } catch (err) { console.error(err); }
@@ -529,7 +530,7 @@ export default function NewProjectPage() {
                         )}
                         <button
                             type="submit"
-                            disabled={creating || !newName.trim() || (parcels.length > 0 && selectedParcelIds.length === 0)}
+                            disabled={creating || !selectedAddress || (parcels.length > 0 && selectedParcelIds.length === 0)}
                             className="flex-1 max-w-md py-3.5 rounded-full bg-indigo-600 text-white font-semibold disabled:opacity-40 hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-500/30 transition-all text-base tracking-wide"
                         >
                             {creating ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {t("newProj.creating")}</span> : (t("newProj.createProject") === "Create Project" ? "Next: What is your project?" : "Suivant : Quel est votre projet ?")}

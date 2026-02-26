@@ -211,7 +211,7 @@ export default function AuthorizationPage({
             zoneType: proj.regulatoryAnalysis?.zoneType ?? proj.zoneType,
             address: proj.address,
             regulatoryType: proj.regulatoryType,
-            isProtectedZone: proj.protectedAreas?.length > 0,
+            isProtectedZone: Array.isArray(proj.protectedAreas) && proj.protectedAreas.some((a: { type?: string }) => a.type === "ABF" || a.type === "HERITAGE"),
             coordinates: coords,
             citycode: proj.citycode,
           });
@@ -1415,21 +1415,6 @@ export default function AuthorizationPage({
                     </button>
                   </div>
 
-                  {/* Note — single-family houses & annexes */}
-                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                      <Info className="w-3.5 h-3.5" />
-                      {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                    </p>
-                    <p className="text-xs text-amber-700">
-                      {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                    </p>
-                    <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                      <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                      <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                    </ul>
-                  </div>
-
                   {/* Actions */}
                   <div className="flex gap-3">
                     <button
@@ -1565,6 +1550,120 @@ export default function AuthorizationPage({
                       className="underline hover:text-slate-600"
                     >
                       {isEn ? "to document list" : "à la liste des documents"}
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {/* ── Step 2: Payment ── */}
+              {autoDetectModal === "payment" && (
+                <div className="p-6 space-y-5">
+                  {/* Header */}
+                  <div className="text-center space-y-1">
+                    <h2 className="text-2xl font-bold text-slate-900">
+                      {isEn ? "Access our smart editor" : "Accéder à notre éditeur intelligent"}
+                    </h2>
+                    <p className="text-sm text-slate-500">{projectData?.name}</p>
+                  </div>
+
+                  {/* Package card */}
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="bg-violet-50 px-5 py-4 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+                        <FileText className="w-5 h-5 text-violet-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-violet-700">
+                          {isEn ? "Complete Urban Planning File" : "Dossier Urbanisme Complet"}
+                        </p>
+                        <p className="text-xs text-violet-500">
+                          {isEn ? "Automatic DP or PC detection" : "Détection automatique DP ou PC"}
+                        </p>
+                      </div>
+                      <span className="text-lg font-bold text-violet-600">AUTO</span>
+                    </div>
+                    <div className="px-5 py-4 space-y-2 border-t border-slate-100">
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <FileText className="w-4 h-4 text-violet-400" />
+                        <span>{isEn ? `${getDocumentsForType("PC").length} regulatory documents` : `${getDocumentsForType("PC").length} documents réglementaires`}</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-sm ${autoDetectPlu ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                        {autoDetectPlu ? <Check className="w-4 h-4 text-violet-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
+                        <span>{isEn ? "Automatic regulatory analysis" : "Analyse réglementaire automatique"}</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-sm ${autoDetectCerfa ? "text-slate-700" : "text-slate-400 line-through"}`}>
+                        {autoDetectCerfa ? <Check className="w-4 h-4 text-violet-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />}
+                        <span>{isEn ? "Automatic CERFA form completion" : "Remplissage automatique du CERFA"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className="w-4 h-4 text-violet-500" />
+                        <span>{isEn ? "Site plan + floor plan" : "Plan de situation + plan de masse"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className="w-4 h-4 text-violet-500" />
+                        <span>{isEn ? "Automatically generated graphic elements" : "Éléments graphiques générés automatiquement"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-slate-700">
+                        <Check className="w-4 h-4 text-violet-500" />
+                        <span>{isEn ? "Descriptive information automatically generated" : "Informations descriptives générées automatiquement"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Price */}
+                  <div className="rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{isEn ? "Complete file" : "Dossier complet"}</p>
+                      <p className="text-xs text-slate-500">{isEn ? "Current balance: 0 credits" : "Solde actuel : 0 crédits"}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-slate-900">€ {(89 + (autoDetectCerfa ? 5 : 0) + (autoDetectPlu ? 15 : 0)).toFixed(2)}</p>
+                      <p className="text-xs text-slate-500">{isEn ? "by file" : "par dossier"}</p>
+                    </div>
+                  </div>
+
+                  {autoDetectError && (
+                    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-600">
+                      {autoDetectError}
+                    </div>
+                  )}
+
+                  {/* CTA */}
+                  <button
+                    type="button"
+                    disabled={autoDetectPaying}
+                    onClick={async () => {
+                      setAutoDetectPaying(true);
+                      setAutoDetectError(null);
+                      try {
+                        const res = await fetch("/api/stripe/checkout", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ projectId, type: "credits", packageId: "credits-10" }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) { setAutoDetectError(data.error || "Payment failed"); return; }
+                        if (data.url) window.location.href = data.url;
+                        else if (data.success) router.push(`/projects/${projectId}`);
+                      } catch { setAutoDetectError(isEn ? "Payment failed" : "Paiement échoué"); }
+                      finally { setAutoDetectPaying(false); }
+                    }}
+                    className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-50 hover:bg-blue-700 hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base"
+                  >
+                    {autoDetectPaying ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
+                    ) : (
+                      <>{isEn ? "Confirm and access the editor" : "Confirmer et accéder à l'éditeur"}</>
+                    )}
+                  </button>
+
+                  <p className="text-center text-xs text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => setAutoDetectModal("documents")}
+                      className="underline hover:text-slate-600"
+                    >
+                      {isEn ? "← Back to document list" : "← Retour à la liste des documents"}
                     </button>
                   </p>
                 </div>
@@ -1752,22 +1851,22 @@ export default function AuthorizationPage({
                     </div>
 
 
-                    {/* Note — for both DP and PC (single-family houses & annexes) */}
-                    {(
-                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                        <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                          <Info className="w-3.5 h-3.5" />
-                          {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                        </p>
-                        <p className="text-xs text-amber-700">
-                          {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                        </p>
-                        <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                          <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                          <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                        </ul>
-                      </div>
-                    )}
+                     {/* Note — only for PC (single-family houses & annexes) */}
+                     {!isDP && (
+                       <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                         <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                           <Info className="w-3.5 h-3.5" />
+                           {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                         </p>
+                         <p className="text-xs text-amber-700">
+                           {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                         </p>
+                         <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                           <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                           <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                         </ul>
+                       </div>
+                     )}
 
                     {/* CTA */}
                     <button
