@@ -73,39 +73,52 @@ async function gpuMunicipality(insee: string): Promise<unknown[]> {
 // Zone selection helpers
 // ---------------------------------------------------------------------------
 
+/** Broad zone families — used only as fallback when no specific sub-zone exists */
 const BROAD_ZONE_CODES = new Set(["U", "AU", "A", "N"]);
-
-const ZONE_LIBELLE_PRIORITY: string[] = [
-  "AUD", "AU", "AUS", "AUL", "AUH", "AUM", "AUN",
-  "UA", "UB", "UC", "UD", "UE", "UF", "UG", "UH", "UI", "UJ", "UK", "UL",
-  "UM", "UN", "UP", "UQ", "UR", "US", "UT", "UU", "UV", "UW", "UX", "UY", "UZ",
-];
 
 function getZoneLibelle(props: Record<string, unknown> | undefined): string | null {
   if (!props) return null;
-  const v = (props.libelle ?? props.LIBELLE ?? props.typezone ?? props.TYPEZONE ?? props.code ?? props.zone) as string | undefined;
+  // Prefer `libelle` (the specific sub-zone like "UC1") over `typezone` (the broad family like "U")
+  const v = (props.libelle ?? props.LIBELLE ?? props.code ?? props.zone ?? props.typezone ?? props.TYPEZONE) as string | undefined;
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
 function getZoneLibelong(props: Record<string, unknown> | undefined): string | null {
   if (!props) return null;
-  const v = (props.libelong ?? props.LIBELONG ?? props.libelle ?? props.LIBELLE) as string | undefined;
+  const v = (props.libelong ?? props.LIBELLONG ?? props.LIBELONG) as string | undefined;
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
+/**
+ * Picks the best zone from a list of zone features.
+ *
+ * Strategy (in order):
+ * 1. Filter out features without a zone label
+ * 2. Filter out overly broad codes ("U", "AU", "A", "N") when more specific ones exist
+ * 3. Prefer the MOST SPECIFIC zone code — longer codes like "UC1" beat shorter ones like "UB"
+ *    because sub-zones carry the exact regulation for the parcel
+ * 4. If tied on length, sort alphabetically for deterministic results
+ */
 function pickBestZone(features: Array<{ properties?: Record<string, unknown> }>): Record<string, unknown> | undefined {
   if (!features.length) return undefined;
+
   const withLib = features.filter(f => getZoneLibelle(f.properties));
   if (!withLib.length) return features[0].properties;
+
+  // Separate specific sub-zones from overly broad zone families
   const specific = withLib.filter(f => !BROAD_ZONE_CODES.has(String(getZoneLibelle(f.properties) ?? "").toUpperCase()));
   const pool = specific.length > 0 ? specific : withLib;
+
+  // Sort by specificity: longer zone code = more specific, then alphabetical for determinism
   pool.sort((a, b) => {
-    const la = String(getZoneLibelle(a.properties) ?? "").toUpperCase();
-    const lb = String(getZoneLibelle(b.properties) ?? "").toUpperCase();
-    const ia = ZONE_LIBELLE_PRIORITY.indexOf(la);
-    const ib = ZONE_LIBELLE_PRIORITY.indexOf(lb);
-    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    const la = String(getZoneLibelle(a.properties) ?? "");
+    const lb = String(getZoneLibelle(b.properties) ?? "");
+    // Longer (more specific) codes first
+    if (lb.length !== la.length) return lb.length - la.length;
+    // Alphabetical tiebreak
+    return la.localeCompare(lb);
   });
+
   return pool[0]?.properties ?? features[0].properties;
 }
 
@@ -131,7 +144,6 @@ export async function POST(request: NextRequest) {
     } = { zoneType: null, zoneName: null, communeName: null, pluType: null, pluStatus: null, regulations: null, pdfUrl: null };
 
     // ── Run commune lookup + ALL GPU layers in PARALLEL ─────────────────
-    // Previously commune lookup ran first (blocking GPU by 1-2s). Now everything runs at once.
     let communeCode = citycode as string | undefined;
     let communeName = "";
 
@@ -185,14 +197,12 @@ export async function POST(request: NextRequest) {
       gpu.infoSurf = val(8);
       gpu.infoLin = val(9);
       gpu.infoPct = val(10);
-      // communeCode/communeName are now set via the communePromise side-effect
 
       // Municipality lookup needs communeCode, so run it after commune resolves
       if (communeCode) {
         try { gpu.municipality = await gpuMunicipality(communeCode); } catch { /* */ }
       }
     } else if (hasCoords) {
-      // Has coords but missing geom (shouldn't happen, defensive)
       try {
         const r = await fetch(`https://geo.api.gouv.fr/communes?lat=${lat}&lon=${lng}&fields=code,nom&limit=1`, { signal: AbortSignal.timeout(5000) });
         if (r.ok) { const c = await r.json(); if (c[0]) { communeCode = c[0].code; communeName = c[0].nom; } }
@@ -207,10 +217,33 @@ export async function POST(request: NextRequest) {
     console.log(`[PLU] Commune: ${communeName} (${communeCode ?? "?"})`);
 
     // ── Extract zone from results ───────────────────────────────────────
-    let zoneFeatures: unknown[] =
-      gpu.zoneUrbaPolygon.length > 0 ? gpu.zoneUrbaPolygon :
-        gpu.zoneUrbaPoint.length > 0 ? gpu.zoneUrbaPoint :
-          gpu.zoneUrbaGP.length > 0 ? gpu.zoneUrbaGP : [];
+    // Priority order: Point query (exact hit) > Geoportail feature-info > Polygon buffer
+    // Point queries return only zones that contain the exact coordinate,
+    // while Polygon buffers can pick up neighboring zones.
+    const pointZones = gpu.zoneUrbaPoint as Array<{ properties?: Record<string, unknown> }>;
+    const gpZones = gpu.zoneUrbaGP as Array<{ properties?: Record<string, unknown> }>;
+    const polyZones = gpu.zoneUrbaPolygon as Array<{ properties?: Record<string, unknown> }>;
+
+    // Use the most precise source that has results
+    let zoneFeatures: unknown[];
+    let zoneSource: string;
+    if (pointZones.length > 0) {
+      zoneFeatures = pointZones;
+      zoneSource = "point";
+    } else if (gpZones.length > 0) {
+      zoneFeatures = gpZones;
+      zoneSource = "geoportail";
+    } else if (polyZones.length > 0) {
+      zoneFeatures = polyZones;
+      zoneSource = "polygon-buffer";
+    } else {
+      zoneFeatures = [];
+      zoneSource = "none";
+    }
+
+    // Log all raw zone results for debugging
+    console.log(`[PLU] Raw zones — point: ${pointZones.map(f => getZoneLibelle(f.properties)).join(", ") || "none"} | GP: ${gpZones.map(f => getZoneLibelle(f.properties)).join(", ") || "none"} | polygon: ${polyZones.map(f => getZoneLibelle(f.properties)).join(", ") || "none"}`);
+    console.log(`[PLU] Using source: ${zoneSource} (${zoneFeatures.length} features)`);
 
     if (zoneFeatures.length > 0) {
       const zone = pickBestZone(zoneFeatures as Array<{ properties?: Record<string, unknown> }>);
@@ -220,7 +253,7 @@ export async function POST(request: NextRequest) {
         const idurba = (zone.idurba ?? zone.IDURBA ?? zone.du_type) as string | undefined;
         pluInfo.pluType = idurba ? (String(idurba).includes("PLUi") ? "PLUi" : "PLU") : null;
         pluInfo.pluStatus = (zone.etat as string) ?? "detected";
-        console.log(`[PLU] Zone detected: ${pluInfo.zoneType} — ${pluInfo.zoneName}`);
+        console.log(`[PLU] Zone detected: ${pluInfo.zoneType} — ${pluInfo.zoneName} (source: ${zoneSource})`);
       }
     }
 
@@ -384,6 +417,14 @@ function getDefaultRegulations(zoneType: string): Record<string, unknown> {
   };
   const exact = defaults[zoneType];
   if (exact) return exact;
-  const family = zoneType.startsWith("AU") ? "AU" : zoneType.startsWith("U") ? "UB" : null;
-  return family ? defaults[family] ?? defaults["UB"] : defaults["UB"];
+  // Try progressively shorter prefixes: UC1 → UC, UA2 → UA, AUD → AU
+  for (let len = zoneType.length - 1; len >= 1; len--) {
+    const prefix = zoneType.substring(0, len);
+    if (defaults[prefix]) return defaults[prefix];
+  }
+  // Final fallback based on zone family
+  if (zoneType.startsWith("AU")) return defaults["AU"];
+  if (zoneType.startsWith("U")) return defaults["UB"];
+  if (zoneType.startsWith("A") || zoneType.startsWith("N")) return defaults["A/N"];
+  return defaults["UB"];
 }

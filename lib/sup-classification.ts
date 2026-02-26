@@ -23,7 +23,7 @@ export const CRITICAL_CODES = [
 ] as const;
 
 // Types from the protected-areas API that are always critical
-const CRITICAL_TYPES = ["ABF", "FLOOD_ZONE", "HERITAGE"] as const;
+const CRITICAL_TYPES = ["ABF", "FLOOD_ZONE", "HERITAGE", "MINING_RISK"] as const;
 
 // ── Text patterns for critical detection ────────────────────────────────────
 // When the raw API data doesn't have a clean categorie code, we fall back

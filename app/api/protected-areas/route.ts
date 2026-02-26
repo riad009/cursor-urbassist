@@ -77,15 +77,29 @@ function isAbfRelated(props: Record<string, unknown> | undefined): boolean {
   return false;
 }
 
-/** Detect flood/risk prescriptions (P.P.R.I., inondation, PM1, PM2, etc.) */
-function isRiskRelated(props: Record<string, unknown> | undefined): boolean {
+/** Detect mining risks specifically (PM3, risque minier, mine, etc.) */
+function isMiningRiskRelated(props: Record<string, unknown> | undefined): boolean {
   if (!props) return false;
   const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
   const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
   const desc = String(props.libelong ?? props.LIBELLONG ?? props.description ?? "").toLowerCase();
   const text = lib + " " + desc;
-  if (cat.startsWith("PM1") || cat.startsWith("PM2") || cat.startsWith("PM3")) return true;
-  if (text.includes("p.p.r.i") || text.includes("ppri") || text.includes("inondation") || text.includes("inondable") || text.includes("risque naturel") || text.includes("risque technologique") || text.includes("risque minier") || text.includes("zone à risque") || text.includes("zone a risque") || text.includes("submersion") || text.includes("crue") || text.includes("aléa")) return true;
+  if (cat.startsWith("PM3")) return true;
+  if (text.includes("risque minier") || text.includes("risques miniers") || text.includes("prévention des risques miniers") || text.includes("prevention des risques miniers") || text.includes("mine ") || text.includes("mines ") || text.includes("minier")) return true;
+  return false;
+}
+
+/** Detect flood/risk prescriptions (P.P.R.I., inondation, PM1, PM2, etc.) — excludes mining */
+function isRiskRelated(props: Record<string, unknown> | undefined): boolean {
+  if (!props) return false;
+  // Mining risks handled separately by isMiningRiskRelated()
+  if (isMiningRiskRelated(props)) return false;
+  const cat = String(props.categorie ?? props.CATEGORIE ?? props.type_sup ?? "").toUpperCase();
+  const lib = String(props.libelle ?? props.LIBELLE ?? props.nom ?? "").toLowerCase();
+  const desc = String(props.libelong ?? props.LIBELLONG ?? props.description ?? "").toLowerCase();
+  const text = lib + " " + desc;
+  if (cat.startsWith("PM1") || cat.startsWith("PM2")) return true;
+  if (text.includes("p.p.r.i") || text.includes("ppri") || text.includes("inondation") || text.includes("inondable") || text.includes("risque naturel") || text.includes("risque technologique") || text.includes("zone à risque") || text.includes("zone a risque") || text.includes("submersion") || text.includes("crue") || text.includes("aléa")) return true;
   return false;
 }
 
@@ -188,6 +202,21 @@ export async function POST(request: NextRequest) {
             severity: "high",
             categorie: cat || undefined,
           });
+        } else if (isMiningRiskRelated(props)) {
+          addArea({
+            type: "MINING_RISK",
+            name: String(name),
+            description: desc || "Zone du Plan de prévention des risques miniers. Des contraintes spécifiques s'appliquent.",
+            distance: null,
+            constraints: [
+              "Construction may be restricted due to mining subsidence risk",
+              "Geotechnical study may be required",
+              "Check with local authorities for specific building requirements",
+            ],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
+            severity: "high",
+            categorie: cat || undefined,
+          });
         } else if (isRiskRelated(props)) {
           addArea({
             type: "FLOOD_ZONE",
@@ -266,6 +295,17 @@ export async function POST(request: NextRequest) {
               "Fences and walls subject to ABF approval",
             ],
             sourceUrl: "https://www.culture.gouv.fr/Thematiques/Monuments-Sites",
+            severity: "high",
+            categorie: supCat || undefined,
+          });
+        } else if (isMiningRiskRelated(props)) {
+          addArea({
+            type: "MINING_RISK",
+            name: `SUP – ${String(rawName)}`,
+            description: "Zone du Plan de prévention des risques miniers. Des contraintes spécifiques s'appliquent.",
+            distance: null,
+            constraints: ["Construction may be restricted due to mining subsidence risk", "Geotechnical study may be required"],
+            sourceUrl: "https://www.geoportail-urbanisme.gouv.fr/",
             severity: "high",
             categorie: supCat || undefined,
           });

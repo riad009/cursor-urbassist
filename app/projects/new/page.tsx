@@ -398,14 +398,14 @@ export default function NewProjectPage() {
 
                                                 {/* ── CRITICAL ITEMS — always visible ── */}
                                                 {classified.criticalItems.map((item, idx) => {
-                                                    const typeColor = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-400" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-400" : "bg-blue-400";
-                                                    const typeBadgeBg = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-50 text-orange-500 border-orange-100" : item.type === "FLOOD_ZONE" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-50 text-amber-500 border-amber-100" : "bg-blue-50 text-blue-500 border-blue-100";
+                                                    const typeColor = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-400" : item.type === "FLOOD_ZONE" || item.type === "MINING_RISK" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-400" : "bg-blue-400";
+                                                    const typeBadgeBg = item.type === "ABF" || (item.categorie ?? "").startsWith("AC") ? "bg-orange-50 text-orange-500 border-orange-100" : item.type === "FLOOD_ZONE" || item.type === "MINING_RISK" || (item.categorie ?? "").startsWith("PM") ? "bg-amber-50 text-amber-500 border-amber-100" : "bg-blue-50 text-blue-500 border-blue-100";
                                                     return (
                                                         <div key={`crit-${idx}`} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-slate-50/80 border border-slate-100 transition-colors">
                                                             <span className={`w-2 h-2 rounded-full shrink-0 ${typeColor}`} />
                                                             <p className="text-xs text-slate-700 font-medium truncate flex-1">{item.label}</p>
                                                             {item.count > 1 && <span className="text-[9px] text-slate-400 font-medium shrink-0">×{item.count}</span>}
-                                                            <span className={`text-[8px] uppercase shrink-0 font-bold px-1.5 py-0.5 rounded-md border ${typeBadgeBg}`}>{item.type === "ABF" ? "ABF" : item.type === "FLOOD_ZONE" ? "RISQUE" : item.type === "HERITAGE" ? "PATRI" : item.categorie || item.type}</span>
+                                                            <span className={`text-[8px] uppercase shrink-0 font-bold px-1.5 py-0.5 rounded-md border ${typeBadgeBg}`}>{item.type === "ABF" ? "ABF" : item.type === "MINING_RISK" ? "MINIER" : item.type === "FLOOD_ZONE" ? "RISQUE" : item.type === "HERITAGE" ? "PATRI" : item.categorie || item.type}</span>
                                                         </div>
                                                     );
                                                 })}
