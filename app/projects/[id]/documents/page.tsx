@@ -39,10 +39,9 @@ export default function DocumentsPage({
         projectType?: string | null;
         projectDescription?: Record<string, unknown> | null;
         protectedAreas?: { type: string; name: string }[] | null;
-        regulatoryAnalysis?: { isProtectedArea?: boolean; abfRequired?: boolean; heritageTypes?: string[] } | null;
     } | null>(null);
 
-    // Load project data with regulatory analysis
+    // Load project data
     useEffect(() => {
         fetch(`/api/projects/${projectId}`)
             .then((r) => r.json())
@@ -53,36 +52,14 @@ export default function DocumentsPage({
             .finally(() => setLoading(false));
     }, [projectId]);
 
-    // Derive document list with improved detection
+    // Derive document list
     const authType = project?.authorizationType || null;
-
-    // ABF detection: check both protectedAreas and regulatoryAnalysis
-    const protectedAreasABF = (project?.protectedAreas || []).some(
-        (a: { type: string }) =>
-            a.type === "ABF" ||
-            a.type === "HERITAGE" ||
-            a.type === "abf" ||
-            a.type === "heritage" ||
-            a.type === "MONUMENT_HISTORIQUE" ||
-            a.type === "SITE_PATRIMONIAL"
+    const hasABF = (project?.protectedAreas || []).some(
+        (a: { type: string }) => a.type === "ABF" || a.type === "HERITAGE"
     );
-    const regulatoryABF = project?.regulatoryAnalysis?.isProtectedArea === true ||
-        project?.regulatoryAnalysis?.abfRequired === true;
-    const hasABF = protectedAreasABF || regulatoryABF;
-
-    // Existing structure detection: check projectType AND projectDescription categories
-    const projectDescCategories = (project?.projectDescription as { categories?: string[] })?.categories || [];
-    const projectDescWorkItems = (project?.projectDescription as { workItems?: { projectType: string }[] })?.workItems || [];
     const isExistingStructure =
         project?.projectType === "extension" ||
-        project?.projectType === "existing_extension" ||
-        project?.projectType === "renovation" ||
-        project?.projectType === "facade_change" ||
-        projectDescCategories.includes("existing_extension") ||
-        projectDescCategories.includes("renovation") ||
-        projectDescWorkItems.some((w: { projectType: string }) =>
-            ["existing_extension", "facade_change"].includes(w.projectType)
-        );
+        (project?.projectDescription as { categories?: string[] })?.categories?.includes("existing_extension");
 
     const documents = getDocumentsForProject(authType, {
         hasABF,
@@ -159,13 +136,9 @@ export default function DocumentsPage({
                                     {isEn ? "ABF Heritage Zone Detected" : "Zone ABF / Patrimoine détectée"}
                                 </p>
                                 <p className="text-xs text-amber-600 mt-1">
-                                    {authType === "DP"
-                                        ? (isEn
-                                            ? "Additional document DPC 11 has been automatically added to your list."
-                                            : "Le document DPC 11 a été automatiquement ajouté à votre liste.")
-                                        : (isEn
-                                            ? "The PC4 descriptive notice will be completed with the necessary information for the ABF."
-                                            : "La notice descriptive PC4 sera complétée avec les informations nécessaires pour l'ABF.")}
+                                    {isEn
+                                        ? "Additional document DPC 11 has been automatically added to your list."
+                                        : "Le document DPC 11 a été automatiquement ajouté à votre liste."}
                                 </p>
                             </div>
                         </div>
@@ -245,21 +218,6 @@ export default function DocumentsPage({
                                 </div>
                             ))}
                         </div>
-                    </div>
-
-                    {/* PCMI Note — single-family houses & annexes */}
-                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                        <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                        </p>
-                        <p className="text-xs text-amber-700">
-                            {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                        </p>
-                        <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                            <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                            <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                        </ul>
                     </div>
 
                     {/* Navigation buttons */}
