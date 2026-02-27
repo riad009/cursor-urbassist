@@ -186,6 +186,71 @@ export default function ProjectDescriptionPage({
                 if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
+
+                // ── Pre-populate jobs from authorization data ──────────────
+                const desc = d.project?.projectDescription;
+                if (desc) {
+                    // If jobs were previously saved by this page, restore them
+                    if (Array.isArray(desc.jobs) && desc.jobs.length > 0) {
+                        setJobs(desc.jobs);
+                    } else if (Array.isArray(desc.categories) && desc.categories.length > 0) {
+                        // Convert authorization data into Job objects
+                        const preJobs: Job[] = [];
+
+                        if (desc.categories.includes("new_construction") && desc.constructionFootprint > 0) {
+                            preJobs.push({
+                                id: `auth-construction-${Date.now()}`,
+                                nature: "new_construction",
+                                levels: (desc.constructionLevels === 2 ? 2 : desc.constructionLevels === 3 ? 3 : 1) as LevelCount,
+                                footprint: desc.constructionFootprint,
+                                floorAreaEstimated: desc.constructionFloorArea || estimateFloorAreaCreated(desc.constructionFootprint, desc.constructionLevels || 1),
+                                displayLabel: isEn ? "Independent Construction 1" : "Construction Indépendante 1",
+                            });
+                        }
+
+                        if (desc.categories.includes("existing_extension") && desc.extensionFootprint > 0) {
+                            preJobs.push({
+                                id: `auth-extension-${Date.now()}`,
+                                nature: "existing_extension",
+                                levels: (desc.extensionLevels === 2 ? 2 : desc.extensionLevels === 3 ? 3 : 1) as LevelCount,
+                                footprint: desc.extensionFootprint,
+                                floorAreaEstimated: desc.extensionFloorArea || estimateFloorAreaCreated(desc.extensionFootprint, desc.extensionLevels || 1),
+                                currentLivingArea: desc.existingFloorArea || undefined,
+                                displayLabel: isEn ? "Work on existing" : "Travaux sur existant",
+                            });
+                        }
+
+                        if (desc.categories.includes("outdoor") && Array.isArray(desc.outdoorTags)) {
+                            if (desc.outdoorTags.includes("swimming_pool") && desc.outdoorSurface > 0) {
+                                preJobs.push({
+                                    id: `auth-pool-${Date.now()}`,
+                                    nature: "outdoor",
+                                    levels: 1,
+                                    footprint: desc.outdoorSurface,
+                                    floorAreaEstimated: 0,
+                                    outdoorLayout: "pool",
+                                    poolSurfaceArea: desc.outdoorSurface,
+                                    displayLabel: isEn ? "Pool" : "Piscine",
+                                });
+                            }
+                            if (desc.outdoorTags.includes("fence_gate")) {
+                                preJobs.push({
+                                    id: `auth-fence-${Date.now()}`,
+                                    nature: "outdoor",
+                                    levels: 1,
+                                    footprint: 0,
+                                    floorAreaEstimated: 0,
+                                    outdoorLayout: "fence_gate",
+                                    displayLabel: isEn ? "Fence / Gate" : "Clôture / Portail",
+                                });
+                            }
+                        }
+
+                        if (preJobs.length > 0) {
+                            setJobs(preJobs);
+                        }
+                    }
+                }
             })
             .catch(() => { });
     }, [projectId]);
@@ -1129,23 +1194,26 @@ export default function ProjectDescriptionPage({
                                                     : "Précisez les matériaux et coloris de chaque élément visible. Cette information est obligatoire et figure dans la notice descriptive."}
                                             </p>
 
-                                            {/* ── Section 1: Standing Building (Exterior) ── */}
+                                            {/* ── Section 1: Structural Framework (Exterior) ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🏗️</span>
                                                     <p className="text-sm font-bold text-slate-800">
-                                                        {isEn ? "Standing Building (Exterior)" : "Gros œuvre (Extérieur)"}
+                                                        {isEn ? "Structural Framework" : "Gros œuvre"}
                                                     </p>
                                                     <span className="ml-auto text-[10px] font-semibold text-slate-400 uppercase">CERFA</span>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Main structural materials used for the building envelope." : "Matériaux structurels principaux utilisés pour l'enveloppe du bâtiment."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
                                                         <label className="text-xs text-slate-500">{isEn ? "Material" : "Matériau"}</label>
-                                                        <input type="text" value={matExtMaterial} onChange={e => setMatExtMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Breeze blocks, bricks, reinforced-wall / tiles..." : "Parpaings, briques, pré-mur / tuiles..."} />
+                                                        <input type="text" value={matExtMaterial} onChange={e => setMatExtMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Concrete blocks, brick, timber frame" : "Ex: Parpaings, briques, ossature bois"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={matExtColor} onChange={e => setMatExtColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Basque Red / reinforced wall / tiles" : "Ex: Rouge basque / pré-mur / tuiles"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Exterior finish / Color" : "Finition extérieure / Coloris"}</label>
+                                                        <input type="text" value={matExtColor} onChange={e => setMatExtColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: White render RAL 9010" : "Ex: Enduit blanc RAL 9010"} />
                                                     </div>
                                                 </div>
                                             </div>
@@ -1178,244 +1246,265 @@ export default function ProjectDescriptionPage({
                                                 </div>
                                             </div>
 
-                                            {/* ── Section 3: Non-independent Construction ── */}
+                                            {/* ── Section 3: Attached Construction / Extension ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🏗</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Non-independent Construction" : "Construction non indépendante"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Attached Construction / Extension" : "Construction attenante / Extension"}</p>
                                                     <span className="ml-auto text-[10px] font-semibold text-slate-400 uppercase">CERFA</span>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "If your project adjoins an existing building, specify the roof covering." : "Si votre projet est accolé à un bâtiment existant, précisez la couverture."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Roof" : "Toiture"}</label>
+                                                        <label className="text-xs text-slate-500">{isEn ? "Roof covering" : "Couverture toiture"}</label>
                                                         <select value={roofMaterial} onChange={e => setRoofMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
                                                             <option value="">{isEn ? "Select..." : "Sélectionner..."}</option>
-                                                            <option value="tiles">{isEn ? "Tiles" : "Tuiles"}</option>
-                                                            <option value="slate">{isEn ? "Slate" : "Ardoises"}</option>
-                                                            <option value="metal">{isEn ? "Metal sheet" : "Bac acier"}</option>
-                                                            <option value="flat">{isEn ? "Flat (EPDM/bitumen)" : "Plate (EPDM/bitume)"}</option>
+                                                            <option value="tiles">{isEn ? "Clay / Concrete tiles" : "Tuiles terre cuite / béton"}</option>
+                                                            <option value="slate">{isEn ? "Natural / Fibre-cement slate" : "Ardoises naturelles / fibro-ciment"}</option>
+                                                            <option value="metal">{isEn ? "Standing seam metal" : "Bac acier / zinc"}</option>
+                                                            <option value="flat">{isEn ? "Flat roof (EPDM / bitumen)" : "Toiture plate (EPDM / bitume)"}</option>
+                                                            <option value="green">{isEn ? "Green roof / Vegetalized" : "Toiture végétalisée"}</option>
                                                         </select>
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            {/* ── Section 4: Wall(s) ── */}
+                                            {/* ── Section 4: Exterior Walls & Façade ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🧱</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Wall(s)" : "Mur(s)"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Exterior Walls & Façade" : "Murs extérieurs & Façade"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Describe the exterior wall finish visible from the street." : "Décrivez la finition des murs extérieurs visibles depuis la voie publique."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Material" : "Matériau"}</label>
-                                                        <input type="text" value={wallMaterial} onChange={e => setWallMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Plaster, Brick, Wood..." : "Ex: Enduit, Briques, Bois..."} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Wall finish" : "Finition murale"}</label>
+                                                        <input type="text" value={wallMaterial} onChange={e => setWallMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Render, exposed stone, timber cladding" : "Ex: Enduit, pierre apparente, bardage bois"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={wallColor} onChange={e => setWallColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: White, Beige..." : "Ex: Blanc, Beige..."} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / RAL" : "Coloris / RAL"}</label>
+                                                        <input type="text" value={wallColor} onChange={e => setWallColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Off-white RAL 9001" : "Ex: Blanc cassé RAL 9001"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Render type" : "Type d'enduit"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Rendered", "Smooth", "Scraped", "Stone", "Cladding", "Composite"]
-                                                            : ["Enduit", "Lisse", "Gratté", "Pierre", "Bardage", "Composite"]
+                                                            ? ["Smooth render", "Textured render", "Scraped", "Natural stone", "Wood cladding", "Composite panel"]
+                                                            : ["Enduit lisse", "Enduit grainé", "Enduit gratté", "Pierre naturelle", "Bardage bois", "Panneau composite"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setWallType(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", wallType.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of surfing" : "Ajouter un type de surfaçage"}</p>
                                             </div>
 
-                                            {/* ── Section 5: Gutters and Downspouts ── */}
+                                            {/* ── Section 5: Rainwater Management ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
-                                                    <span className="text-base">🪥</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Gutters and Downspouts" : "Gouttières et descentes"}</p>
+                                                    <span className="text-base">💧</span>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Rainwater Management" : "Gestion des eaux pluviales"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Gutters, downspouts and drainage elements visible from the exterior." : "Gouttières, descentes et éléments d'évacuation visibles depuis l'extérieur."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
                                                         <label className="text-xs text-slate-500">{isEn ? "Material" : "Matériau"}</label>
-                                                        <input type="text" value={gutterMaterial} onChange={e => setGutterMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Zinc, PVC, Aluminium..." : "Ex: Zinc, PVC, Aluminium..."} />
+                                                        <input type="text" value={gutterMaterial} onChange={e => setGutterMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Zinc, PVC, Aluminium, Copper" : "Ex: Zinc, PVC, Aluminium, Cuivre"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={gutterColor} onChange={e => setGutterColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Zinc Grey" : "Ex: Gris zinc"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / RAL" : "Coloris / RAL"}</label>
+                                                        <input type="text" value={gutterColor} onChange={e => setGutterColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Natural zinc, Grey RAL 7016" : "Ex: Zinc naturel, Gris RAL 7016"} />
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of surfing" : "Ajouter un type de surfaçage"}</p>
                                             </div>
 
-                                            {/* ── Section 6: Surfaces and Coverings ── */}
+                                            {/* ── Section 6: Ground Surfaces & Coverings ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🪟</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Surfaces and Coverings" : "Surfaces et revêtements"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Ground Surfaces & Coverings" : "Sols & Revêtements extérieurs"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Describe outdoor paving, driveways, terraces and pathways." : "Décrivez les allées, terrasses, cours et cheminements extérieurs."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Covering for: all surfaces" : "Revêtement de : toutes surfaces"}</label>
-                                                        <input type="text" value={surfaceMaterial} onChange={e => setSurfaceMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Porcelain Stoneware" : "Ex: Grès cérame"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Surface material" : "Matériau de surface"}</label>
+                                                        <input type="text" value={surfaceMaterial} onChange={e => setSurfaceMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Concrete pavers, gravel, natural stone" : "Ex: Pavés béton, gravier, pierre naturelle"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Flooring Features: (or others)" : "Caractéristiques de sol : (ou autres)"}</label>
-                                                        <input type="text" value={surfaceColor} onChange={e => setSurfaceColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / Finish" : "Coloris / Finition"}</label>
+                                                        <input type="text" value={surfaceColor} onChange={e => setSurfaceColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Natural grey, Beige" : "Ex: Gris naturel, Beige"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Surface type" : "Type de surface"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Terracotta", "Concrete", "Natural Stone", "Wood", "Composite"]
-                                                            : ["Terre cuite", "Béton", "Pierre naturelle", "Bois", "Composite"]
+                                                            ? ["Concrete pavers", "Gravel", "Natural stone", "Wood decking", "Resin-bound", "Grass"]
+                                                            : ["Pavés béton", "Gravier", "Pierre naturelle", "Terrasse bois", "Enrobé résine", "Gazon"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setSurfaceType(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", surfaceType.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type" : "Ajouter un type"}</p>
                                             </div>
 
-                                            {/* ── Section 7: Fencing ── */}
+                                            {/* ── Section 7: Fencing & Boundaries ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🚧</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Fencing" : "Clôture"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Fencing & Boundaries" : "Clôtures & Limites"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Perimeter fencing, gates, and boundary walls." : "Clôtures périphériques, portails et murs de limite."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Material" : "Matériau"}</label>
-                                                        <input type="text" value={fenceMaterial} onChange={e => setFenceMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="..." />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Fence material" : "Matériau de clôture"}</label>
+                                                        <input type="text" value={fenceMaterial} onChange={e => setFenceMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Aluminium, welded mesh, wood" : "Ex: Aluminium, panneaux soudés, bois"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={fenceColor} onChange={e => setFenceColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="..." />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / RAL" : "Coloris / RAL"}</label>
+                                                        <input type="text" value={fenceColor} onChange={e => setFenceColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Anthracite RAL 7016" : "Ex: Anthracite RAL 7016"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Fence type" : "Type de clôture"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Welded Mesh", "Flat Bars", "PVC", "Wooden", "Aluminium"]
-                                                            : ["Panneaux soudés", "Barreaux plats", "PVC", "Bois", "Aluminium"]
+                                                            ? ["Welded mesh", "Flat bar railing", "PVC panels", "Wood slats", "Aluminium", "Stone wall"]
+                                                            : ["Panneaux soudés", "Barreaux plats", "PVC", "Lames bois", "Aluminium", "Muret pierre"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setFenceType(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", fenceType.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of finish" : "Ajouter un type de finition"}</p>
                                             </div>
 
-                                            {/* ── Section 8: Joinery & Blinds ── */}
+                                            {/* ── Section 8: Windows, Doors & Shutters ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🚪</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Joinery & Blinds" : "Menuiserie & Volets"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Windows, Doors & Shutters" : "Fenêtres, Portes & Volets"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Exterior joinery: windows, entrance doors, French windows and shutters." : "Menuiseries extérieures : fenêtres, portes d'entrée, portes-fenêtres et volets."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Material" : "Matériau"}</label>
-                                                        <input type="text" value={joineryMaterial} onChange={e => setJoineryMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Aluminium, PVC, Wood" : "Ex: Aluminium, PVC, Bois"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Frame material" : "Matériau des cadres"}</label>
+                                                        <input type="text" value={joineryMaterial} onChange={e => setJoineryMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Aluminium RAL 7016, PVC white" : "Ex: Aluminium RAL 7016, PVC blanc"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Shutter type" : "Type de volets"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Shutter Blinds", "Hinged Shutters", "Accordion Shutters", "Folding Shutters", "Sliding Shutters"]
-                                                            : ["Volets roulants", "Volets battants", "Persiennes", "Volets pliants", "Volets coulissants"]
+                                                            ? ["Roller shutters", "Hinged shutters", "Sliding shutters", "Louvered shutters", "Folding shutters"]
+                                                            : ["Volets roulants", "Volets battants", "Volets coulissants", "Persiennes", "Volets pliants"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setJoineryType(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", joineryType.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of finish" : "Ajouter un type de finition"}</p>
                                             </div>
 
-                                            {/* ── Section 9: Exterior (Additions) ── */}
+                                            {/* ── Section 9: Exterior Metalwork & Accessories ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">🏡</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Exterior (Additions)" : "Extérieur (Ajouts)"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Exterior Metalwork & Accessories" : "Serrurerie extérieure & Accessoires"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Railings, balconies, window grilles and other exterior metal elements." : "Garde-corps, balcons, grilles de fenêtre et autres éléments métalliques extérieurs."}
+                                                </p>
                                                 <div className="space-y-1">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Roofing" : "Couverture"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Balcony / Terrace roofing" : "Couverture balcon / Terrasse"}</label>
                                                     <select value={extRoofing} onChange={e => setExtRoofing(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
                                                         <option value="">{isEn ? "Select..." : "Sélectionner..."}</option>
-                                                        <option value="tiles">{isEn ? "Tiles" : "Tuiles"}</option>
-                                                        <option value="metal">{isEn ? "Metal sheet" : "Bac acier"}</option>
-                                                        <option value="flat">{isEn ? "EPDM / Bitumen" : "EPDM / Bitume"}</option>
-                                                        <option value="polycarbonate">{isEn ? "Polycarbonate" : "Polycarbonate"}</option>
+                                                        <option value="tiles">{isEn ? "Clay / Concrete tiles" : "Tuiles terre cuite / béton"}</option>
+                                                        <option value="metal">{isEn ? "Standing seam metal" : "Bac acier / zinc"}</option>
+                                                        <option value="flat">{isEn ? "EPDM / Bitumen membrane" : "EPDM / Membrane bitume"}</option>
+                                                        <option value="polycarbonate">{isEn ? "Polycarbonate / Glass" : "Polycarbonate / Verre"}</option>
                                                     </select>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Aluminium (Zinc RAL)" : "Aluminium (Zinc RAL)"}</label>
-                                                        <input type="text" value={surface2Material} onChange={e => setSurface2Material(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: RAL 7016" : "Ex: RAL 7016"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Railing / Grille material" : "Matériau garde-corps / Grille"}</label>
+                                                        <input type="text" value={surface2Material} onChange={e => setSurface2Material(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Aluminium, wrought iron" : "Ex: Aluminium, fer forgé"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={surface2Color} onChange={e => setSurface2Color(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Window Grilles" : "Grilles de fenêtre"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / RAL" : "Coloris / RAL"}</label>
+                                                        <input type="text" value={surface2Color} onChange={e => setSurface2Color(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Anthracite RAL 7016" : "Ex: Anthracite RAL 7016"} />
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            {/* ── Section 10: Trimmings ── */}
+                                            {/* ── Section 10: Flashings & Trim Details ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-base">✨</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Trimmings" : "Finitions"}</p>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Flashings & Trim Details" : "Habillages & Détails de finition"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Ridge caps, wall copings, sill flashings and other sheet-metal details." : "Faîtières, couvertines, bavettes d'appui et autres détails de zinguerie."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Material (Tin, Zinc, Alum...)" : "Matériau (Zinc, Alu…)"}</label>
-                                                        <input type="text" value={trimMaterial} onChange={e => setTrimMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Galvanized steel" : "Ex: Acier galvanisé"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Sheet-metal material" : "Matériau de zinguerie"}</label>
+                                                        <input type="text" value={trimMaterial} onChange={e => setTrimMaterial(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Zinc, pre-lacquered aluminium" : "Ex: Zinc, aluminium prélaqué"} />
                                                     </div>
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Color" : "Coloris"}</label>
-                                                        <input type="text" value={trimColor} onChange={e => setTrimColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: RAL 7016" : "Ex: RAL 7016"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Color / RAL" : "Coloris / RAL"}</label>
+                                                        <input type="text" value={trimColor} onChange={e => setTrimColor(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Anthracite RAL 7016" : "Ex: Anthracite RAL 7016"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Detail type" : "Type de détail"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Hat coping", "Capping", "Cover plate", "Gutter", "Glazed"]
-                                                            : ["Chaperon", "Couvertine", "Bavette", "Gouttière", "Vitré"]
+                                                            ? ["Wall coping", "Ridge cap", "Sill flashing", "Drip edge", "Valley flashing"]
+                                                            : ["Couvertine", "Faîtière", "Bavette d'appui", "Larmier", "Noue"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setTrimType(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", trimType.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of cladding" : "Ajouter un type de bardage"}</p>
                                             </div>
 
-                                            {/* ── Section 11: Joinery & Blinds 2 ── */}
+                                            {/* ── Section 11: Solar Protection & Awnings ── */}
                                             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                                                 <div className="flex items-center gap-2">
-                                                    <span className="text-base">🚪</span>
-                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Joinery & Blinds" : "Menuiserie & Volets"}</p>
+                                                    <span className="text-base">☀️</span>
+                                                    <p className="text-sm font-bold text-slate-800">{isEn ? "Solar Protection & Awnings" : "Protection solaire & Stores"}</p>
                                                 </div>
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Sun shading devices, awnings, and solar protection elements." : "Dispositifs d'ombrage, stores et éléments de protection solaire."}
+                                                </p>
                                                 <div className="grid grid-cols-2 gap-3">
                                                     <div className="space-y-1">
-                                                        <label className="text-xs text-slate-500">{isEn ? "Other blinds (RAL)" : "Autres volets (RAL)"}</label>
-                                                        <input type="text" value={joinery2Material} onChange={e => setJoinery2Material(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: RAL 7016, Anthracite" : "Ex: RAL 7016, Anthracite"} />
+                                                        <label className="text-xs text-slate-500">{isEn ? "Material / Color" : "Matériau / Coloris"}</label>
+                                                        <input type="text" value={joinery2Material} onChange={e => setJoinery2Material(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder={isEn ? "Ex: Aluminium RAL 7016, Canvas" : "Ex: Aluminium RAL 7016, Toile"} />
                                                     </div>
                                                 </div>
                                                 <div className="space-y-1.5">
-                                                    <label className="text-xs text-slate-500">{isEn ? "Type" : "Type"}</label>
+                                                    <label className="text-xs text-slate-500">{isEn ? "Protection type" : "Type de protection"}</label>
                                                     <div className="flex flex-wrap gap-1.5">
                                                         {(isEn
-                                                            ? ["Integrated roller shutter", "Motorised Shutter", "Window Shade / Curtain"]
-                                                            : ["Volet roulant intégré", "Brise-soleil", "Store banne"]
+                                                            ? ["Integrated roller shutter", "Brise-soleil", "Retractable awning", "Fixed pergola", "Bioclimatic pergola"]
+                                                            : ["Volet roulant intégré", "Brise-soleil", "Store banne", "Pergola fixe", "Pergola bioclimatique"]
                                                         ).map(t => (
                                                             <button key={t} type="button" onClick={() => setJoinery2Type(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])} className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all", joinery2Type.includes(t) ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50")}>{t}</button>
                                                         ))}
                                                     </div>
                                                 </div>
-                                                <p className="text-[10px] text-indigo-500 cursor-pointer hover:underline">+ {isEn ? "Add one type of cladding" : "Ajouter un type de bardage"}</p>
                                             </div>
                                         </div>
 
@@ -1657,7 +1746,7 @@ export default function ProjectDescriptionPage({
                                             <div className={`rounded-xl border-2 p-4 ${projectProtectedAreas.length > 0 ? "border-amber-200 bg-amber-50/30" : "border-green-200 bg-green-50/30"}`}>
                                                 <div className="flex items-center justify-between mb-2">
                                                     <h3 className="text-sm font-bold text-slate-900 uppercase">
-                                                        {isEn ? "HERITAGE PROTECTION" : "PROTECTION PATRIMOINE"}
+                                                        {isEn ? "Protected Area" : "Zone Protégée"}
                                                     </h3>
                                                     <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                                                         projectProtectedAreas.length > 0
@@ -1758,7 +1847,7 @@ export default function ProjectDescriptionPage({
                                             <div className="rounded-xl border-2 border-amber-200 bg-amber-50/30 p-4">
                                                 <div className="flex items-center justify-between mb-1">
                                                     <h3 className="text-sm font-bold text-slate-900 uppercase">
-                                                        {isEn ? "HERITAGE PROTECTION" : "PROTECTION PATRIMOINE"}
+                                                        {isEn ? "Protected Area" : "Zone Protégée"}
                                                     </h3>
                                                     <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
                                                         {isEn ? "No easement" : "Aucune servitude"}

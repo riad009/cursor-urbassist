@@ -87,7 +87,11 @@ import {
   drawInteriorLayout,
   drawBuildingOpenings,
   clearBuildingOverlays,
+  drawWallThickness,
+  drawRoomLabels,
+  drawExteriorEnvelope,
 } from "@/lib/buildingCanvasOverlays";
+import { calculateRoofData } from "@/lib/roofCalculations";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -202,6 +206,7 @@ const CANVAS_PROPS = [
   "isBoundaryOverlay", "isBoundaryDimension", "isRegulatoryFootprint",
   "isNorthArrow", "isInteriorLayout",
   "isBuildingOpening", "isBuildingOverhang", "isExteriorEnvelope",
+  "isWallThickness", "isRoomLabel",
   "isElevationPoint", "isVegetation", "isViewpoint",
   "isAnnotation", "isVrd", "isSectionLine", "isParcel",
   "excludeFromExport",
@@ -275,6 +280,10 @@ function SitePlanContent() {
   const placeGuidedBuildingAtRef = useRef<(x: number, y: number) => void>(() => { });
   const projectDataRef = useRef<ProjectData | null>(null);
   const parcelsDrawnFromGeometryRef = useRef<string | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
+
+  /** Cache of building canvas positions for 3D viewer (survives view switches) */
+  const buildingPositionsRef = useRef<Record<string, { x: number; y: number; angle: number }>>({});
 
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -309,7 +318,6 @@ function SitePlanContent() {
   const [isDirty, setIsDirty] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const [canvasReady, setCanvasReady] = useState(false);
 
   // Buildings state
   const [buildingDetails, setBuildingDetails] = useState<BuildingDetail[]>([]);
@@ -724,7 +732,7 @@ function SitePlanContent() {
     canvas.requestRenderAll();
   }, [projectData?.includeOverhangInFootprint, buildingDetails, viewMode, currentScale.pixelsPerMeter]);
 
-  // Phase 7: Draw building canvas overlays (overhang, interior layout, openings)
+  // Phase 7: Draw building canvas overlays (overhang, interior layout, openings, wall thickness, rooms, envelope)
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas || viewMode !== "2d") return;
@@ -740,8 +748,16 @@ function SitePlanContent() {
       clearBuildingOverlays(canvas, building.id);
       // Draw new overlays
       drawOverhangOverlay(canvas, fabric, obj, building);
+      drawWallThickness(canvas, fabric, obj, building);
       drawInteriorLayout(canvas, fabric, obj, building as any);
+      drawRoomLabels(canvas, fabric, obj, building);
       drawBuildingOpenings(canvas, fabric, obj, building as any, currentScale.pixelsPerMeter);
+      // Exterior envelope from PLU setbacks if available
+      const setbacks = projectDataRef.current?.pluSetbacks;
+      if (setbacks) {
+        const maxSetback = Math.max(...Object.values(setbacks).filter((v): v is number => typeof v === "number"));
+        if (maxSetback > 0) drawExteriorEnvelope(canvas, fabric, obj, building, maxSetback);
+      }
     });
 
     canvas.requestRenderAll();
@@ -1083,6 +1099,8 @@ function SitePlanContent() {
       o.isBuildingOpening ||
       o.isBuildingOverhang ||
       o.isExteriorEnvelope ||
+      o.isWallThickness ||
+      o.isRoomLabel ||
       o.isElevationPoint ||
       o.isVegetation ||
       o.isViewpoint ||
@@ -1287,7 +1305,10 @@ function SitePlanContent() {
   // ─── Canvas init ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!canvasRef.current || viewMode !== "2d") return;
+    // CRITICAL: Do NOT include viewMode in deps — canvas must persist across 2D/3D switches
+    if (!canvasRef.current) return;
+    // Skip re-init if canvas already exists
+    if (fabricRef.current) return;
 
     const canvas = new fabric.Canvas(canvasRef.current, {
       width: canvasSize.width, height: canvasSize.height,
@@ -1307,8 +1328,9 @@ function SitePlanContent() {
     canvas.on("object:added", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
     canvas.on("object:removed", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
 
-    return () => { setCanvasReady(false); canvas.dispose(); };
-  }, [canvasSize, showGrid, drawGrid, updateObjectMeasurements, updateLayers, runComplianceCheck, pushUndoState, viewMode]);
+    return () => { setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasSize]);
 
   // ─── Mouse handlers ────────────────────────────────────────────────────────
 
@@ -2554,6 +2576,23 @@ function SitePlanContent() {
       return sum;
     }, 0);
 
+    // Phase 7: Compute roof data, NIA, and GEA from building details
+    let roofSurfaceArea = 0;
+    let drainageArea = 0;
+    let totalNIA = 0;
+    let totalGEA = 0;
+    buildingDetails.forEach((b) => {
+      const rd = calculateRoofData(
+        b.width, b.depth,
+        { type: b.roof.type, pitch: b.roof.pitch, overhang: b.roof.overhang },
+        b.wallThickness || 0.2
+      );
+      roofSurfaceArea += rd.surfaceArea;
+      drainageArea += rd.drainageArea;
+      totalNIA += rd.netInternalArea;
+      totalGEA += rd.grossExternalArea;
+    });
+
     const parcelArea = projectData?.parcelArea ?? 500;
     const maxCov = projectData?.maxCoverageRatio ?? 0.5;
 
@@ -2567,6 +2606,10 @@ function SitePlanContent() {
       requiredGreenPct: projectData?.minGreenPct ?? 20,
       maxCoverageRatio: maxCov,
       surfacesByType,
+      roofSurfaceArea,
+      drainageArea,
+      totalNIA,
+      totalGEA,
     };
   };
 
@@ -2590,6 +2633,8 @@ function SitePlanContent() {
       o.isBuildingOpening ||
       o.isBuildingOverhang ||
       o.isExteriorEnvelope ||
+      o.isWallThickness ||
+      o.isRoomLabel ||
       o.isElevationPoint ||
       o.isVegetation ||
       o.isViewpoint ||
@@ -2666,7 +2711,12 @@ function SitePlanContent() {
           {/* 2D / 3D Toggle */}
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
             <button
-              onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); }}
+              onClick={() => {
+                setViewMode("2d");
+                setSelectedBuildingId3d(null);
+                // Force canvas re-render on switch back
+                setTimeout(() => fabricRef.current?.requestRenderAll(), 50);
+              }}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
                 viewMode === "2d" ? "bg-blue-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
@@ -2676,7 +2726,27 @@ function SitePlanContent() {
               2D
             </button>
             <button
-              onClick={() => setViewMode("3d")}
+              onClick={() => {
+                // Cache building positions from canvas before switching
+                const canvas = fabricRef.current;
+                if (canvas) {
+                  const positions: Record<string, { x: number; y: number; angle: number }> = {};
+                  buildingDetails.forEach((b) => {
+                    const obj = canvas.getObjects().find((o: any) =>
+                      o.type === "rect" && (o.id === b.id || o.buildingDetailId === b.id)
+                    );
+                    if (obj) {
+                      const l = obj.left ?? 0;
+                      const t = obj.top ?? 0;
+                      const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
+                      const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
+                      positions[b.id] = { x: l + w / 2, y: t + h / 2, angle: obj.angle || 0 };
+                    }
+                  });
+                  buildingPositionsRef.current = positions;
+                }
+                setViewMode("3d");
+              }}
               className={cn(
                 "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
                 viewMode === "3d" ? "bg-violet-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
@@ -2830,6 +2900,19 @@ function SitePlanContent() {
               ))}
             </div>
             <div className="w-8 h-px bg-white/10 my-1 self-center" />
+            {/* Quick-add building buttons — always visible */}
+            <div className="px-2 pb-1.5 mb-1 border-b border-slate-200">
+              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-0 py-0.5">BUILDINGS</p>
+            </div>
+            <button onClick={() => { addExistingBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2 px-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-all" title="Add Existing Building">
+              <Building2 className="w-4 h-4 shrink-0" />
+              <span className="text-[11px] font-medium truncate hidden sm:inline">Existing</span>
+            </button>
+            <button onClick={() => { addNewBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2 px-2 text-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all" title="Add New Construction">
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="text-[11px] font-medium truncate hidden sm:inline">+ New</span>
+            </button>
+            <div className="w-8 h-px bg-white/10 my-1 self-center" />
             {templatesList.map((t) => {
               const Icon = t.icon;
               return (
@@ -2882,8 +2965,8 @@ function SitePlanContent() {
 
         {/* Main Area */}
         <div className="flex-1 relative overflow-hidden" ref={containerRef}>
-          {viewMode === "2d" ? (
-            <>
+          {/* === 2D Canvas Layer (always mounted, hidden via CSS when in 3D) === */}
+          <div style={{ display: viewMode === "2d" ? "block" : "none" }} className="absolute inset-0">
               {currentMeasurement && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
                   <div className="px-6 py-3 rounded-xl bg-amber-500 text-slate-900 font-mono font-bold text-xl shadow-lg shadow-amber-500/25">{currentMeasurement}</div>
@@ -2973,22 +3056,46 @@ function SitePlanContent() {
                   </div>
                 );
               })()}
-            </>
-          ) : (
+          </div>
+
+          {/* === 3D Viewer Layer (conditionally rendered — rebuilds scene from data each mount) === */}
+          {viewMode === "3d" && (
             <div className="absolute inset-0 bg-white">
               <Inline3DViewer
                 buildings={buildingDetails.map((b) => {
+                  // Read positions fresh from the live canvas (always available since canvas persists)
                   const canvas = fabricRef.current;
-                  let canvasX, canvasY, canvasAngle;
+                  let canvasX: number | undefined;
+                  let canvasY: number | undefined;
+                  let canvasAngle = 0;
+
                   if (canvas) {
-                    const obj = canvas.getObjects().find((o: any) => o.id === b.id || o.buildingDetailId === b.id);
+                    // Filter to only match the actual building rect, not measurements or overlays
+                    const obj = canvas.getObjects().find((o: any) =>
+                      o.type === "rect" && (o.id === b.id || o.buildingDetailId === b.id)
+                    );
                     if (obj) {
-                      const center = obj.getCenterPoint();
-                      canvasX = center.x;
-                      canvasY = center.y;
+                      // Manually compute center — getCenterPoint can be unreliable with transforms
+                      const l = obj.left ?? 0;
+                      const t = obj.top ?? 0;
+                      const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
+                      const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
+                      canvasX = l + w / 2;
+                      canvasY = t + h / 2;
                       canvasAngle = obj.angle || 0;
                     }
                   }
+
+                  // Fallback to cached positions if canvas read failed
+                  if (canvasX === undefined) {
+                    const cached = buildingPositionsRef.current[b.id];
+                    if (cached) {
+                      canvasX = cached.x;
+                      canvasY = cached.y;
+                      canvasAngle = cached.angle;
+                    }
+                  }
+
                   return { ...b, canvasX, canvasY, canvasAngle } as any;
                 })}
                 elevationPoints={elevationPoints}
@@ -3001,7 +3108,7 @@ function SitePlanContent() {
               />
               <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
                 <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
-                <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
+                <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
               </div>
             </div>
           )}
@@ -3065,9 +3172,9 @@ function SitePlanContent() {
                   setPlacementMode(true);
                 }
               }}
-              onDone={() => setCreationMode("free")}
+              onDone={() => { setCreationMode("free"); setRightTab("buildings"); }}
               buildingCount={buildingDetails.length + (placementMode ? 0 : 0)}
-              onSwitchToFreeDesign={() => { setCreationMode("free"); setPlacementMode(false); }}
+              onSwitchToFreeDesign={() => { setCreationMode("free"); setPlacementMode(false); setRightTab("buildings"); }}
             />
           ) : (
             <>
@@ -3535,6 +3642,7 @@ function Inline3DViewer({
 
           // Roof
           const overhang = b.roof.overhang || 0;
+          const roofMat = new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 });
           if (b.roof.type === "flat") {
             const flatGeom = new THREE.BoxGeometry(w + overhang * 2, 0.25, d + overhang * 2);
             const roof = new THREE.Mesh(flatGeom, new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.92 }));
@@ -3571,19 +3679,84 @@ function Inline3DViewer({
             const geom = new THREE.BufferGeometry();
             geom.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
             geom.computeVertexNormals();
-            const roof = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 }));
+            const roof = new THREE.Mesh(geom, roofMat);
             roof.position.set(posX, baseY + totalH, posZ);
             roof.rotation.y = rotY;
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
+          } else if (b.roof.type === "shed") {
+            // Shed: single slope across shorter dimension
+            const pitch = (b.roof.pitch || 25) * (Math.PI / 180);
+            const halfW = w / 2 + overhang, halfD = d / 2 + overhang;
+            const span = Math.min(w, d);
+            const roofH = span * Math.tan(pitch);
+            // Quad: high edge on one side, low edge on the other
+            const p1 = [-halfW, roofH, halfD];
+            const p2 = [halfW, roofH, halfD];
+            const p3 = [halfW, 0, -halfD];
+            const p4 = [-halfW, 0, -halfD];
+            const verts = new Float32Array([
+              ...p1, ...p2, ...p3,  ...p1, ...p3, ...p4
+            ]);
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+            geom.computeVertexNormals();
+            const roof = new THREE.Mesh(geom, roofMat);
+            roof.position.set(posX, baseY + totalH, posZ);
+            roof.rotation.y = rotY;
+            roof.castShadow = true;
+            (roof as any).userData = { buildingId: b.id };
+            scene.add(roof);
+          } else if (b.roof.type === "mansard") {
+            // Mansard: lower steep section + upper gentle section
+            const lowerPitch = 70 * (Math.PI / 180);
+            const upperPitch = (b.roof.pitch || 25) * (Math.PI / 180);
+            const halfW = w / 2 + overhang, halfD = d / 2 + overhang;
+            const lowerFrac = 0.35;
+            const halfSpan = Math.min(w, d) / 2;
+            const lowerRun = halfSpan * lowerFrac;
+            const lowerH = lowerRun * Math.tan(lowerPitch);
+            const upperRun = halfSpan - lowerRun;
+            const upperH = upperRun * Math.tan(upperPitch);
+            // Build as box geometry sections
+            // Lower wall extension (steep)
+            const lowerGeom = new THREE.BoxGeometry(w, lowerH, d);
+            const lowerMesh = new THREE.Mesh(lowerGeom, roofMat);
+            lowerMesh.position.set(posX, baseY + totalH + lowerH / 2, posZ);
+            lowerMesh.rotation.y = rotY;
+            lowerMesh.castShadow = true;
+            (lowerMesh as any).userData = { buildingId: b.id };
+            scene.add(lowerMesh);
+            // Upper gentle roof (simple gable)
+            const upperW = w - 2 * lowerRun;
+            const upperD = d - 2 * lowerRun;
+            if (upperW > 0 && upperD > 0) {
+              const uHalfW = upperW / 2, uHalfD = upperD / 2;
+              const r1 = [0, upperH, 0];
+              const verts = new Float32Array([
+                -uHalfW, 0, uHalfD,   uHalfW, 0, uHalfD,  ...r1,
+                uHalfW, 0, uHalfD,    uHalfW, 0, -uHalfD, ...r1,
+                uHalfW, 0, -uHalfD,  -uHalfW, 0, -uHalfD, ...r1,
+                -uHalfW, 0, -uHalfD, -uHalfW, 0, uHalfD,  ...r1,
+              ]);
+              const geom = new THREE.BufferGeometry();
+              geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+              geom.computeVertexNormals();
+              const upper = new THREE.Mesh(geom, roofMat);
+              upper.position.set(posX, baseY + totalH + lowerH, posZ);
+              upper.rotation.y = rotY;
+              upper.castShadow = true;
+              (upper as any).userData = { buildingId: b.id };
+              scene.add(upper);
+            }
           } else {
+            // Hip roof (default)
             const pitch = (b.roof.pitch || 35) * (Math.PI / 180);
             const roofH = (Math.max(w, d) / 2) * Math.tan(pitch);
-            const size = Math.max(w, d) / 2 + overhang; // Use regular hip pyramid based on Square size. 
-            // In Threejs ConeGeometry: radius, height, radialSegments
+            const size = Math.max(w, d) / 2 + overhang;
             const roofGeom = new THREE.ConeGeometry(size * Math.SQRT2, roofH, 4);
-            const roof = new THREE.Mesh(roofGeom, new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 }));
+            const roof = new THREE.Mesh(roofGeom, roofMat);
             roof.rotation.y = rotY + Math.PI / 4;
             roof.position.set(posX, baseY + totalH + roofH / 2, posZ);
             roof.castShadow = true;
@@ -3591,67 +3764,115 @@ function Inline3DViewer({
             scene.add(roof);
           }
 
-          // Windows
-          const floorHeights = [b.wallHeights.ground, b.wallHeights.first, b.wallHeights.second].filter((h) => h > 0);
-          const winW = Math.min(1.2, w * 0.12), winH = Math.min(1.4, (b.wallHeights.ground || 3) * 0.4);
+          // Phase 7: Render user-defined openings (or fall back to auto-generated)
           const winMat = new THREE.MeshStandardMaterial({ color: 0x2a3f4f, roughness: 0.15, metalness: 0.35 });
-          const nWinX = w > 10 ? 3 : 2, nWinZ = d > 10 ? 3 : 2;
+          const doorMat = new THREE.MeshStandardMaterial({ color: 0x8b6238, roughness: 0.7 });
+          const userOpenings = b.openings || [];
 
-          for (let fi = 0; fi < floorHeights.length; fi++) {
-            const floorBase = baseY + floorHeights.slice(0, fi).reduce((a, b2) => a + b2, 0);
-            const cy = floorBase + floorHeights[fi] / 2;
-            
-            // X-axis mapping for windows (Front/Back)
-            for (let wi = 0; wi < nWinX; wi++) {
-              const cx = ((wi + 1) / (nWinX + 1)) * w - w / 2;
-              
-              const g1 = new THREE.PlaneGeometry(winW, winH);
-              const w1 = new THREE.Mesh(g1, winMat); 
-              w1.position.set(cx, cy, d / 2 + 0.02); 
-              (w1 as any).userData = { buildingId: b.id }; 
-              scene.add(w1);
-              
-              const g2 = new THREE.PlaneGeometry(winW, winH);
-              const w2 = new THREE.Mesh(g2, winMat); 
-              w2.position.set(cx, cy, -d / 2 - 0.02); 
-              w2.rotation.y = Math.PI; 
-              (w2 as any).userData = { buildingId: b.id }; 
-              scene.add(w2);
+          if (userOpenings.length > 0) {
+            // Render user-defined openings placed on their specified facades
+            const facadeMap: Record<string, { normal: number[]; offset: number[]; rotY: number }> = {
+              south: { normal: [0,0,1], offset: [0, 0, d/2 + 0.02], rotY: 0 },
+              north: { normal: [0,0,-1], offset: [0, 0, -d/2 - 0.02], rotY: Math.PI },
+              east:  { normal: [1,0,0], offset: [w/2 + 0.02, 0, 0], rotY: -Math.PI/2 },
+              west:  { normal: [-1,0,0], offset: [-w/2 - 0.02, 0, 0], rotY: Math.PI/2 },
+            };
 
-              // Position them relative to the root building center
-              w1.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-              w1.position.x += posX; w1.position.z += posZ;
-              w1.rotation.y += rotY;
+            // Group openings by facade for distribution
+            const byFacade: Record<string, typeof userOpenings> = {};
+            for (const op of userOpenings) { (byFacade[op.facade] ??= []).push(op); }
 
-              w2.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-              w2.position.x += posX; w2.position.z += posZ;
-              w2.rotation.y += rotY;
+            for (const [facade, ops] of Object.entries(byFacade)) {
+              const fm = facadeMap[facade];
+              if (!fm) continue;
+              const wallLen = (facade === "north" || facade === "south") ? w : d;
+              const totalOpeningW = ops.reduce((s: number, op: any) => s + op.width * op.count, 0);
+              let cursor = -totalOpeningW / 2;
+
+              for (const op of ops) {
+                for (let ci = 0; ci < op.count; ci++) {
+                  const opW = op.width;
+                  const opH = op.height;
+                  const cx = cursor + opW / 2;
+                  const cy = baseY + (op.sillHeight || 0) + opH / 2;
+                  const mat = op.type === "door" || op.type === "garage_door" ? doorMat : winMat;
+                  const geom = new THREE.PlaneGeometry(opW, opH);
+                  const mesh = new THREE.Mesh(geom, mat);
+
+                  // Position relative to building center
+                  if (facade === "south" || facade === "north") {
+                    mesh.position.set(cx, cy, fm.offset[2]);
+                  } else {
+                    mesh.position.set(fm.offset[0], cy, cx);
+                  }
+                  mesh.rotation.y = fm.rotY;
+                  (mesh as any).userData = { buildingId: b.id };
+
+                  // Apply building rotation and translate
+                  mesh.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+                  mesh.position.x += posX; mesh.position.z += posZ;
+                  mesh.rotation.y += rotY;
+                  scene.add(mesh);
+
+                  // Shutter indicator: small box above the opening
+                  if (op.shutter && op.shutter !== "none") {
+                    const shutterGeom = new THREE.BoxGeometry(opW + 0.04, 0.08, 0.06);
+                    const shutterMat = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.8 });
+                    const shutterMesh = new THREE.Mesh(shutterGeom, shutterMat);
+                    if (facade === "south" || facade === "north") {
+                      shutterMesh.position.set(cx, cy + opH / 2 + 0.06, fm.offset[2]);
+                    } else {
+                      shutterMesh.position.set(fm.offset[0], cy + opH / 2 + 0.06, cx);
+                    }
+                    shutterMesh.rotation.y = fm.rotY;
+                    shutterMesh.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+                    shutterMesh.position.x += posX; shutterMesh.position.z += posZ;
+                    shutterMesh.rotation.y += rotY;
+                    (shutterMesh as any).userData = { buildingId: b.id };
+                    scene.add(shutterMesh);
+                  }
+
+                  cursor += opW;
+                }
+              }
             }
-            // Z-axis mapping for windows (Left/Right)
-            for (let wi = 0; wi < nWinZ; wi++) {
-              const cz = ((wi + 1) / (nWinZ + 1)) * d - d / 2;
-              
-              const g1 = new THREE.PlaneGeometry(winW, winH);
-              const w1 = new THREE.Mesh(g1, winMat); 
-              w1.position.set(w / 2 + 0.02, cy, cz); 
-              w1.rotation.y = -Math.PI / 2; 
-              (w1 as any).userData = { buildingId: b.id }; 
-              scene.add(w1);
+          } else {
+            // Fallback: auto-generated windows
+            const floorHeights = [b.wallHeights.ground, b.wallHeights.first, b.wallHeights.second].filter((h: number) => h > 0);
+            const autoWinW = Math.min(1.2, w * 0.12), autoWinH = Math.min(1.4, (b.wallHeights.ground || 3) * 0.4);
+            const nWinX = w > 10 ? 3 : 2, nWinZ = d > 10 ? 3 : 2;
 
-              const g2 = new THREE.PlaneGeometry(winW, winH);
-              const w2 = new THREE.Mesh(g2, winMat); 
-              w2.position.set(-w / 2 - 0.02, cy, cz); 
-              w2.rotation.y = Math.PI / 2; 
-              (w2 as any).userData = { buildingId: b.id }; 
-              scene.add(w2);
-
-              w1.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-              w1.position.x += posX; w1.position.z += posZ;
-              w1.rotation.y += rotY;
-
-              w2.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-              w2.position.x += posX; w2.position.z += posZ;
-              w2.rotation.y += rotY;
+            for (let fi = 0; fi < floorHeights.length; fi++) {
+              const floorBase = baseY + floorHeights.slice(0, fi).reduce((a: number, b2: number) => a + b2, 0);
+              const cy = floorBase + floorHeights[fi] / 2;
+              for (let wi = 0; wi < nWinX; wi++) {
+                const cx = ((wi + 1) / (nWinX + 1)) * w - w / 2;
+                for (const zOff of [d / 2 + 0.02, -d / 2 - 0.02]) {
+                  const g = new THREE.PlaneGeometry(autoWinW, autoWinH);
+                  const m = new THREE.Mesh(g, winMat);
+                  m.position.set(cx, cy, zOff);
+                  if (zOff < 0) m.rotation.y = Math.PI;
+                  m.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+                  m.position.x += posX; m.position.z += posZ;
+                  m.rotation.y += rotY;
+                  (m as any).userData = { buildingId: b.id };
+                  scene.add(m);
+                }
+              }
+              for (let wi = 0; wi < nWinZ; wi++) {
+                const cz = ((wi + 1) / (nWinZ + 1)) * d - d / 2;
+                for (const [xOff, ry] of [[w / 2 + 0.02, -Math.PI / 2], [-w / 2 - 0.02, Math.PI / 2]] as [number, number][]) {
+                  const g = new THREE.PlaneGeometry(autoWinW, autoWinH);
+                  const m = new THREE.Mesh(g, winMat);
+                  m.position.set(xOff, cy, cz);
+                  m.rotation.y = ry;
+                  m.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+                  m.position.x += posX; m.position.z += posZ;
+                  m.rotation.y += rotY;
+                  (m as any).userData = { buildingId: b.id };
+                  scene.add(m);
+                }
+              }
             }
           }
         });

@@ -15,6 +15,14 @@ export interface FootprintData {
   requiredGreenPct: number; // % from PLU
   maxCoverageRatio: number; // CES from PLU
   surfacesByType: Record<string, number>;
+  /** Phase 7: Roof surface area (material area) */
+  roofSurfaceArea?: number;
+  /** Phase 7: Drainage projection area */
+  drainageArea?: number;
+  /** Phase 7: Total Net Internal Area across all buildings */
+  totalNIA?: number;
+  /** Phase 7: Total Gross External Area across all buildings */
+  totalGEA?: number;
 }
 
 interface FootprintTableProps {
@@ -140,6 +148,20 @@ export function FootprintTable({ data, className }: FootprintTableProps) {
           </div>
           <Row label="Max allowed (CES)" value={data.maxFootprint} />
           <Row label="Remaining" value={remaining} accent={remaining > 0 ? "emerald" : "red"} />
+          {/* Phase 7: Roof areas */}
+          {(data.roofSurfaceArea ?? 0) > 0 && (
+            <div className="border-t border-slate-200 pt-1.5 space-y-1">
+              <Row label="Roof surface area" value={data.roofSurfaceArea || 0} accent="orange" />
+              <Row label="Drainage area" value={data.drainageArea || 0} />
+            </div>
+          )}
+          {/* Phase 7: NIA / GEA */}
+          {(data.totalNIA ?? 0) > 0 && (
+            <div className="border-t border-slate-200 pt-1.5 space-y-1">
+              <Row label="Gross External (GEA)" value={data.totalGEA || 0} />
+              <Row label="Net Internal (NIA)" value={data.totalNIA || 0} accent="emerald" />
+            </div>
+          )}
           <div className="border-t border-slate-200 pt-1.5">
             <div className="flex justify-between items-center">
               <span className="text-slate-500">Coverage ratio (CES)</span>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Home,
   ChevronDown,
@@ -9,8 +9,19 @@ import {
   Trash2,
   Layers,
   PanelRightOpen,
+  AlertTriangle,
+  Ruler,
+  Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  calculateRoofData,
+  generatePitchProfile,
+  validateOpenings,
+  type OpeningConflict,
+} from "@/lib/roofCalculations";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface BuildingOpening {
   id: string;
@@ -24,6 +35,13 @@ export interface BuildingOpening {
   shutter?: "none" | "roller_shutter" | "traditional_shutter" | "venetian" | "hinged";
 }
 
+export interface BuildingRoom {
+  id: string;
+  label: string;
+  area: number; // m²
+  flooringType: string;
+}
+
 export interface BuildingDetail {
   id: string;
   name: string;
@@ -31,6 +49,8 @@ export interface BuildingDetail {
   width: number; // meters
   depth: number; // meters
   wallHeights: { ground: number; first: number; second: number };
+  /** Wall thickness in meters (default 0.2) */
+  wallThickness: number;
   roof: {
     type: "flat" | "gable" | "hip" | "shed" | "mansard";
     pitch: number; // degrees
@@ -43,12 +63,16 @@ export interface BuildingDetail {
     facade: string;
   };
   openings: BuildingOpening[];
+  /** Interior rooms with labels and flooring */
+  rooms: BuildingRoom[];
   color: string;
   /** Altitude (m) for placement on terrain, e.g. 0.00 or +1.50 */
   altitudeM?: number;
   /** Phase 7: interior layout preset */
   layoutPreset?: "open_plan" | "corridor" | "room_per_floor" | null;
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ROOF_TYPES = [
   { id: "flat", label: "Flat (Toit plat)" },
@@ -104,6 +128,61 @@ const SHUTTER_OPTIONS = [
   { id: "hinged",               label: "Hinged (Battant)",          icon: "◨" },
 ];
 
+const FLOORING_TYPES = [
+  "Tiles (Carrelage)",
+  "Hardwood (Parquet)",
+  "Concrete (Béton)",
+  "Laminate (Stratifié)",
+  "Stone (Pierre)",
+  "Carpet (Moquette)",
+];
+
+const ROOM_PRESETS = [
+  "Bedroom (Chambre)",
+  "Living Room (Séjour)",
+  "Kitchen (Cuisine)",
+  "Bathroom (Salle de bain)",
+  "Garage",
+  "Office (Bureau)",
+  "Hallway (Couloir)",
+  "Laundry (Buanderie)",
+  "Storage (Rangement)",
+];
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+/** SVG cross-section thumbnail for roof pitch */
+function RoofProfileThumb({ pitch, roofType }: { pitch: number; roofType: string }) {
+  const profile = useMemo(
+    () => generatePitchProfile(pitch, roofType as any),
+    [pitch, roofType]
+  );
+
+  return (
+    <svg viewBox={profile.viewBox} className="w-full h-14 rounded-md bg-slate-900/50 border border-white/5">
+      {/* Ground */}
+      <path d={profile.groundLine} stroke="#475569" strokeWidth="1.5" fill="none" />
+      {/* Walls */}
+      <path d={profile.wallPath} stroke="#94a3b8" strokeWidth="1.5" fill="none" />
+      {/* Roof */}
+      <path d={profile.roofPath} stroke="#f97316" strokeWidth="2" fill="rgba(249,115,22,0.15)" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Stat pill for roof calculations */
+function StatPill({ label, value, unit, accent }: { label: string; value: string; unit: string; accent?: string }) {
+  return (
+    <div className="flex flex-col items-center px-2 py-1.5 rounded-lg bg-slate-900/40 border border-white/5 min-w-0">
+      <span className="text-[9px] text-slate-500 uppercase tracking-wide truncate">{label}</span>
+      <span className={cn("text-sm font-semibold tabular-nums", accent || "text-white")}>{value}</span>
+      <span className="text-[9px] text-slate-500">{unit}</span>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 interface BuildingDetailPanelProps {
   building: BuildingDetail;
   onChange: (updated: BuildingDetail) => void;
@@ -122,6 +201,8 @@ export function BuildingDetailPanel({
 }: BuildingDetailPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [openingsExpanded, setOpeningsExpanded] = useState(false);
+  const [roomsExpanded, setRoomsExpanded] = useState(false);
+  const [roofCalcExpanded, setRoofCalcExpanded] = useState(false);
 
   useEffect(() => {
     if (highlight) setExpanded(true);
@@ -130,6 +211,8 @@ export function BuildingDetailPanel({
   const update = (patch: Partial<BuildingDetail>) => {
     onChange({ ...building, ...patch });
   };
+
+  // ─── Openings ─────────────────────────────────────────────────────────────
 
   const addOpening = () => {
     const newOpening: BuildingOpening = {
@@ -157,8 +240,64 @@ export function BuildingDetailPanel({
     update({ openings });
   };
 
+  // ─── Rooms ────────────────────────────────────────────────────────────────
+
+  const addRoom = () => {
+    const newRoom: BuildingRoom = {
+      id: `room-${Date.now()}`,
+      label: "Bedroom (Chambre)",
+      area: 12,
+      flooringType: "Tiles (Carrelage)",
+    };
+    update({ rooms: [...(building.rooms || []), newRoom] });
+  };
+
+  const updateRoom = (index: number, patch: Partial<BuildingRoom>) => {
+    const rooms = [...(building.rooms || [])];
+    rooms[index] = { ...rooms[index], ...patch };
+    update({ rooms });
+  };
+
+  const removeRoom = (index: number) => {
+    const rooms = [...(building.rooms || [])];
+    rooms.splice(index, 1);
+    update({ rooms });
+  };
+
+  // ─── Computed Values ──────────────────────────────────────────────────────
+
+  const roofData = useMemo(
+    () =>
+      calculateRoofData(
+        building.width,
+        building.depth,
+        { type: building.roof.type, pitch: building.roof.pitch, overhang: building.roof.overhang },
+        building.wallThickness || 0.2
+      ),
+    [building.width, building.depth, building.roof.type, building.roof.pitch, building.roof.overhang, building.wallThickness]
+  );
+
+  const openingConflicts = useMemo(
+    () =>
+      validateOpenings(building.openings || [], building.width, building.depth),
+    [building.openings, building.width, building.depth]
+  );
+
+  const totalRoomArea = useMemo(
+    () => (building.rooms || []).reduce((sum, r) => sum + r.area, 0),
+    [building.rooms]
+  );
+
+  const conflictMap = useMemo(() => {
+    const map: Record<string, OpeningConflict[]> = {};
+    for (const c of openingConflicts) {
+      (map[c.openingId] ??= []).push(c);
+    }
+    return map;
+  }, [openingConflicts]);
+
   return (
-    <div className={cn("rounded-xl border overflow-hidden", highlight ? "border-blue-500 ring-2 ring-blue-500/30 bg-slate-800/80" : "border-white/10 bg-slate-800/50", className)}>
+    <div className={cn("rounded-xl border overflow-hidden transition-all duration-200", highlight ? "border-blue-500 ring-2 ring-blue-500/30 bg-slate-800/80" : "border-white/10 bg-slate-800/50", className)}>
       {/* Header */}
       <button
         type="button"
@@ -174,11 +313,17 @@ export function BuildingDetailPanel({
         <div className="flex-1 text-left">
           <p className="text-sm font-medium text-white">{building.name}</p>
           <p className="text-xs text-slate-400">
-            {building.width}m x {building.depth}m ·{" "}
+            {building.width}m × {building.depth}m ·{" "}
             {building.isExisting ? "Existing" : "New"} ·{" "}
             {ROOF_TYPES.find((r) => r.id === building.roof.type)?.label || "Flat"}
           </p>
         </div>
+        {openingConflicts.length > 0 && (
+          <span className="flex items-center gap-1 text-[10px] text-amber-400" title={`${openingConflicts.length} conflict(s)`}>
+            <AlertTriangle className="w-3 h-3" />
+            {openingConflicts.length}
+          </span>
+        )}
         {expanded ? (
           <ChevronUp className="w-4 h-4 text-slate-400" />
         ) : (
@@ -186,7 +331,12 @@ export function BuildingDetailPanel({
         )}
       </button>
 
-      {expanded && (
+      <div
+        className={cn(
+          "transition-all duration-200 overflow-hidden",
+          expanded ? "max-h-[3000px] opacity-100" : "max-h-0 opacity-0"
+        )}
+      >
         <div className="p-3 pt-0 space-y-4 border-t border-white/5">
           {/* Name */}
           <div>
@@ -202,10 +352,10 @@ export function BuildingDetailPanel({
           {/* Dimensions */}
           <div>
             <label className="block text-xs text-slate-500 mb-2 flex items-center gap-1">
-              <Layers className="w-3 h-3" />
+              <Ruler className="w-3 h-3" />
               Dimensions (m)
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-[10px] text-slate-500 mb-0.5">Width</label>
                 <input
@@ -216,6 +366,7 @@ export function BuildingDetailPanel({
                   value={building.width}
                   onChange={(e) => update({ width: Number(e.target.value) || 6 })}
                   className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                  title="Building width in meters"
                 />
               </div>
               <div>
@@ -228,7 +379,32 @@ export function BuildingDetailPanel({
                   value={building.depth}
                   onChange={(e) => update({ depth: Number(e.target.value) || 6 })}
                   className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                  title="Building depth in meters"
                 />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-0.5">Wall (m)</label>
+                <input
+                  type="number"
+                  min={0.1}
+                  max={0.5}
+                  step={0.05}
+                  value={building.wallThickness || 0.2}
+                  onChange={(e) => update({ wallThickness: Number(e.target.value) || 0.2 })}
+                  className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                  title="Wall thickness in meters (affects NIA vs GEA)"
+                />
+              </div>
+            </div>
+            {/* NIA vs GEA */}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="px-2 py-1.5 rounded bg-slate-900/40 border border-white/5">
+                <span className="block text-[9px] text-slate-500 uppercase">GEA</span>
+                <span className="text-xs text-white font-medium">{roofData.grossExternalArea} m²</span>
+              </div>
+              <div className="px-2 py-1.5 rounded bg-slate-900/40 border border-white/5">
+                <span className="block text-[9px] text-slate-500 uppercase">NIA</span>
+                <span className="text-xs text-emerald-400 font-medium">{roofData.netInternalArea} m²</span>
               </div>
             </div>
             <div className="mt-2">
@@ -269,6 +445,7 @@ export function BuildingDetailPanel({
                       })
                     }
                     className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                    title={`${floor} floor wall height in meters`}
                   />
                 </div>
               ))}
@@ -286,10 +463,12 @@ export function BuildingDetailPanel({
                     roof: {
                       ...building.roof,
                       type: e.target.value as BuildingDetail["roof"]["type"],
+                      pitch: e.target.value === "flat" ? 0 : building.roof.pitch || 35,
                     },
                   })
                 }
                 className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-white/10 text-white text-sm"
+                title="Roof shape type"
               >
                 {ROOF_TYPES.map((r) => (
                   <option key={r.id} value={r.id}>
@@ -297,12 +476,29 @@ export function BuildingDetailPanel({
                   </option>
                 ))}
               </select>
-              {/* Pitch + Overhang always shown; pitch is disabled for flat roofs */}
+
+              {/* Cross-section preview thumbnail */}
+              <RoofProfileThumb pitch={building.roof.type === "flat" ? 0 : building.roof.pitch} roofType={building.roof.type} />
+
+              {/* Pitch slider + Overhang */}
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <div>
                   <label className="block text-[10px] text-slate-500 mb-0.5">
-                    {building.roof.type !== "flat" ? "Pitch (deg)" : "Pitch (n/a)"}
+                    {building.roof.type !== "flat" ? `Pitch ${building.roof.pitch}°` : "Pitch (n/a)"}
                   </label>
+                  <input
+                    type="range"
+                    min={5}
+                    max={60}
+                    value={building.roof.type === "flat" ? 0 : building.roof.pitch}
+                    disabled={building.roof.type === "flat"}
+                    onChange={(e) =>
+                      update({ roof: { ...building.roof, pitch: Number(e.target.value) || 35 } })
+                    }
+                    className="w-full h-2 accent-orange-500 disabled:opacity-30"
+                    title="Drag to adjust roof pitch angle"
+                  />
+                  {/* Numeric input below slider */}
                   <input
                     type="number"
                     min={0}
@@ -312,7 +508,7 @@ export function BuildingDetailPanel({
                     onChange={(e) =>
                       update({ roof: { ...building.roof, pitch: Number(e.target.value) || 35 } })
                     }
-                    className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm disabled:opacity-40"
+                    className="w-full mt-1 px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px] disabled:opacity-40 text-center"
                   />
                 </div>
                 <div>
@@ -327,6 +523,7 @@ export function BuildingDetailPanel({
                       update({ roof: { ...building.roof, overhang: Number(e.target.value) || 0 } })
                     }
                     className="w-full px-2 py-1.5 rounded bg-slate-800 border border-white/10 text-white text-sm"
+                    title="Roof overhang distance in meters"
                   />
                 </div>
               </div>
@@ -347,6 +544,30 @@ export function BuildingDetailPanel({
             </div>
           </div>
 
+          {/* Roof Calculations Summary */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setRoofCalcExpanded(!roofCalcExpanded)}
+              className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
+            >
+              <span className="font-medium flex items-center gap-1">
+                <Box className="w-3 h-3" />
+                Roof Calculations
+              </span>
+              {roofCalcExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            <div className={cn("transition-all duration-200 overflow-hidden", roofCalcExpanded ? "max-h-[400px] opacity-100 mt-2" : "max-h-0 opacity-0")}>
+              <div className="grid grid-cols-2 gap-1.5">
+                <StatPill label="Surface Area" value={roofData.surfaceArea.toFixed(1)} unit="m²" accent="text-orange-400" />
+                <StatPill label="Ridge Height" value={roofData.ridgeHeight.toFixed(2)} unit="m" accent="text-sky-400" />
+                <StatPill label="Drainage Area" value={roofData.drainageArea.toFixed(1)} unit="m²" />
+                <StatPill label="Attic Volume" value={roofData.atticVolume.toFixed(1)} unit="m³" />
+                <StatPill label="Footprint+OH" value={roofData.footprintWithOverhang.toFixed(1)} unit="m²" accent="text-amber-400" />
+                <StatPill label="Wall Vol." value={(2 * (building.width + building.depth) * (building.wallHeights.ground + building.wallHeights.first + building.wallHeights.second) * (building.wallThickness || 0.2)).toFixed(1)} unit="m³" />
+              </div>
+            </div>
+          </div>
 
           {/* Materials */}
           <div>
@@ -401,6 +622,101 @@ export function BuildingDetailPanel({
             </div>
           </div>
 
+          {/* Rooms Editor */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setRoomsExpanded(!roomsExpanded)}
+              className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white transition-colors"
+            >
+              <span className="font-medium">
+                Rooms ({(building.rooms || []).length})
+                {totalRoomArea > 0 && (
+                  <span className="ml-1 text-emerald-400">· {totalRoomArea.toFixed(1)} m²</span>
+                )}
+              </span>
+              {roomsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+
+            <div className={cn("transition-all duration-200 overflow-hidden", roomsExpanded ? "max-h-[1000px] opacity-100" : "max-h-0 opacity-0")}>
+              <div className="mt-2 space-y-2">
+                {/* Area budget bar */}
+                {totalRoomArea > 0 && (
+                  <div>
+                    <div className="flex justify-between text-[9px] text-slate-500 mb-0.5">
+                      <span>Room area budget</span>
+                      <span>{totalRoomArea.toFixed(1)} / {roofData.netInternalArea.toFixed(1)} m²</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                      <div
+                        className={cn("h-full rounded-full transition-all duration-300", totalRoomArea > roofData.netInternalArea ? "bg-red-500" : "bg-emerald-500")}
+                        style={{ width: `${Math.min(100, (totalRoomArea / roofData.netInternalArea) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {(building.rooms || []).map((room, idx) => (
+                  <div
+                    key={room.id}
+                    className="p-2 rounded-lg bg-slate-900/50 border border-white/5 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white font-medium">#{idx + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeRoom(idx)}
+                        className="p-1 text-red-400 hover:text-red-300"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select
+                        value={room.label}
+                        onChange={(e) => updateRoom(idx, { label: e.target.value })}
+                        className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                      >
+                        {ROOM_PRESETS.map((rp) => (
+                          <option key={rp} value={rp}>{rp}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={room.flooringType}
+                        onChange={(e) => updateRoom(idx, { flooringType: e.target.value })}
+                        className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                      >
+                        {FLOORING_TYPES.map((ft) => (
+                          <option key={ft} value={ft}>{ft}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] text-slate-500">Area (m²)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        step={0.5}
+                        value={room.area}
+                        onChange={(e) => updateRoom(idx, { area: Number(e.target.value) || 1 })}
+                        className="w-full px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                      />
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addRoom}
+                  className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-white/10 text-slate-400 hover:text-white hover:border-white/20 text-xs transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add room
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Openings */}
           <div>
             <button
@@ -410,6 +726,9 @@ export function BuildingDetailPanel({
             >
               <span className="font-medium">
                 Openings ({(building.openings || []).length})
+                {openingConflicts.length > 0 && (
+                  <span className="ml-1 text-amber-400">· {openingConflicts.length} issue(s)</span>
+                )}
               </span>
               {openingsExpanded ? (
                 <ChevronUp className="w-3 h-3" />
@@ -418,139 +737,162 @@ export function BuildingDetailPanel({
               )}
             </button>
 
-            {openingsExpanded && (
+            <div className={cn("transition-all duration-200 overflow-hidden", openingsExpanded ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0")}>
               <div className="mt-2 space-y-2">
-                {(building.openings || []).map((opening, idx) => (
-                  <div
-                    key={opening.id}
-                    className="p-2 rounded-lg bg-slate-900/50 border border-white/5 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-white font-medium">
-                        #{idx + 1} {OPENING_TYPES.find((o) => o.id === opening.type)?.label}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeOpening(idx)}
-                        className="p-1 text-red-400 hover:text-red-300"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <select
-                        value={opening.type}
-                        onChange={(e) =>
-                          updateOpening(idx, {
-                            type: e.target.value as BuildingOpening["type"],
-                          })
-                        }
-                        className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                      >
-                        {OPENING_TYPES.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={opening.facade}
-                        onChange={(e) =>
-                          updateOpening(idx, {
-                            facade: e.target.value as BuildingOpening["facade"],
-                          })
-                        }
-                        className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                      >
-                        {FACADES.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[9px] text-slate-500 mb-0.5">Shutter</label>
-                      <select
-                        value={opening.shutter ?? "none"}
-                        onChange={(e) =>
-                          updateOpening(idx, {
-                            shutter: e.target.value as BuildingOpening["shutter"],
-                          })
-                        }
-                        className="w-full px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                        title="Hinged (battants) or rolling (roulants)"
-                      >
-                        {SHUTTER_OPTIONS.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <div>
-                        <label className="block text-[9px] text-slate-500">W (m)</label>
-                        <input
-                          type="number"
-                          min={0.3}
-                          max={5}
-                          step={0.1}
-                          value={opening.width}
-                          onChange={(e) =>
-                            updateOpening(idx, { width: Number(e.target.value) || 1 })
-                          }
-                          className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                        />
+                {(building.openings || []).map((opening, idx) => {
+                  const conflicts = conflictMap[opening.id] || [];
+                  return (
+                    <div
+                      key={opening.id}
+                      className={cn(
+                        "p-2 rounded-lg border space-y-2",
+                        conflicts.length > 0
+                          ? "bg-red-950/30 border-red-500/30"
+                          : "bg-slate-900/50 border-white/5"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-white font-medium">
+                          #{idx + 1} {OPENING_TYPES.find((o) => o.id === opening.type)?.label}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {conflicts.length > 0 && (
+                            <span className="text-[9px] text-red-400 flex items-center gap-0.5" title={conflicts.map(c => c.message).join('\n')}>
+                              <AlertTriangle className="w-3 h-3" />
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeOpening(idx)}
+                            className="p-1 text-red-400 hover:text-red-300"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-500">H (m)</label>
-                        <input
-                          type="number"
-                          min={0.3}
-                          max={4}
-                          step={0.1}
-                          value={opening.height}
-                          onChange={(e) =>
-                            updateOpening(idx, { height: Number(e.target.value) || 1 })
-                          }
-                          className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-500">Sill</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={3}
-                          step={0.1}
-                          value={opening.sillHeight}
+                      {/* Conflict messages */}
+                      {conflicts.length > 0 && (
+                        <div className="text-[9px] text-red-400 space-y-0.5">
+                          {conflicts.map((c, ci) => (
+                            <p key={ci}>⚠ {c.message}</p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <select
+                          value={opening.type}
                           onChange={(e) =>
                             updateOpening(idx, {
-                              sillHeight: Number(e.target.value) || 0,
+                              type: e.target.value as BuildingOpening["type"],
                             })
                           }
-                          className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] text-slate-500">Qty</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={opening.count}
+                          className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                        >
+                          {OPENING_TYPES.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={opening.facade}
                           onChange={(e) =>
                             updateOpening(idx, {
-                              count: parseInt(e.target.value, 10) || 1,
+                              facade: e.target.value as BuildingOpening["facade"],
                             })
                           }
-                          className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
-                        />
+                          className="px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                        >
+                          {FACADES.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-slate-500 mb-0.5">Shutter</label>
+                        <select
+                          value={opening.shutter ?? "none"}
+                          onChange={(e) =>
+                            updateOpening(idx, {
+                              shutter: e.target.value as BuildingOpening["shutter"],
+                            })
+                          }
+                          className="w-full px-2 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                          title="Hinged (battants) or rolling (roulants)"
+                        >
+                          {SHUTTER_OPTIONS.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <div>
+                          <label className="block text-[9px] text-slate-500">W (m)</label>
+                          <input
+                            type="number"
+                            min={0.3}
+                            max={5}
+                            step={0.1}
+                            value={opening.width}
+                            onChange={(e) =>
+                              updateOpening(idx, { width: Number(e.target.value) || 1 })
+                            }
+                            className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-slate-500">H (m)</label>
+                          <input
+                            type="number"
+                            min={0.3}
+                            max={4}
+                            step={0.1}
+                            value={opening.height}
+                            onChange={(e) =>
+                              updateOpening(idx, { height: Number(e.target.value) || 1 })
+                            }
+                            className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-slate-500">Sill</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={3}
+                            step={0.1}
+                            value={opening.sillHeight}
+                            onChange={(e) =>
+                              updateOpening(idx, {
+                                sillHeight: Number(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-slate-500">Qty</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={opening.count}
+                            onChange={(e) =>
+                              updateOpening(idx, {
+                                count: parseInt(e.target.value, 10) || 1,
+                              })
+                            }
+                            className="w-full px-1.5 py-1 rounded bg-slate-800 border border-white/10 text-white text-[11px]"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <button
                   type="button"
                   onClick={addOpening}
@@ -560,7 +902,7 @@ export function BuildingDetailPanel({
                   Add opening
                 </button>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Remove */}
@@ -575,12 +917,13 @@ export function BuildingDetailPanel({
             </button>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// Utility to create a default building detail
+// ─── Utility: Create Default Building ─────────────────────────────────────────
+
 export function createDefaultBuilding(
   overrides: Partial<BuildingDetail> = {}
 ): BuildingDetail {
@@ -591,6 +934,7 @@ export function createDefaultBuilding(
     width: 12,
     depth: 10,
     wallHeights: { ground: 3, first: 0, second: 0 },
+    wallThickness: 0.2,
     roof: {
       type: "gable",
       pitch: 35,
@@ -603,13 +947,15 @@ export function createDefaultBuilding(
       facade: "Enduit blanc",
     },
     openings: [],
+    rooms: [],
     color: "#3b82f6",
     altitudeM: 0,
     ...overrides,
   };
 }
 
-// Create from OSM data
+// ─── Utility: Create from OSM data ───────────────────────────────────────────
+
 export function createBuildingFromOSM(osmBuilding: {
   id: string;
   name: string;

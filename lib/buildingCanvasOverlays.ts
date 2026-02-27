@@ -3,17 +3,18 @@
  * Pure functions that draw Fabric.js objects for:
  *   1. Roof overhang dashed outline
  *   2. Exterior envelope (PLU setback preview)
- *   3. Interior layout room dividers
- *   4. Window / door / sliding-door edge markers
+ *   3. Wall thickness (inner boundary)
+ *   4. Interior layout room dividers
+ *   5. Room labels with coloured fills
+ *   6. Window / door / sliding-door edge markers with conflict highlights
  *
  * All created objects carry tag properties for safe cleanup:
- *   isBuildingOverhang, isInteriorLayout, isBuildingOpening
+ *   isBuildingOverhang, isInteriorLayout, isBuildingOpening, isWallThickness, isRoomLabel
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { BuildingDetail, BuildingOpening } from "@/components/site-plan/BuildingDetailPanel";
-
-const RAD = Math.PI / 180;
+import type { BuildingDetail, BuildingOpening, BuildingRoom } from "@/components/site-plan/BuildingDetailPanel";
+import { validateOpenings } from "@/lib/roofCalculations";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export function getBuildingRect(obj: any): { left: number; top: number; width: n
 export function clearBuildingOverlays(
   canvas: any,
   buildingId: string,
-  tags: string[] = ["isBuildingOverhang", "isInteriorLayout", "isBuildingOpening"]
+  tags: string[] = ["isBuildingOverhang", "isInteriorLayout", "isBuildingOpening", "isWallThickness", "isRoomLabel", "isExteriorEnvelope"]
 ) {
   const toRemove = canvas.getObjects().filter((o: any) =>
     o._overlayBuildingId === buildingId && tags.some((t) => o[t])
@@ -131,7 +132,49 @@ export function drawExteriorEnvelope(
   canvas.sendObjectToBack(envelope);
 }
 
-// ─── 3. Interior Layout ───────────────────────────────────────────────────────
+// ─── 3. Wall Thickness ────────────────────────────────────────────────────────
+
+/**
+ * Draw an inner dashed rectangle showing the Net Internal Area boundary.
+ * The gap between this and the building edge represents wall thickness.
+ */
+export function drawWallThickness(
+  canvas: any,
+  fabric: any,
+  obj: any,
+  building: BuildingDetail
+): void {
+  const wt = building.wallThickness || 0.2;
+  if (wt <= 0) return;
+  const rect = getBuildingRect(obj);
+  if (!rect) return;
+  const ppm: number = (canvas as any)._pixelsPerMeter || 20;
+  const wtPx = wt * ppm;
+
+  // Only draw if the wall thickness is visually meaningful (> 2px)
+  if (wtPx < 2) return;
+
+  const inner = new fabric.Rect({
+    left: rect.left + wtPx,
+    top: rect.top + wtPx,
+    width: Math.max(0, rect.width - 2 * wtPx),
+    height: Math.max(0, rect.height - 2 * wtPx),
+    fill: "transparent",
+    stroke: "#94a3b8",
+    strokeWidth: 0.8,
+    strokeDashArray: [3, 3],
+    selectable: false,
+    evented: false,
+    opacity: 0.5,
+    originX: "left",
+    originY: "top",
+  });
+  (inner as any).isWallThickness = true;
+  (inner as any)._overlayBuildingId = building.id;
+  canvas.add(inner);
+}
+
+// ─── 4. Interior Layout ───────────────────────────────────────────────────────
 
 type LayoutPreset = "open_plan" | "corridor" | "room_per_floor" | null;
 
@@ -181,7 +224,96 @@ export function drawInteriorLayout(
   }
 }
 
-// ─── 4. Opening Visualization ─────────────────────────────────────────────────
+// ─── 5. Room Labels ──────────────────────────────────────────────────────────
+
+const ROOM_COLORS: Record<string, string> = {
+  "Bedroom (Chambre)": "rgba(147,197,253,0.15)",
+  "Living Room (Séjour)": "rgba(253,224,71,0.12)",
+  "Kitchen (Cuisine)": "rgba(251,146,60,0.15)",
+  "Bathroom (Salle de bain)": "rgba(96,165,250,0.2)",
+  "Garage": "rgba(148,163,184,0.15)",
+  "Office (Bureau)": "rgba(167,139,250,0.15)",
+  "Hallway (Couloir)": "rgba(203,213,225,0.1)",
+  "Laundry (Buanderie)": "rgba(56,189,248,0.12)",
+  "Storage (Rangement)": "rgba(120,113,108,0.15)",
+};
+
+/**
+ * Draw room labels and fills inside the building.
+ * Rooms are stacked vertically within the building rect,
+ * sized proportionally to their area.
+ */
+export function drawRoomLabels(
+  canvas: any,
+  fabric: any,
+  obj: any,
+  building: BuildingDetail
+): void {
+  const rooms = building.rooms || [];
+  if (rooms.length === 0) return;
+  const rect = getBuildingRect(obj);
+  if (!rect) return;
+
+  const wt = (building.wallThickness || 0.2) * ((canvas as any)._pixelsPerMeter || 20);
+  const innerLeft = rect.left + wt;
+  const innerTop = rect.top + wt;
+  const innerW = Math.max(0, rect.width - 2 * wt);
+  const innerH = Math.max(0, rect.height - 2 * wt);
+
+  const totalArea = rooms.reduce((s, r) => s + r.area, 0);
+  if (totalArea <= 0) return;
+
+  let y = innerTop;
+
+  rooms.forEach((room) => {
+    const fraction = room.area / totalArea;
+    const roomH = innerH * fraction;
+
+    const fill = ROOM_COLORS[room.label] || "rgba(148,163,184,0.1)";
+
+    // Room fill
+    const roomRect = new fabric.Rect({
+      left: innerLeft,
+      top: y,
+      width: innerW,
+      height: roomH,
+      fill,
+      stroke: "#64748b",
+      strokeWidth: 0.5,
+      strokeDashArray: [3, 2],
+      selectable: false,
+      evented: false,
+      opacity: 0.8,
+      originX: "left",
+      originY: "top",
+    });
+    (roomRect as any).isRoomLabel = true;
+    (roomRect as any)._overlayBuildingId = building.id;
+    canvas.add(roomRect);
+
+    // Room label text
+    const shortLabel = room.label.split("(")[0].trim();
+    const labelText = new fabric.Text(`${shortLabel}\n${room.area}m²`, {
+      left: innerLeft + innerW / 2,
+      top: y + roomH / 2,
+      fontSize: Math.min(10, roomH * 0.35),
+      fontFamily: "Inter, sans-serif",
+      fill: "#cbd5e1",
+      textAlign: "center",
+      originX: "center",
+      originY: "center",
+      selectable: false,
+      evented: false,
+    });
+    (labelText as any).isRoomLabel = true;
+    (labelText as any)._overlayBuildingId = building.id;
+    canvas.add(labelText);
+
+    y += roomH;
+  });
+}
+
+// ─── 6. Opening Visualization ─────────────────────────────────────────────────
 
 /**
  * Colour and symbol per opening type.
@@ -217,6 +349,7 @@ function facadeEdge(
  * Draw opening markers on building edges (Windows, Doors, Sliding doors, etc.)
  * Each opening is a small coloured rectangle on the corresponding facade edge.
  * Sliding doors get a diagonal "track" line inside.
+ * Openings with conflicts get a red stroke highlight.
  */
 export function drawBuildingOpenings(
   canvas: any,
@@ -229,6 +362,10 @@ export function drawBuildingOpenings(
   if (!rect) return;
   const openings = building.openings || [];
   if (openings.length === 0) return;
+
+  // Get conflicts
+  const conflicts = validateOpenings(openings, building.width, building.depth);
+  const conflictIds = new Set(conflicts.map((c) => c.openingId));
 
   // Group openings per facade
   const byFacade: Record<string, BuildingOpening[]> = {};
@@ -243,13 +380,13 @@ export function drawBuildingOpenings(
     const gap = 4;       // px between multiple openings
 
     // Distribute openings evenly along the edge
-    let totalW = 0;
     const widths = ops.map((op) => Math.max(op.width * pixelsPerMeter * op.count, 10));
-    totalW = widths.reduce((a, b) => a + b, 0) + gap * (ops.length - 1);
+    const totalW = widths.reduce((a, b) => a + b, 0) + gap * (ops.length - 1);
     let cursor = edge.from + (edgeLen - totalW) / 2;
 
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
+      const hasConflict = conflictIds.has(op.id);
       const style = OPENING_STYLE[op.type] || OPENING_STYLE.window;
       const w = widths[i];
 
@@ -272,9 +409,9 @@ export function drawBuildingOpenings(
         top: rectTop,
         width: rectWidth,
         height: rectHeight,
-        fill: style.fill,
-        stroke: style.stroke,
-        strokeWidth: 1.5,
+        fill: hasConflict ? "rgba(239,68,68,0.3)" : style.fill,
+        stroke: hasConflict ? "#ef4444" : style.stroke,
+        strokeWidth: hasConflict ? 2 : 1.5,
         selectable: false,
         evented: false,
         originX: "left",
