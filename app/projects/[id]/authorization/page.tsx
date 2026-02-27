@@ -211,7 +211,9 @@ export default function AuthorizationPage({
             zoneType: proj.regulatoryAnalysis?.zoneType ?? proj.zoneType,
             address: proj.address,
             regulatoryType: proj.regulatoryType,
-            isProtectedZone: Array.isArray(proj.protectedAreas) && proj.protectedAreas.some((a: { type?: string }) => a.type === "ABF" || a.type === "HERITAGE"),
+            isProtectedZone: (proj.protectedAreas ?? []).some(
+              (a: { type: string }) => ["ABF", "HERITAGE", "MONUMENT_HISTORIQUE", "SITE_PATRIMONIAL"].includes(a.type)
+            ),
             coordinates: coords,
             citycode: proj.citycode,
           });
@@ -1415,6 +1417,8 @@ export default function AuthorizationPage({
                     </button>
                   </div>
 
+                  {/* Note — single-family houses & annexes (PC only, PCMI docs not applicable to DP) */}
+
                   {/* Actions */}
                   <div className="flex gap-3">
                     <button
@@ -1554,7 +1558,6 @@ export default function AuthorizationPage({
                   </p>
                 </div>
               )}
-
             </div>
           </div>
         )
@@ -1738,22 +1741,22 @@ export default function AuthorizationPage({
                     </div>
 
 
-                     {/* Note — only for PC (single-family houses & annexes) */}
-                     {!isDP && (
-                       <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
-                         <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
-                           <Info className="w-3.5 h-3.5" />
-                           {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
-                         </p>
-                         <p className="text-xs text-amber-700">
-                           {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
-                         </p>
-                         <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
-                           <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
-                           <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
-                         </ul>
-                       </div>
-                     )}
+                    {/* Note — single-family houses & annexes (PC only) */}
+                    {!isDP && (
+                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                        <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                          <Info className="w-3.5 h-3.5" />
+                          {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                        </p>
+                        <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                          <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                          <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                        </ul>
+                      </div>
+                    )}
 
                     {/* CTA */}
                     <button
