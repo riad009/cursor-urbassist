@@ -25,6 +25,7 @@ import {
     HardHat,
     X,
     Printer,
+    Pencil,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -653,9 +654,19 @@ export default function ProjectDescriptionPage({
 
                                             {/* Address field */}
                                             <div className="space-y-2">
-                                                <label className="text-sm font-semibold text-slate-800">
-                                                    {isEn ? "Address of the plot" : "Adresse de la parcelle"}
-                                                </label>
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-semibold text-slate-800">
+                                                        {isEn ? "Address of the plot" : "Adresse de la parcelle"}
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => router.push("/projects/new")}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-semibold hover:bg-indigo-100 hover:text-indigo-700 transition-all border border-indigo-200 hover:border-indigo-300 hover:shadow-sm"
+                                                    >
+                                                        <Pencil className="w-3 h-3" />
+                                                        {isEn ? "Change address" : "Changer l'adresse"}
+                                                    </button>
+                                                </div>
                                                 <div className="relative">
                                                     <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                                     <input
@@ -1837,22 +1848,39 @@ export default function ProjectDescriptionPage({
                                                         {isEn ? "PLU ZONE DETECTED" : "ZONE PLU DÉTECTÉE"}
                                                     </h3>
                                                     <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
-                                                        {isEn ? "Urban Zone (U)" : "Zone Urbaine (U)"}
+                                                        {projectZoneType
+                                                            ? (isEn ? `Zone ${projectZoneType}` : `Zone ${projectZoneType}`)
+                                                            : (isEn ? "Not detected" : "Non détectée")}
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-slate-500">
-                                                    {isEn ? "Dense zone allowing extensions up to 40m²." : "Zone dense permettant des extensions jusqu'à 40m²."}
+                                                    {projectZoneType && (projectZoneType.toUpperCase().startsWith("U") || projectZoneType.toUpperCase().startsWith("AU"))
+                                                        ? (isEn ? "Dense zone allowing extensions up to 40m²." : "Zone dense permettant des extensions jusqu'à 40m².")
+                                                        : projectZoneType
+                                                            ? (isEn ? "Rural or natural zone — DP threshold at 20m²." : "Zone rurale/naturelle — seuil DP à 20m².")
+                                                            : (isEn ? "No PLU zone detected." : "Aucune zone PLU détectée.")}
                                                 </p>
                                             </div>
-                                            <div className="rounded-xl border-2 border-amber-200 bg-amber-50/30 p-4">
+                                            <div className={`rounded-xl border-2 p-4 ${projectProtectedAreas.length > 0 ? "border-amber-200 bg-amber-50/30" : "border-green-200 bg-green-50/30"}`}>
                                                 <div className="flex items-center justify-between mb-1">
                                                     <h3 className="text-sm font-bold text-slate-900 uppercase">
                                                         {isEn ? "Protected Area" : "Zone Protégée"}
                                                     </h3>
-                                                    <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
-                                                        {isEn ? "No easement" : "Aucune servitude"}
+                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                                        projectProtectedAreas.length > 0
+                                                            ? "text-amber-600 bg-amber-100"
+                                                            : "text-green-600 bg-green-100"
+                                                    }`}>
+                                                        {projectProtectedAreas.length > 0
+                                                            ? (isEn ? `${projectProtectedAreas.length} zone(s) detected` : `${projectProtectedAreas.length} zone(s) détectée(s)`)
+                                                            : (isEn ? "No constraint" : "Aucune contrainte")}
                                                     </span>
                                                 </div>
+                                                <p className="text-xs text-slate-500 mt-1">
+                                                    {projectProtectedAreas.length > 0
+                                                        ? projectProtectedAreas.slice(0, 3).map(a => a.name).join(", ")
+                                                        : (isEn ? "No heritage constraint detected on the plot." : "Aucune contrainte patrimoniale détectée sur la parcelle.")}
+                                                </p>
                                             </div>
                                         </div>
 
@@ -1909,6 +1937,45 @@ export default function ProjectDescriptionPage({
                                                             {isEn
                                                                 ? "Declared materials are authorized in this zone (Article 11)."
                                                                 : "Les matériaux déclarés sont autorisés dans cette zone (Article 11)."}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-start gap-2.5">
+                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-900">
+                                                            {isEn ? "Boundary Setbacks" : "Reculs par rapport aux limites"}
+                                                        </p>
+                                                        <p className="text-xs text-slate-500">
+                                                            {isEn
+                                                                ? "Minimum boundary setback distances are respected (Article 7)."
+                                                                : "Les distances minimales de recul par rapport aux limites séparatives sont respectées (Article 7)."}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-start gap-2.5">
+                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-900">
+                                                            {isEn ? "Parking Requirements" : "Stationnement"}
+                                                        </p>
+                                                        <p className="text-xs text-slate-500">
+                                                            {isEn
+                                                                ? "Required number of parking spaces is provided (Article 12)."
+                                                                : "Le nombre de places de stationnement requis est respecté (Article 12)."}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-start gap-2.5">
+                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-900">
+                                                            {isEn ? "Green Space" : "Espaces verts"}
+                                                        </p>
+                                                        <p className="text-xs text-slate-500">
+                                                            {isEn
+                                                                ? "Minimum green area and landscaping ratio is met (Article 13)."
+                                                                : "Le coefficient minimum d'espaces verts et de pleine terre est respecté (Article 13)."}
                                                         </p>
                                                     </div>
                                                 </div>

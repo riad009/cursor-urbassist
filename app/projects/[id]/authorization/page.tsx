@@ -287,10 +287,9 @@ export default function AuthorizationPage({
 
   function toggleOutdoorTag(tag: OutdoorTag) {
     setOutdoorTags((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
-      return next;
+      // Single-select: deselect if already selected, otherwise select only this one
+      if (prev.has(tag)) return new Set<OutdoorTag>();
+      return new Set<OutdoorTag>([tag]);
     });
   }
 
@@ -1212,10 +1211,25 @@ export default function AuthorizationPage({
                           {isEn ? "Global Summary" : "Synthèse Globale"}
                         </p>
                         {(() => {
-                          const totalCreated = workItems.reduce((sum, w) => sum + w.floorAreaCreated, 0);
-                          const totalExisting = workItems.reduce((sum, w) => sum + (w.existingFloorArea || 0), 0);
+                          // Only building-type items contribute to surface de plancher
+                          const buildingItems = workItems.filter(w =>
+                            w.projectType === "new_construction" || w.projectType === "existing_extension"
+                          );
+                          const totalCreated = buildingItems.reduce((sum, w) => sum + w.floorAreaCreated, 0);
+                          const totalExisting = buildingItems.reduce((sum, w) => sum + (w.existingFloorArea || 0), 0);
                           const totalAfter = totalExisting + totalCreated;
-                          const architectNeeded = totalAfter >= 150 || totalCreated >= 150;
+                          // Use per-item calculateDpPc to determine if architect is actually needed
+                          const architectNeeded = workItems.some((item) => {
+                            const res = calculateDpPc({
+                              projectType: item.projectType,
+                              floorAreaCreated: item.floorAreaCreated,
+                              footprintCreated: item.footprintCreated,
+                              existingFloorArea: item.existingFloorArea,
+                              shelterHeight: item.shelterHeight,
+                              inUrbanZone: item.inUrbanZone,
+                            });
+                            return res.determination === "ARCHITECT_REQUIRED";
+                          });
                           return (
                             <div className="space-y-2">
                               <div className="flex justify-between text-xs">
@@ -1273,9 +1287,9 @@ export default function AuthorizationPage({
                                 <button
                                   type="button"
                                   onClick={() => removeWorkItem(item.id)}
-                                  className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-red-50 text-red-400 border border-red-200 hover:bg-red-100 hover:text-red-600 transition-colors"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -1372,6 +1386,21 @@ export default function AuthorizationPage({
                       </div>
                     );
                   })()}
+
+                  {/* Note — Detached House & Outbuildings */}
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4">
+                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1.5 mb-1">
+                      <Info className="w-3.5 h-3.5" />
+                      {isEn ? "Note – Detached House & Outbuildings" : "Note – Maison individuelle & annexes"}
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      {isEn ? "For the projects in question, also plan for:" : "Pour les projets concernés, prévoir également :"}
+                    </p>
+                    <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                      <li>PCMI14-2: {isEn ? "RE2020 Certificate" : "Attestation RE2020"}</li>
+                      <li>PCMI13: {isEn ? "Seismic Certificate" : "Attestation parasismique"}</li>
+                    </ul>
+                  </div>
 
                   {/* Optional add-ons */}
                   <div className="space-y-2">

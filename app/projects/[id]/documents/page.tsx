@@ -171,6 +171,23 @@ export default function DocumentsPage({
                         </div>
                     )}
 
+                    {/* Architect Required Warning */}
+                    {(project?.projectDescription as { architectRequired?: boolean })?.architectRequired && (
+                        <div className="rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                            <div>
+                                <p className="text-sm font-semibold text-red-700">
+                                    {isEn ? "Architect Required" : "Architecte obligatoire"}
+                                </p>
+                                <p className="text-xs text-red-600 mt-1">
+                                    {isEn
+                                        ? "Your project exceeds the 150 m² threshold. An architect is legally required for this building permit application."
+                                        : "Votre projet dépasse le seuil de 150 m². Le recours à un architecte est obligatoire pour cette demande de permis de construire."}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Existing structure info for split PC5 */}
                     {isExistingStructure && (authType === "PC" || authType === "ARCHITECT_REQUIRED") && (
                         <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 flex items-start gap-3">

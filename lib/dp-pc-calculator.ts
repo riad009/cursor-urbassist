@@ -58,9 +58,15 @@ export function estimateFloorAreaCreated(
 ): number {
   if (groundAreaM2 <= 0 || numberOfLevels < 1) return 0;
   if (isGarage) return 0; // Garages are excluded from surface de plancher
-  // Formula: 0.90 × Footprint × Levels (simplified per Art. R.111-22)
-  // Returns decimal for display precision (e.g. 19.80 instead of 20)
-  return parseFloat((groundAreaM2 * numberOfLevels * 0.90).toFixed(2));
+  // Formula: Footprint × Levels × 0.90 − stairwell deduction
+  // The 0.90 factor accounts for wall thickness (interior measurement per Art. R.111-22).
+  // Stairwell deductions per level count (client-confirmed values):
+  //   1 level (RDC):            110 * 1 * 0.9       = 99
+  //   2 levels (RDC + R+1):     110 * 2 * 0.9 - 6   = 192
+  //   3 levels (RDC + R+1+R+2): 110 * 3 * 0.9 - 9   = 288
+  // Formula: levels × 3 for multi-level buildings, 0 for single level.
+  const deduction = numberOfLevels > 1 ? numberOfLevels * 3 : 0;
+  return parseFloat((groundAreaM2 * numberOfLevels * 0.90 - deduction).toFixed(2));
 }
 
 export type DeterminationType = "NONE" | "DP" | "PC" | "ARCHITECT_REQUIRED" | "REVIEW";

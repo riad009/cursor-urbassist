@@ -537,6 +537,30 @@ function SitePlanContent() {
       else if (obj.type === "polygon") addPolygonMeasurements(obj as fabric.Polygon, id);
       else if (obj.type === "line") addLineMeasurement(obj as fabric.Line, id);
       else if (obj.type === "circle") addCircleMeasurements(obj as fabric.Circle, id);
+      // Re-add template name label if this is a template element
+      const tType = (obj as any).templateType;
+      const eName = (obj as any).elementName;
+      if (tType && eName && obj.type === "rect") {
+        const canvas = fabricRef.current;
+        if (canvas) {
+          const tpl = templatesList.find((t) => t.id === tType);
+          const color = tpl?.color || "#888";
+          const l = obj.left ?? 0;
+          const t2 = obj.top ?? 0;
+          const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
+          const labelText = new fabric.Text(eName, {
+            left: l + 4, top: t2 + 2,
+            fontSize: Math.min(12, h * 0.3), fontFamily: "sans-serif",
+            fill: color, selectable: false, evented: false,
+          });
+          (labelText as any).isMeasurement = true;
+          (labelText as any).parentId = id;
+          canvas.add(labelText);
+          const existing = measurementLabelsRef.current.get(id) || [];
+          existing.push(labelText);
+          measurementLabelsRef.current.set(id, existing);
+        }
+      }
     },
     [removeMeasurements, addRectMeasurements, addPolygonMeasurements, addLineMeasurement, addCircleMeasurements]
   );
@@ -1770,7 +1794,10 @@ function SitePlanContent() {
     active.forEach((obj) => {
       const id = (obj as any).id;
       if (id) { removeMeasurements(id); deletedIds.add(id); }
+      // Remove overlay children (_overlayBuildingId)
       canvas.getObjects().filter((o: any) => o._overlayBuildingId === id).forEach((o) => canvas.remove(o));
+      // Remove template children (parentId) — parking car body, wheels, labels, etc.
+      canvas.getObjects().filter((o: any) => o.parentId === id).forEach((o) => canvas.remove(o));
       canvas.remove(obj);
     });
     canvas.discardActiveObject();
@@ -1780,7 +1807,8 @@ function SitePlanContent() {
     }
     pushUndoState();
     setIsDirty(true);
-  }, [removeMeasurements, pushUndoState]);
+    updateLayers(canvas);
+  }, [removeMeasurements, pushUndoState, updateLayers]);
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1921,12 +1949,25 @@ function SitePlanContent() {
     if (canvas) { canvas.setZoom(nz / 100); canvas.renderAll(); }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+    // Confirm before clearing everything
+    if (!window.confirm("Clear all objects and buildings? This cannot be undone.")) return;
     canvas.getObjects().filter((o: any) => !o.isGrid).forEach((o) => canvas.remove(o));
     measurementLabelsRef.current.clear();
+    // Reset all related state so 3D viewer doesn't show stale objects
+    setBuildingDetails([]);
+    setElevationPoints([]);
+    setLastPlacedBuildingId(null);
+    buildingPositionsRef.current = {};
+    setLayers([]);
+    setSelectedObject(null);
     canvas.renderAll();
+    // Persist the empty state to DB so refresh doesn't bring back old data
+    if (currentProjectId) {
+      await saveSitePlan();
+    }
   };
 
   const addTemplate = (templateId: string) => {
@@ -1950,6 +1991,7 @@ function SitePlanContent() {
     (rect as any).id = shapeId;
     (rect as any).templateType = templateId;
     (rect as any).elementName = template.label;
+    (rect as any).buildingDetailId = shapeId;
     canvas.add(rect);
     if (templateId === "parking") {
       const l = center.x - wPx / 2, t = center.y - hPx / 2;
@@ -1975,17 +2017,51 @@ function SitePlanContent() {
         canvas.add(wheel);
       });
     }
-    const label = new fabric.Text(template.label, {
-      left: center.x, top: center.y, fontSize: 14, fontFamily: "sans-serif",
-      fill: template.color, originX: "center", originY: "center",
-      selectable: false, evented: false,
+    // Place label inside the rect (top-left corner) and track it so it moves with the shape
+    const labelText = new fabric.Text(template.label, {
+      left: (center.x - wPx / 2) + 4, top: (center.y - hPx / 2) + 2,
+      fontSize: Math.min(12, hPx * 0.3), fontFamily: "sans-serif",
+      fill: template.color, selectable: false, evented: false,
     });
-    (label as any).isMeasurement = true;
-    (label as any).parentId = shapeId;
-    canvas.add(label);
+    (labelText as any).isMeasurement = true;
+    (labelText as any).parentId = shapeId;
+    canvas.add(labelText);
     addRectMeasurements(rect, shapeId);
+    // Store the label alongside measurements so it gets repositioned on move/resize
+    const existing = measurementLabelsRef.current.get(shapeId) || [];
+    existing.push(labelText);
+    measurementLabelsRef.current.set(shapeId, existing);
     canvas.setActiveObject(rect);
+
+    // For building-type templates (house, garage, pool, terrace), create a BuildingDetail
+    // so they render in the 3D viewer
+    const BUILDING_TEMPLATE_IDS = ["house", "garage", "pool", "terrace"];
+    if (BUILDING_TEMPLATE_IDS.includes(templateId)) {
+      const presetMap: Record<string, string> = {
+        house: "house-small",
+        garage: "garage",
+        pool: "pool",
+        terrace: "terrace",
+      };
+      const presetId = presetMap[templateId];
+      const preset = presetId ? getPresetById(presetId) : null;
+      if (preset) {
+        const b = createDefaultBuilding({
+          name: template.label,
+          width: template.width,
+          depth: template.height,
+          wallHeights: preset.wallHeights,
+          roof: { type: preset.roof.type, pitch: preset.roof.pitch, overhang: preset.roof.overhang, material: "Tuile terre cuite" },
+          color: template.color,
+        });
+        // Override with the canvas shape id so 3D viewer can find the rect
+        (b as any).id = shapeId;
+        setBuildingDetails((prev) => [...prev, b]);
+      }
+    }
+
     canvas.renderAll();
+    updateLayers(canvas);
   };
 
   /** Site access: triangle symbol + "Access" label (mandatory tool per spec) */
@@ -2733,7 +2809,7 @@ function SitePlanContent() {
                   const positions: Record<string, { x: number; y: number; angle: number }> = {};
                   buildingDetails.forEach((b) => {
                     const obj = canvas.getObjects().find((o: any) =>
-                      o.type === "rect" && (o.id === b.id || o.buildingDetailId === b.id)
+                      (o.id === b.id || o.buildingDetailId === b.id)
                     );
                     if (obj) {
                       const l = obj.left ?? 0;
@@ -2871,27 +2947,24 @@ function SitePlanContent() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
-          <div className="w-[72px] sm:w-44 bg-white border-r border-slate-200 flex flex-col py-3 gap-0.5 overflow-y-auto shrink-0">
-            <div className="px-2 pb-1.5 mb-1 border-b border-slate-200">
-              <p className="text-[10px] font-semibold text-amber-600/90 uppercase tracking-wider">Free wall drawing</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">Line · Rect · Polygon</p>
-            </div>
-            <div className="flex flex-col gap-0">
+          <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">
+            {/* ─── Drawing Tools ─── */}
+            <div className="flex flex-col gap-0 px-1">
               {TOOL_GROUPS.map((group) => (
-                <div key={group.label} className="mb-1">
-                  <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-2 py-0.5 hidden sm:block">{group.label}</p>
+                <div key={group.label} className="mb-0.5">
+                  <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-2 py-1">{group.label}</p>
                   {tools.filter((t) => group.ids.includes(t.id)).map((tool) => {
                     const Icon = tool.icon;
                     const tooltip = (tool as { tooltip?: string }).tooltip || `${tool.label} (${tool.shortcut})`;
                     return (
                       <button key={tool.id} onClick={() => handleToolSelect(tool.id as Tool)}
-                        className={cn("w-full h-9 rounded-lg flex items-center justify-center gap-2 px-2 transition-all",
+                        className={cn("w-full h-8 rounded-lg flex items-center gap-2 px-2.5 transition-all text-left",
                           activeTool === tool.id
                             ? "bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-md"
                             : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                         )} title={tooltip}>
                         <Icon className="w-4 h-4 shrink-0" />
-                        <span className="text-[11px] font-medium truncate max-w-[80px] hidden sm:inline">{tool.label}</span>
+                        <span className="text-[11px] font-medium truncate">{tool.label}</span>
                       </button>
                     );
                   })}
@@ -2899,67 +2972,93 @@ function SitePlanContent() {
                 </div>
               ))}
             </div>
-            <div className="w-8 h-px bg-white/10 my-1 self-center" />
-            {/* Quick-add building buttons — always visible */}
-            <div className="px-2 pb-1.5 mb-1 border-b border-slate-200">
-              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-0 py-0.5">BUILDINGS</p>
+
+            {/* ─── Add Elements (Templates) ─── */}
+            <div className="px-2 pt-1 pb-1">
+              <p className="text-[9px] font-bold uppercase text-amber-600 tracking-widest py-1">Add Elements</p>
             </div>
-            <button onClick={() => { addExistingBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2 px-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-all" title="Add Existing Building">
-              <Building2 className="w-4 h-4 shrink-0" />
-              <span className="text-[11px] font-medium truncate hidden sm:inline">Existing</span>
-            </button>
-            <button onClick={() => { addNewBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2 px-2 text-blue-500 hover:bg-blue-50 hover:text-blue-700 transition-all" title="Add New Construction">
-              <Plus className="w-4 h-4 shrink-0" />
-              <span className="text-[11px] font-medium truncate hidden sm:inline">+ New</span>
-            </button>
-            <div className="w-8 h-px bg-white/10 my-1 self-center" />
-            {templatesList.map((t) => {
-              const Icon = t.icon;
-              return (
-                <button key={t.id} onClick={() => addTemplate(t.id)}
-                  className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all"
-                  title={t.id === "access" ? "Site access: triangle + Access label" : `${t.label}${t.width && t.height ? ` (${t.width}m × ${t.height}m)` : ""}`}>
-                  <Icon className="w-4 h-4" style={{ color: t.color }} />
-                </button>
-              );
-            })}
-            <div className="w-8 h-px bg-white/10 my-1" />
-            <button onClick={addExistingBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-all" title="Add Existing Building">
-              <Building2 className="w-4 h-4 text-gray-400" />
-            </button>
-            <button onClick={addNewBuilding} className="w-12 h-10 rounded-xl flex items-center justify-center text-blue-600 hover:bg-blue-100 transition-all" title="Add New Construction">
-              <Plus className="w-4 h-4" />
-            </button>
-            {currentProjectId && (
-              <button
-                onClick={loadTerrainFromIgn}
-                disabled={loadingIgnTerrain}
-                className="w-12 h-10 rounded-xl flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-all disabled:opacity-50"
-                title="Load terrain from IGN (RGE ALTI®) – adds elevation points for 3D"
-              >
-                {loadingIgnTerrain ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mountain className="w-4 h-4" />}
+            <div className="px-1.5 space-y-0.5">
+              {templatesList.map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button key={t.id} onClick={() => addTemplate(t.id)}
+                    className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200"
+                    title={t.id === "access" ? "Site access point" : `${t.label}${t.width && t.height ? ` (${t.width}×${t.height} m)` : ""}`}>
+                    <Icon className="w-4 h-4 shrink-0" style={{ color: t.color }} />
+                    <span className="text-[11px] font-medium">{t.label}</span>
+                    {t.width > 0 && t.height > 0 && (
+                      <span className="text-[9px] text-slate-400 ml-auto font-mono">{t.width}×{t.height}m</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="h-px bg-slate-200 mx-3 my-1.5" />
+
+            {/* ─── Buildings ─── */}
+            <div className="px-2 pb-0.5">
+              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest py-1">Buildings</p>
+            </div>
+            <div className="px-1.5 space-y-0.5">
+              <button onClick={() => { addExistingBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200" title="Add Existing Building">
+                <Building2 className="w-4 h-4 shrink-0 text-gray-500" />
+                <span className="text-[11px] font-medium">Existing Building</span>
               </button>
-            )}
-            <div className="w-8 h-px bg-white/10 my-1" />
-            <button onClick={addNorthArrow} className="w-12 h-10 rounded-xl flex items-center justify-center text-sky-400 hover:bg-sky-500/20 transition-all" title="North Arrow">
-              <Compass className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowLegend(v => !v)} className={cn("w-12 h-10 rounded-xl flex items-center justify-center transition-all", showLegend ? "bg-violet-100 text-violet-600" : "text-violet-400 hover:bg-violet-500/20")} title="Legend">
-              <FileText className="w-4 h-4" />
-            </button>
-            <button onClick={autoAddBoundaryDimensions} className="w-12 h-10 rounded-xl flex items-center justify-center text-orange-400 hover:bg-orange-500/20 transition-all" title="Auto Boundary Dimensions">
-              <Ruler className="w-4 h-4" />
-            </button>
-            {currentProjectId && (
-              <Link href={`/building-3d?project=${currentProjectId}`} className="w-12 h-10 rounded-xl flex items-center justify-center text-violet-400 hover:bg-violet-500/20 transition-all" title="Full 3D Editor">
-                <Box className="w-4 h-4" />
+              <button onClick={() => { addNewBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all border border-transparent hover:border-blue-200" title="Add New Construction">
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">New Construction</span>
+              </button>
+            </div>
+            <div className="h-px bg-slate-200 mx-3 my-1.5" />
+
+            {/* ─── Utilities ─── */}
+            <div className="px-2 pb-0.5">
+              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest py-1">Utilities</p>
+            </div>
+            <div className="px-1.5 space-y-0.5">
+              <button onClick={addNorthArrow} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-sky-500 hover:bg-sky-50 transition-all" title="North Arrow">
+                <Compass className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">North Arrow</span>
+              </button>
+              <button onClick={() => setShowLegend(v => !v)} className={cn("w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 transition-all", showLegend ? "bg-violet-50 text-violet-600" : "text-violet-500 hover:bg-violet-50")} title="Legend">
+                <FileText className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">Legend</span>
+              </button>
+              <button onClick={autoAddBoundaryDimensions} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-orange-500 hover:bg-orange-50 transition-all" title="Auto Boundary Dimensions">
+                <Ruler className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">Auto Dimensions</span>
+              </button>
+              {currentProjectId && (
+                <button
+                  onClick={loadTerrainFromIgn}
+                  disabled={loadingIgnTerrain}
+                  className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-emerald-600 hover:bg-emerald-50 transition-all disabled:opacity-50"
+                  title="Load terrain from IGN (RGE ALTI®)"
+                >
+                  {loadingIgnTerrain ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Mountain className="w-4 h-4 shrink-0" />}
+                  <span className="text-[11px] font-medium">Terrain IGN</span>
+                </button>
+              )}
+              {currentProjectId && (
+                <Link href={`/building-3d?project=${currentProjectId}`} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-violet-500 hover:bg-violet-50 transition-all" title="Full 3D Editor">
+                  <Box className="w-4 h-4 shrink-0" />
+                  <span className="text-[11px] font-medium">Full 3D Editor</span>
+                </Link>
+              )}
+              <Link href={`/editor${currentProjectId ? `?project=${currentProjectId}` : ""}`} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-cyan-500 hover:bg-cyan-50 transition-all" title="Technical Drawing Editor">
+                <Ruler className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">Tech Drawing</span>
               </Link>
-            )}
-            <Link href={`/editor${currentProjectId ? `?project=${currentProjectId}` : ""}`} className="w-12 h-10 rounded-xl flex items-center justify-center text-cyan-400 hover:bg-cyan-500/20 transition-all" title="Technical Drawing Editor">
-              <Ruler className="w-4 h-4" />
-            </Link>
+            </div>
+
+            {/* Spacer + Delete at bottom */}
             <div className="flex-1" />
-            <button onClick={handleDelete} className="w-12 h-10 rounded-xl flex items-center justify-center text-red-600 hover:bg-red-50 transition-all" title="Delete"><Trash2 className="w-4 h-4" /></button>
+            <div className="px-1.5 pb-1">
+              <button onClick={handleDelete} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-red-500 hover:bg-red-50 transition-all" title="Delete Selected">
+                <Trash2 className="w-4 h-4 shrink-0" />
+                <span className="text-[11px] font-medium">Delete</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -3070,9 +3169,9 @@ function SitePlanContent() {
                   let canvasAngle = 0;
 
                   if (canvas) {
-                    // Filter to only match the actual building rect, not measurements or overlays
+                    // Match by ID regardless of shape type (rect, polygon, circle, etc.)
                     const obj = canvas.getObjects().find((o: any) =>
-                      o.type === "rect" && (o.id === b.id || o.buildingDetailId === b.id)
+                      (o.id === b.id || o.buildingDetailId === b.id)
                     );
                     if (obj) {
                       // Manually compute center — getCenterPoint can be unreliable with transforms
@@ -3096,8 +3195,15 @@ function SitePlanContent() {
                     }
                   }
 
-                  return { ...b, canvasX, canvasY, canvasAngle } as any;
-                })}
+                  // Ensure wallHeights has safe defaults for 3D rendering
+                  const safeWallHeights = {
+                    ground: b.wallHeights?.ground ?? 3,
+                    first: b.wallHeights?.first ?? 0,
+                    second: b.wallHeights?.second ?? 0,
+                  };
+
+                  return { ...b, wallHeights: safeWallHeights, canvasX, canvasY, canvasAngle } as any;
+                }).filter((b: any) => b.canvasX !== undefined && b.canvasY !== undefined)}
                 elevationPoints={elevationPoints}
                 pixelsPerMeter={currentScale.pixelsPerMeter}
                 selectedBuildingId={selectedBuildingId3d}
@@ -3528,21 +3634,22 @@ function Inline3DViewer({
         const height = container.clientHeight || 600;
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xdce1e8);
-        scene.fog = new THREE.Fog(0xdce1e8, 80, 200);
+        // Gradient sky background for realism
+        scene.background = new THREE.Color(0xc9daea);
+        scene.fog = new THREE.FogExp2(0xc9daea, 0.008);
 
-        const camera = new THREE.PerspectiveCamera(45, width / height, 0.5, 500);
-        camera.position.set(30, 20, 30);
+        const camera = new THREE.PerspectiveCamera(40, width / height, 0.5, 500);
+        camera.position.set(35, 25, 35);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-        // Clear explicitly to avoid WebGL memory leaks on repeated unmounts
         renderer.setSize(width, height);
         renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
         container.innerHTML = "";
         const canvasEl = renderer.domElement;
         canvasEl.style.cursor = "grab";
@@ -3554,40 +3661,66 @@ function Inline3DViewer({
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.08;
+        controls.dampingFactor = 0.06;
         controls.maxPolarAngle = Math.PI / 2 - 0.05;
-        controls.target.set(0, 0, 0);
+        controls.minDistance = 5;
+        controls.maxDistance = 150;
+        controls.target.set(0, 2, 0);
         controls.enablePan = true;
 
-        // Lights
-        const dirLight = new THREE.DirectionalLight(0xfffaf0, 1.3);
-        dirLight.position.set(20, 35, 15);
-        dirLight.castShadow = true;
-        dirLight.shadow.mapSize.set(2048, 2048);
-        dirLight.shadow.camera.near = 0.5;
-        dirLight.shadow.camera.far = 100;
-        dirLight.shadow.camera.left = -50;
-        dirLight.shadow.camera.right = 50;
-        dirLight.shadow.camera.top = 50;
-        dirLight.shadow.camera.bottom = -50;
-        scene.add(dirLight);
+        // === Lighting: architectural studio quality ===
+        // Main sun light — warm afternoon tone
+        const sunLight = new THREE.DirectionalLight(0xfff4e6, 1.8);
+        sunLight.position.set(25, 40, 20);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.set(4096, 4096);
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 120;
+        sunLight.shadow.camera.left = -60;
+        sunLight.shadow.camera.right = 60;
+        sunLight.shadow.camera.top = 60;
+        sunLight.shadow.camera.bottom = -60;
+        sunLight.shadow.bias = -0.0005;
+        sunLight.shadow.normalBias = 0.04;
+        sunLight.shadow.radius = 3;
+        scene.add(sunLight);
 
-        const fillLight = new THREE.DirectionalLight(0xb8c4d4, 0.5);
-        fillLight.position.set(-12, 15, -8);
+        // Fill light — cool blue from opposite side
+        const fillLight = new THREE.DirectionalLight(0xb0c4de, 0.6);
+        fillLight.position.set(-15, 20, -10);
         scene.add(fillLight);
-        scene.add(new THREE.AmbientLight(0xa8b4c4, 0.6));
 
-        // Ground
-        const groundGeom = new THREE.PlaneGeometry(200, 200);
-        const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7c4e, roughness: 0.95 });
+        // Sky/ground hemisphere light for natural ambient
+        const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x4a7c4e, 0.5);
+        scene.add(hemiLight);
+
+        // Subtle ambient for shadow fill
+        scene.add(new THREE.AmbientLight(0xd4d4d8, 0.35));
+
+        // === Ground: realistic grass plane ===
+        const groundGeom = new THREE.PlaneGeometry(250, 250, 32, 32);
+        const groundMat = new THREE.MeshStandardMaterial({
+          color: 0x5a9c4e,
+          roughness: 0.92,
+          metalness: 0.0,
+          envMapIntensity: 0.3,
+        });
         const ground = new THREE.Mesh(groundGeom, groundMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         scene.add(ground);
 
+        // Subtle ground grid for scale reference
+        const gridHelper = new THREE.GridHelper(200, 40, 0x4a8c3e, 0x4a8c3e);
+        const gridMat = gridHelper.material;
+        (gridMat as any).opacity = 0.15;
+        (gridMat as any).transparent = true;
+        gridHelper.position.y = 0.01;
+        scene.add(gridHelper);
+
         // Center calculation
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        const buildingsToRender = buildings.length > 0 ? buildings : [createDefaultBuilding({ name: "Main Building" })];
+        const buildingsToRender = buildings.length > 0 ? buildings : [];
 
         buildingsToRender.forEach((b: any) => {
           if (b.canvasX !== undefined) {
@@ -3607,12 +3740,30 @@ function Inline3DViewer({
         const centerX = minX !== Infinity ? (minX + maxX) / 2 : 400;
         const centerY = minY !== Infinity ? (minY + maxY) / 2 : 300;
 
-        // Buildings
+        // === Buildings ===
+        // Material helpers
+        const createWallMaterial = (isExisting: boolean, isSelected: boolean) => {
+          return new THREE.MeshStandardMaterial({
+            color: isExisting ? 0xc8c0b8 : 0xf0ece4,
+            roughness: 0.82,
+            metalness: 0.02,
+            emissive: isSelected ? 0x2255bb : 0,
+            emissiveIntensity: isSelected ? 0.2 : 0,
+          });
+        };
+
+        const roofColors: Record<string, number> = {
+          flat: 0x6b6b6b,
+          gable: 0x8b5a3c,
+          hip: 0x8b5a3c,
+          shed: 0x7a6a5a,
+          mansard: 0x5a5a5a,
+        };
+
         buildingsToRender.forEach((b: any, i) => {
-          const totalH = b.wallHeights.ground + b.wallHeights.first + b.wallHeights.second;
+          const totalH = (b.wallHeights?.ground || 0) + (b.wallHeights?.first || 0) + (b.wallHeights?.second || 0) || 3;
           const baseY = b.altitudeM ?? 0;
-          const w = b.width, d = b.depth;
-          const boxColor = b.isExisting ? 0xb0b0b0 : 0xe8e4dc;
+          const w = b.width || 6, d = b.depth || 6;
           const isSelected = selectedBuildingId === b.id;
 
           let posX = i * (w + 3);
@@ -3625,35 +3776,50 @@ function Inline3DViewer({
              rotY = b.canvasAngle ? -b.canvasAngle * (Math.PI / 180) : 0;
           }
 
+          // Foundation/plinth
+          const plinthH = 0.15;
+          const plinthGeom = new THREE.BoxGeometry(w + 0.1, plinthH, d + 0.1);
+          const plinthMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.95 });
+          const plinth = new THREE.Mesh(plinthGeom, plinthMat);
+          plinth.position.set(posX, baseY + plinthH / 2, posZ);
+          plinth.rotation.y = rotY;
+          plinth.receiveShadow = true;
+          plinth.castShadow = true;
+          scene.add(plinth);
+
+          // Walls
+          const wallMat = createWallMaterial(b.isExisting, isSelected);
           const boxGeom = new THREE.BoxGeometry(w, totalH, d);
-          const boxMat = new THREE.MeshStandardMaterial({
-            color: boxColor,
-            roughness: 0.9,
-            emissive: isSelected ? 0x2244aa : 0,
-            emissiveIntensity: isSelected ? 0.25 : 0,
-          });
-          const box = new THREE.Mesh(boxGeom, boxMat);
-          box.position.set(posX, baseY + totalH / 2, posZ);
+          const box = new THREE.Mesh(boxGeom, wallMat);
+          box.position.set(posX, baseY + plinthH + totalH / 2, posZ);
           box.rotation.y = rotY;
           box.castShadow = true;
           box.receiveShadow = true;
           (box as any).userData = { buildingId: b.id };
           scene.add(box);
 
-          // Roof
-          const overhang = b.roof.overhang || 0;
-          const roofMat = new THREE.MeshStandardMaterial({ color: 0x7d4e2e, roughness: 0.9 });
+          // Edge lines for crisp architectural look
+          const edges = new THREE.EdgesGeometry(boxGeom, 30);
+          const edgeLine = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xaaaaaa, opacity: 0.3, transparent: true }));
+          edgeLine.position.copy(box.position);
+          edgeLine.rotation.copy(box.rotation);
+          scene.add(edgeLine);
+
+          const roofOverhang = b.roof.overhang || 0;
+          const roofColor = roofColors[b.roof.type] || 0x8b5a3c;
+          const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.85, metalness: 0.05 });
+          const roofBaseY = baseY + plinthH + totalH;
           if (b.roof.type === "flat") {
-            const flatGeom = new THREE.BoxGeometry(w + overhang * 2, 0.25, d + overhang * 2);
-            const roof = new THREE.Mesh(flatGeom, new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.92 }));
-            roof.position.set(posX, baseY + totalH + 0.125, posZ);
+            const flatGeom = new THREE.BoxGeometry(w + roofOverhang * 2, 0.25, d + roofOverhang * 2);
+            const roof = new THREE.Mesh(flatGeom, new THREE.MeshStandardMaterial({ color: 0x6b6b6b, roughness: 0.88, metalness: 0.1 }));
+            roof.position.set(posX, roofBaseY + 0.125, posZ);
             roof.rotation.y = rotY;
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
           } else if (b.roof.type === "gable") {
             const pitch = (b.roof.pitch || 35) * (Math.PI / 180);
-            const over = overhang;
+            const over = roofOverhang;
             const halfW = w / 2 + over;
             const halfD = d / 2 + over;
             const isSpanX = w < d;
@@ -3688,7 +3854,7 @@ function Inline3DViewer({
           } else if (b.roof.type === "shed") {
             // Shed: single slope across shorter dimension
             const pitch = (b.roof.pitch || 25) * (Math.PI / 180);
-            const halfW = w / 2 + overhang, halfD = d / 2 + overhang;
+            const halfW = w / 2 + roofOverhang, halfD = d / 2 + roofOverhang;
             const span = Math.min(w, d);
             const roofH = span * Math.tan(pitch);
             // Quad: high edge on one side, low edge on the other
@@ -3703,7 +3869,7 @@ function Inline3DViewer({
             geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
             geom.computeVertexNormals();
             const roof = new THREE.Mesh(geom, roofMat);
-            roof.position.set(posX, baseY + totalH, posZ);
+            roof.position.set(posX, roofBaseY, posZ);
             roof.rotation.y = rotY;
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
@@ -3712,7 +3878,7 @@ function Inline3DViewer({
             // Mansard: lower steep section + upper gentle section
             const lowerPitch = 70 * (Math.PI / 180);
             const upperPitch = (b.roof.pitch || 25) * (Math.PI / 180);
-            const halfW = w / 2 + overhang, halfD = d / 2 + overhang;
+            const halfW = w / 2 + roofOverhang, halfD = d / 2 + roofOverhang;
             const lowerFrac = 0.35;
             const halfSpan = Math.min(w, d) / 2;
             const lowerRun = halfSpan * lowerFrac;
@@ -3723,7 +3889,7 @@ function Inline3DViewer({
             // Lower wall extension (steep)
             const lowerGeom = new THREE.BoxGeometry(w, lowerH, d);
             const lowerMesh = new THREE.Mesh(lowerGeom, roofMat);
-            lowerMesh.position.set(posX, baseY + totalH + lowerH / 2, posZ);
+            lowerMesh.position.set(posX, roofBaseY + lowerH / 2, posZ);
             lowerMesh.rotation.y = rotY;
             lowerMesh.castShadow = true;
             (lowerMesh as any).userData = { buildingId: b.id };
@@ -3744,7 +3910,7 @@ function Inline3DViewer({
               geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
               geom.computeVertexNormals();
               const upper = new THREE.Mesh(geom, roofMat);
-              upper.position.set(posX, baseY + totalH + lowerH, posZ);
+              upper.position.set(posX, roofBaseY + lowerH, posZ);
               upper.rotation.y = rotY;
               upper.castShadow = true;
               (upper as any).userData = { buildingId: b.id };
@@ -3754,19 +3920,22 @@ function Inline3DViewer({
             // Hip roof (default)
             const pitch = (b.roof.pitch || 35) * (Math.PI / 180);
             const roofH = (Math.max(w, d) / 2) * Math.tan(pitch);
-            const size = Math.max(w, d) / 2 + overhang;
+            const size = Math.max(w, d) / 2 + roofOverhang;
             const roofGeom = new THREE.ConeGeometry(size * Math.SQRT2, roofH, 4);
             const roof = new THREE.Mesh(roofGeom, roofMat);
             roof.rotation.y = rotY + Math.PI / 4;
-            roof.position.set(posX, baseY + totalH + roofH / 2, posZ);
+            roof.position.set(posX, roofBaseY + roofH / 2, posZ);
             roof.castShadow = true;
             (roof as any).userData = { buildingId: b.id };
             scene.add(roof);
           }
 
-          // Phase 7: Render user-defined openings (or fall back to auto-generated)
-          const winMat = new THREE.MeshStandardMaterial({ color: 0x2a3f4f, roughness: 0.15, metalness: 0.35 });
-          const doorMat = new THREE.MeshStandardMaterial({ color: 0x8b6238, roughness: 0.7 });
+          // Windows & doors with realistic glass/frame materials
+          const winGlassMat = new THREE.MeshStandardMaterial({
+            color: 0x8ab4d8, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.7,
+          });
+          const winFrameMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f0, roughness: 0.5, metalness: 0.1 });
+          const doorMat = new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.65, metalness: 0.05 });
           const userOpenings = b.openings || [];
 
           if (userOpenings.length > 0) {
@@ -3795,7 +3964,7 @@ function Inline3DViewer({
                   const opH = op.height;
                   const cx = cursor + opW / 2;
                   const cy = baseY + (op.sillHeight || 0) + opH / 2;
-                  const mat = op.type === "door" || op.type === "garage_door" ? doorMat : winMat;
+                  const mat = op.type === "door" || op.type === "garage_door" ? doorMat : winGlassMat;
                   const geom = new THREE.PlaneGeometry(opW, opH);
                   const mesh = new THREE.Mesh(geom, mat);
 
@@ -3849,7 +4018,7 @@ function Inline3DViewer({
                 const cx = ((wi + 1) / (nWinX + 1)) * w - w / 2;
                 for (const zOff of [d / 2 + 0.02, -d / 2 - 0.02]) {
                   const g = new THREE.PlaneGeometry(autoWinW, autoWinH);
-                  const m = new THREE.Mesh(g, winMat);
+                  const m = new THREE.Mesh(g, winGlassMat);
                   m.position.set(cx, cy, zOff);
                   if (zOff < 0) m.rotation.y = Math.PI;
                   m.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
@@ -3863,7 +4032,7 @@ function Inline3DViewer({
                 const cz = ((wi + 1) / (nWinZ + 1)) * d - d / 2;
                 for (const [xOff, ry] of [[w / 2 + 0.02, -Math.PI / 2], [-w / 2 - 0.02, Math.PI / 2]] as [number, number][]) {
                   const g = new THREE.PlaneGeometry(autoWinW, autoWinH);
-                  const m = new THREE.Mesh(g, winMat);
+                  const m = new THREE.Mesh(g, winGlassMat);
                   m.position.set(xOff, cy, cz);
                   m.rotation.y = ry;
                   m.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
@@ -3951,10 +4120,18 @@ function Inline3DViewer({
   return (
     <div className="relative w-full h-full min-h-[280px]">
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-      {isReady && (
+      {isReady && buildings.length > 0 && (
         <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:max-w-md flex flex-col gap-2 px-4 py-3 rounded-xl bg-white/95 border border-slate-300 text-sm text-slate-700 shadow-lg">
           <span className="flex items-center gap-2"><span className="text-blue-600 font-medium shrink-0">3D:</span> Drag to rotate · Scroll to zoom · Right-drag to pan</span>
           <span className="flex items-center gap-2"><span className="text-amber-600 font-medium shrink-0">Edit:</span> Click a building to select it, then edit in the <strong>Buildings</strong> panel on the right.</span>
+        </div>
+      )}
+      {isReady && buildings.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-center px-6 py-8 rounded-2xl bg-white/90 backdrop-blur-sm border border-slate-200 shadow-xl pointer-events-auto max-w-sm">
+            <p className="text-slate-900 font-semibold text-lg mb-2">No buildings to display</p>
+            <p className="text-slate-500 text-sm">Switch to 2D view and add buildings using the left panel, then come back to see them in 3D.</p>
+          </div>
         </div>
       )}
       {!isReady && !error && (
