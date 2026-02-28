@@ -25,6 +25,7 @@ import {
     HardHat,
     X,
     Printer,
+    Pencil,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -653,9 +654,19 @@ export default function ProjectDescriptionPage({
 
                                             {/* Address field */}
                                             <div className="space-y-2">
-                                                <label className="text-sm font-semibold text-slate-800">
-                                                    {isEn ? "Address of the plot" : "Adresse de la parcelle"}
-                                                </label>
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-sm font-semibold text-slate-800">
+                                                        {isEn ? "Address of the plot" : "Adresse de la parcelle"}
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => router.push("/projects/new")}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-semibold hover:bg-indigo-100 hover:text-indigo-700 transition-all border border-indigo-200 hover:border-indigo-300 hover:shadow-sm"
+                                                    >
+                                                        <Pencil className="w-3 h-3" />
+                                                        {isEn ? "Change address" : "Changer l'adresse"}
+                                                    </button>
+                                                </div>
                                                 <div className="relative">
                                                     <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                                     <input
