@@ -189,11 +189,18 @@ export async function POST(request: NextRequest) {
         parcels = raw;
       }
 
-      // Fallback: generate estimated parcels
+      // No fallback — real data or clear error
       if (parcels.length === 0) {
-        const communeCode = commune?.code ?? citycode ?? "06088";
-        parcels = generateRealisticParcels(communeCode, [lng, lat]);
-        bestMatchId = parcels[0]?.id ?? null;
+        return NextResponse.json({
+          parcels: [],
+          bestMatchId: null,
+          municipality: commune?.nom ?? "Unknown",
+          departement: commune?.departement?.nom ?? "Unknown",
+          citycode: commune?.code ?? citycode,
+          northAngleDegrees: 0,
+          source: "none",
+          error: "Aucune parcelle cadastrale trouvée pour cette adresse. Vérifiez l'adresse ou réessayez avec une adresse plus précise.",
+        });
       }
 
       const northAngleDegrees = computeNorthAngleFromGeometry(parcels[0]?.geometry);
@@ -205,29 +212,27 @@ export async function POST(request: NextRequest) {
         departement: commune?.departement?.nom ?? "Unknown",
         citycode: commune?.code ?? citycode,
         northAngleDegrees,
-        source: parcels[0]?.geometry ? "api" : "estimated",
-        message: "Select one or more parcels. You can own several parcels. The parcel under your address is pre-selected.",
+        source: "api",
+        message: "Sélectionnez une ou plusieurs parcelles. La parcelle sous votre adresse est présélectionnée.",
       });
     }
 
-    // Strategy 2: citycode only
+    // Strategy 2: citycode only — return commune info, no fake parcels
     if (citycode) {
       const communeRes = await fetch(`https://geo.api.gouv.fr/communes/${citycode}?fields=nom,departement,centre`, { signal: AbortSignal.timeout(4000) });
       let communeName = "Unknown";
-      let center = [0, 0];
       if (communeRes.ok) {
         const commune = await communeRes.json();
         communeName = commune.nom;
-        center = commune.centre?.coordinates || [0, 0];
       }
-      const parcels = generateRealisticParcels(citycode, center);
       return NextResponse.json({
-        parcels,
+        parcels: [],
+        bestMatchId: null,
         municipality: communeName,
         citycode,
-        northAngleDegrees: computeNorthAngleFromGeometry(parcels[0]?.geometry),
-        source: "estimated",
-        message: "Select all parcels affected by your project.",
+        northAngleDegrees: 0,
+        source: "none",
+        error: "Coordonnées GPS requises pour récupérer les parcelles cadastrales. Veuillez saisir une adresse complète.",
       });
     }
 
@@ -257,16 +262,4 @@ function computeNorthAngleFromGeometry(geometry: unknown): number {
   return Math.round((Math.atan2(dLng, dLat) * 180 / Math.PI) * 10) / 10;
 }
 
-function generateRealisticParcels(citycode: string, center: number[]): Array<{
-  id: string; section: string; number: string; area: number; coordinates: number[]; geometry?: unknown;
-}> {
-  const sections = ["AB", "AC", "AD", "AE"];
-  const section = sections[Math.floor(Math.random() * sections.length)];
-  return Array.from({ length: 6 }, (_, i) => ({
-    id: `${citycode}000${section}${String(100 + i).padStart(4, "0")}`,
-    section,
-    number: String(100 + i).padStart(4, "0"),
-    area: Math.floor(200 + Math.random() * 800),
-    coordinates: [center[0] + (Math.random() - 0.5) * 0.002, center[1] + (Math.random() - 0.5) * 0.002],
-  }));
-}
+// generateRealisticParcels removed — no fake data.

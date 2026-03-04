@@ -145,6 +145,7 @@ interface ProjectData {
   includeOverhangInFootprint: boolean;
   coordinates: { lat: number; lng: number } | null;
   parcelGeometry: unknown;
+  existingBuildingsGeoJSON: unknown; // GeoJSON FeatureCollection from IGN BDTOPO
   pluSetbacks?: Record<string, number>;
 }
 
@@ -862,52 +863,115 @@ function SitePlanContent() {
           includeOverhangInFootprint: ai?.includeOverhangInFootprint === true,
           coordinates: coords,
           parcelGeometry: p.parcelGeometry,
+          existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
         });
       })
       .catch(() => setProjectData(null));
   }, [currentProjectId]);
 
-  // Load existing buildings from OSM
-  const loadExistingBuildings = useCallback(async () => {
-    if (!projectData?.coordinates || existingBuildingsLoaded) return;
-    setLoadingExistingBuildings(true);
-    try {
-      const { lat, lng } = projectData.coordinates;
-      const r = await fetch(`/api/existing-buildings?lat=${lat}&lng=${lng}&radius=150`);
-      const data = await r.json();
-      if (data.buildings && data.buildings.length > 0) {
-        const newBuildings = data.buildings.map((b: any) => createBuildingFromOSM(b));
-        setBuildingDetails((prev) => [...prev, ...newBuildings]);
-        const canvas = fabricRef.current;
-        if (canvas) {
-          const center = canvas.getCenterPoint();
-          newBuildings.forEach((b: BuildingDetail, i: number) => {
-            const wPx = metersToPixels(b.width);
-            const dPx = metersToPixels(b.depth);
-            const rect = new fabric.Rect({
-              left: center.x - wPx / 2 + (i * 30), top: center.y - dPx / 2 + (i * 30),
-              width: wPx, height: dPx,
-              fill: "rgba(107, 114, 128, 0.2)", stroke: "#6b7280", strokeWidth: 2, strokeDashArray: [6, 3],
-            });
-            (rect as any).id = b.id;
-            (rect as any).elementName = b.name;
-            (rect as any).surfaceType = "building";
-            (rect as any).isExistingBuilding = true;
-            (rect as any).buildingDetailId = b.id;
-            canvas.add(rect);
-            addRectMeasurements(rect, b.id);
-          });
-          canvas.renderAll();
-        }
-      }
+  // Draw existing buildings from IGN BDTOPO GeoJSON stored on the project.
+  // Each BDTOPO feature is a GeoJSON Polygon/MultiPolygon — we project every vertex
+  // to canvas coordinates using the same geo->canvas transform as parcel boundaries.
+  const drawExistingBuildingsFromGeoJSON = useCallback(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || !projectData?.existingBuildingsGeoJSON || existingBuildingsLoaded) return;
+
+    const fc = projectData.existingBuildingsGeoJSON as {
+      type: string;
+      features?: Array<{
+        geometry?: { type: string; coordinates: unknown };
+        properties?: Record<string, unknown>;
+      }>;
+    };
+    if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || fc.features.length === 0) {
       setExistingBuildingsLoaded(true);
-    } catch { /* ignore */ }
+      return;
+    }
+
+    // Build geo→canvas transform from parcel bounds
+    const { getParcelBoundsAndRef, lngLatToCanvas } = require("@/lib/parcelGeometryToCanvas");
+    const bounds = getParcelBoundsAndRef(projectData.parcelGeometry);
+    if (!bounds) {
+      // No parcel geometry to anchor to — skip (user can draw manually)
+      setExistingBuildingsLoaded(true);
+      return;
+    }
+
+    const ppm = currentScale.pixelsPerMeter;
+    const centerCanvasX = canvasSize.width / 2;
+    const centerCanvasY = canvasSize.height / 2;
+    const transformOpts = {
+      refLng: bounds.refLng,
+      refLat: bounds.refLat,
+      centerCanvasX,
+      centerCanvasY,
+      pixelsPerMeter: ppm,
+    };
+
+    let addedCount = 0;
+    fc.features.forEach((feature, idx) => {
+      const geom = feature?.geometry;
+      if (!geom) return;
+
+      const processRing = (ring: number[][]) => {
+        if (!Array.isArray(ring) || ring.length < 3) return;
+        const pts = ring.map(([lng, lat]: number[]) =>
+          lngLatToCanvas(lng, lat, transformOpts)
+        );
+        // Shift all points so the polygon's local centroid is at (0,0) (Fabric requirement)
+        const cxLocal = pts.reduce((s: number, p: {x:number;y:number}) => s + p.x, 0) / pts.length;
+        const cyLocal = pts.reduce((s: number, p: {x:number;y:number}) => s + p.y, 0) / pts.length;
+        const localPts = pts.map((p: {x:number;y:number}) => ({ x: p.x - cxLocal, y: p.y - cyLocal }));
+
+        const poly = new fabric.Polygon(localPts, {
+          left: cxLocal,
+          top: cyLocal,
+          originX: "center",
+          originY: "center",
+          fill: "rgba(107, 114, 128, 0.18)",
+          stroke: "#4b5563",
+          strokeWidth: 1.5,
+          strokeDashArray: [5, 3],
+          selectable: true,
+          evented: true,
+          lockMovementX: false,
+          lockMovementY: false,
+        });
+        const bid = `bdtopo-${idx}-${addedCount}`;
+        (poly as any).id = bid;
+        const usage = (feature.properties?.usage as string) ?? "Bâtiment existant";
+        const height = feature.properties?.height ? ` (${feature.properties.height}m)` : "";
+        (poly as any).elementName = `${usage}${height}`;
+        (poly as any).isExistingBuilding = true;
+        (poly as any).sourceBdtopo = true;
+        canvas.add(poly);
+        canvas.sendObjectToBack(poly);
+        addedCount++;
+      };
+
+      if (geom.type === "Polygon" && Array.isArray(geom.coordinates)) {
+        const coords = geom.coordinates as number[][][];
+        if (coords[0]) processRing(coords[0]); // exterior ring only
+      } else if (geom.type === "MultiPolygon" && Array.isArray(geom.coordinates)) {
+        const coords = geom.coordinates as number[][][][];
+        coords.forEach((poly) => { if (poly[0]) processRing(poly[0]); });
+      }
+    });
+
+    if (addedCount > 0) {
+      canvas.renderAll();
+      updateLayers(canvas);
+    }
+    setExistingBuildingsLoaded(true);
     setLoadingExistingBuildings(false);
-  }, [projectData?.coordinates, existingBuildingsLoaded, metersToPixels, addRectMeasurements]);
+  }, [projectData?.existingBuildingsGeoJSON, projectData?.parcelGeometry, existingBuildingsLoaded,
+      currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
   useEffect(() => {
-    if (projectData?.coordinates && canvasReady && !existingBuildingsLoaded) loadExistingBuildings();
-  }, [projectData?.coordinates, canvasReady, existingBuildingsLoaded, loadExistingBuildings]);
+    if (projectData?.existingBuildingsGeoJSON && canvasReady && !existingBuildingsLoaded) {
+      drawExistingBuildingsFromGeoJSON();
+    }
+  }, [projectData?.existingBuildingsGeoJSON, canvasReady, existingBuildingsLoaded, drawExistingBuildingsFromGeoJSON]);
 
   // Auto-draw parcel boundaries from project parcelGeometry (spec 2.2)
   const drawParcelsFromProjectData = useCallback(() => {

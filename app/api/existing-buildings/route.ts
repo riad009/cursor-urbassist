@@ -1,122 +1,173 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as turf from "@turf/turf";
+import type { Feature, Polygon, MultiPolygon, FeatureCollection, GeoJsonProperties } from "geojson";
 
 /**
- * Fetch existing buildings around a given coordinate from OpenStreetMap Overpass API.
- * Returns simplified building footprints with basic attributes.
+ * POST /api/existing-buildings
+ *
+ * Fetch existing building footprints from the IGN Géoplateforme WFS
+ * (BDTOPO_V3:batiment — official French topographic database, quarterly updated).
+ *
+ * The buildings are spatially clipped to the provided parcel polygon(s),
+ * ensuring only buildings that actually intersect the selected parcels are returned.
+ *
+ * Body: { parcelGeometry: GeoJSON Polygon | MultiPolygon | FeatureCollection }
+ * Response: { buildings: GeoJSON FeatureCollection, count: number, source: "bdtopo" }
  */
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const lat = parseFloat(searchParams.get("lat") || "0");
-  const lng = parseFloat(searchParams.get("lng") || "0");
-  const radius = parseInt(searchParams.get("radius") || "200", 10); // meters
 
-  if (!lat || !lng) {
-    return NextResponse.json({ error: "lat and lng are required" }, { status: 400 });
+const IGN_WFS_BASE = "https://data.geopf.fr/wfs/ows";
+const BDTOPO_LAYER = "BDTOPO_V3:batiment";
+
+type ParcelGeoJSON = Feature<Polygon | MultiPolygon> | Polygon | MultiPolygon | FeatureCollection;
+
+function normaliseToFeature(geom: ParcelGeoJSON): Feature<Polygon | MultiPolygon> | null {
+  if (!geom) return null;
+  if (geom.type === "FeatureCollection") {
+    // Merge all features into one MultiPolygon via union
+    const features = (geom as FeatureCollection).features.filter(
+      (f) => f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon"
+    ) as Feature<Polygon | MultiPolygon>[];
+    if (features.length === 0) return null;
+    if (features.length === 1) return features[0];
+    let merged: Feature<Polygon | MultiPolygon> = features[0];
+    for (let i = 1; i < features.length; i++) {
+      const result = turf.union(turf.featureCollection([merged, features[i]]));
+      if (result) merged = result as Feature<Polygon | MultiPolygon>;
+    }
+    return merged;
+  }
+  if (geom.type === "Feature") return geom as Feature<Polygon | MultiPolygon>;
+  if (geom.type === "Polygon" || geom.type === "MultiPolygon") {
+    return { type: "Feature", geometry: geom as Polygon | MultiPolygon, properties: {} };
+  }
+  return null;
+}
+
+export async function POST(req: NextRequest) {
+  let body: { parcelGeometry?: ParcelGeoJSON };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  try {
-    // Query OSM Overpass API for buildings within radius
-    const overpassQuery = `
-      [out:json][timeout:15];
-      (
-        way["building"](around:${radius},${lat},${lng});
-        relation["building"](around:${radius},${lat},${lng});
-      );
-      out body;
-      >;
-      out skel qt;
-    `;
+  if (!body.parcelGeometry) {
+    return NextResponse.json(
+      { error: "parcelGeometry is required (GeoJSON Polygon, MultiPolygon, or FeatureCollection)" },
+      { status: 400 }
+    );
+  }
 
-    const overpassUrl = "https://overpass-api.de/api/interpreter";
-    const response = await fetch(overpassUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(overpassQuery)}`,
+  const parcelFeature = normaliseToFeature(body.parcelGeometry);
+  if (!parcelFeature) {
+    return NextResponse.json(
+      { error: "Could not parse parcelGeometry as a valid GeoJSON polygon" },
+      { status: 400 }
+    );
+  }
+
+  // Compute bounding box [minLng, minLat, maxLng, maxLat]
+  const [minLng, minLat, maxLng, maxLat] = turf.bbox(parcelFeature);
+
+  // Add a small buffer (~5m in degrees) to catch buildings that cross the exact boundary
+  const BUFFER_DEG = 0.00005;
+  const bboxStr = `${minLng - BUFFER_DEG},${minLat - BUFFER_DEG},${maxLng + BUFFER_DEG},${maxLat + BUFFER_DEG},EPSG:4326`;
+
+  const wfsUrl = new URL(IGN_WFS_BASE);
+  wfsUrl.searchParams.set("SERVICE", "WFS");
+  wfsUrl.searchParams.set("VERSION", "2.0.0");
+  wfsUrl.searchParams.set("REQUEST", "GetFeature");
+  wfsUrl.searchParams.set("TYPENAMES", BDTOPO_LAYER);
+  wfsUrl.searchParams.set("OUTPUTFORMAT", "application/json");
+  wfsUrl.searchParams.set("BBOX", bboxStr);
+  wfsUrl.searchParams.set("COUNT", "500"); // max 500 buildings per query
+
+  try {
+    const wfsRes = await fetch(wfsUrl.toString(), {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
     });
 
-    if (!response.ok) {
-      // Fallback: return empty buildings with a message
+    if (!wfsRes.ok) {
+      console.error("IGN BDTOPO WFS error:", wfsRes.status, await wfsRes.text().catch(() => ""));
       return NextResponse.json({
-        buildings: [],
-        message: "OSM Overpass API unavailable. You can manually add existing buildings.",
+        buildings: { type: "FeatureCollection", features: [] } as FeatureCollection,
+        count: 0,
+        source: "bdtopo",
+        message: "IGN BDTOPO WFS unavailable. You can manually draw existing buildings.",
       });
     }
 
-    const data = await response.json();
+    const wfsData: FeatureCollection = await wfsRes.json();
 
-    // Parse OSM data into simplified building objects
-    const nodes = new Map<number, { lat: number; lon: number }>();
-    for (const element of data.elements || []) {
-      if (element.type === "node") {
-        nodes.set(element.id, { lat: element.lat, lon: element.lon });
-      }
+    if (!wfsData.features || wfsData.features.length === 0) {
+      return NextResponse.json({
+        buildings: { type: "FeatureCollection", features: [] } as FeatureCollection,
+        count: 0,
+        source: "bdtopo",
+        message: "Aucun bâtiment existant détecté sur les parcelles sélectionnées.",
+      });
     }
 
-    const buildings: Array<{
-      id: string;
-      type: string;
-      name: string;
-      coordinates: Array<{ lat: number; lng: number }>;
-      tags: Record<string, string>;
-      estimatedHeight: number;
-      estimatedLevels: number;
-      roofType: string;
-    }> = [];
-
-    for (const element of data.elements || []) {
-      if (element.type === "way" && element.tags?.building) {
-        const coords = (element.nodes || [])
-          .map((nodeId: number) => {
-            const node = nodes.get(nodeId);
-            if (!node) return null;
-            return { lat: node.lat, lng: node.lon };
-          })
-          .filter(Boolean);
-
-        if (coords.length < 3) continue;
-
-        // Estimate height from tags
-        let estimatedHeight = 6; // default 2 stories at 3m each
-        let estimatedLevels = 2;
-        const heightTag = element.tags["height"];
-        const levelsTag = element.tags["building:levels"];
-        
-        if (heightTag) {
-          estimatedHeight = parseFloat(heightTag) || 6;
-        } else if (levelsTag) {
-          estimatedLevels = parseInt(levelsTag, 10) || 2;
-          estimatedHeight = estimatedLevels * 3;
-        }
-
-        // Get roof type from tags
-        const roofType = element.tags["roof:shape"] || element.tags["building:roof:shape"] || "flat";
-
-        buildings.push({
-          id: `osm-${element.id}`,
-          type: element.tags.building || "yes",
-          name: element.tags.name || element.tags["addr:housenumber"]
-            ? `${element.tags["addr:housenumber"] || ""} ${element.tags["addr:street"] || ""}`.trim()
-            : `Building ${element.id}`,
-          coordinates: coords,
-          tags: element.tags || {},
-          estimatedHeight,
-          estimatedLevels,
-          roofType,
-        });
+    // Clip: keep only buildings that actually intersect the parcel polygon(s)
+    const clipped = wfsData.features.filter((f) => {
+      if (!f.geometry) return false;
+      try {
+        return turf.booleanIntersects(f as Feature, parcelFeature);
+      } catch {
+        return false;
       }
-    }
+    });
+
+    // Normalise and enrich each building feature
+    const buildings: FeatureCollection<Polygon | MultiPolygon, GeoJsonProperties> = {
+      type: "FeatureCollection",
+      features: clipped
+        .filter(
+          (f) => f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon"
+        )
+        .map((f) => {
+          const props = f.properties ?? {};
+          return {
+            type: "Feature",
+            geometry: f.geometry as Polygon | MultiPolygon,
+            properties: {
+              // IGN BDTOPO attribute names
+              id: props.id ?? props.cleabs ?? f.id ?? `bdtopo-${Math.random().toString(36).slice(2)}`,
+              usage: props.usage_1 ?? props.usage ?? "Indéterminé",
+              height: typeof props.hauteur === "number" ? props.hauteur : null,
+              floors: typeof props.nombre_d_etages === "number" ? props.nombre_d_etages : null,
+              roofMaterial: props.materiaux_de_la_toiture ?? null,
+              wallMaterial: props.materiaux_des_murs ?? null,
+              constructionYear: props.date_de_construction ?? null,
+              source: "bdtopo",
+            },
+          };
+        }),
+    };
 
     return NextResponse.json({
       buildings,
-      center: { lat, lng },
-      radius,
-      count: buildings.length,
+      count: buildings.features.length,
+      source: "bdtopo",
     });
   } catch (error) {
-    console.error("Error fetching existing buildings:", error);
+    console.error("Error fetching IGN BDTOPO buildings:", error);
     return NextResponse.json({
-      buildings: [],
-      message: "Failed to fetch buildings from OSM. You can manually add existing buildings.",
+      buildings: { type: "FeatureCollection", features: [] } as FeatureCollection,
+      count: 0,
+      source: "bdtopo",
+      message: "Impossible de récupérer les bâtiments depuis IGN BDTOPO. Vous pouvez les dessiner manuellement.",
     });
   }
+}
+
+/**
+ * GET kept for backward-compatibility but now returns an error pointing to POST.
+ */
+export async function GET() {
+  return NextResponse.json(
+    { error: "Use POST /api/existing-buildings with { parcelGeometry } body. GET is no longer supported." },
+    { status: 405 }
+  );
 }

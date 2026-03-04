@@ -23,14 +23,13 @@ export async function POST(request: NextRequest) {
     const origin = request.nextUrl.origin;
     const addr = typeof body.address === "string" ? body.address : undefined;
 
-    // ── Run commune lookup + ALL sub-APIs in PARALLEL ───────────────────
-    // No sequential commune pre-fetch — each sub-API handles its own commune lookup if needed.
-    // This saves 1-2 seconds on every request.
+    // ── Step 1: Run cadastre + PLU + protected areas in PARALLEL ────────
+    // Once cadastre resolves we use the parcel geometry to clip buildings.
 
     type SubResult = { ok: boolean; data: Record<string, unknown> };
 
     const [cadastreResult, pluResult, paResult] = await Promise.allSettled([
-      // 1) Cadastre — reduced timeout, smaller buffer
+      // 1) Cadastre — real IGN Apicarto parcel polygons
       fetch(`${origin}/api/cadastre/lookup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,22 +61,46 @@ export async function POST(request: NextRequest) {
     let northAngleDegrees: number | null = null;
     let cadastreError: string | null = null;
     let bestMatchId: string | null = null;
+    let bestMatchGeometry: unknown = null;
 
     if (cadastreResult.status === "fulfilled") {
       const { ok, data } = cadastreResult.value;
-      if (ok && Array.isArray(data.parcels)) {
+      if (ok && Array.isArray(data.parcels) && (data.parcels as unknown[]).length > 0) {
         parcels = data.parcels as typeof parcels;
         northAngleDegrees = typeof data.northAngleDegrees === "number" ? data.northAngleDegrees : null;
         bestMatchId = typeof data.bestMatchId === "string" ? data.bestMatchId : null;
-        if (data.source === "estimated" && parcels.length > 0) {
-          cadastreError = "Cadastre data estimated (IGN API unavailable or no parcel at point).";
-        }
+        // Grab the geometry of the best-match parcel for building clip
+        const best = parcels.find((p) => p.id === bestMatchId) ?? parcels[0];
+        bestMatchGeometry = best?.geometry ?? null;
       } else {
-        cadastreError = (data.error as string) || "Failed to load parcels.";
+        // source "none" means IGN returned no parcels — not a server error, surface the message
+        const errMsg = (data.error as string) || (data.source === "none"
+          ? "Aucune parcelle cadastrale trouvée pour cette adresse."
+          : "Failed to load parcels.");
+        cadastreError = errMsg;
       }
     } else {
-      cadastreError = "Location data unavailable. You can still create the project with the address.";
+      cadastreError = "Données cadastrales indisponibles. Vous pouvez continuer avec l'adresse saisie.";
     }
+
+    // ── Step 2: Fetch IGN BDTOPO buildings using parcel geometry (parallel with PLU/PA processing) ──
+    let existingBuildingsGeoJSON: unknown = null;
+    const buildingsFetchPromise: Promise<void> = bestMatchGeometry
+      ? fetch(`${origin}/api/existing-buildings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parcelGeometry: bestMatchGeometry }),
+          signal: AbortSignal.timeout(14000),
+        })
+          .then(async (res) => {
+            if (res.ok) {
+              const bd = await res.json();
+              if (bd.buildings) existingBuildingsGeoJSON = bd.buildings;
+            }
+          })
+          .catch(() => { /* non-blocking — buildings are optional at this stage */ })
+      : Promise.resolve();
+
 
     // PLU
     let plu: { zoneType: string | null; zoneName: string | null; pluType?: string | null } = { zoneType: null, zoneName: null, pluType: null };
@@ -114,6 +137,10 @@ export async function POST(request: NextRequest) {
       }));
     }
 
+    // Wait for buildings (non-blocking — resolves immediately if no parcel geometry)
+    await buildingsFetchPromise;
+
+
     return NextResponse.json({
       parcels,
       bestMatchId: bestMatchId ?? undefined,
@@ -124,6 +151,7 @@ export async function POST(request: NextRequest) {
       pluFallbackMessage: pluFallbackMessage ?? undefined,
       zoneFeatures,
       protectedAreas,
+      existingBuildingsGeoJSON: existingBuildingsGeoJSON ?? undefined,
     });
   } catch (error) {
     console.error("Geo-data error:", error);

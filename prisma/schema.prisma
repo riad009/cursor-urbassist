@@ -135,6 +135,7 @@ model Project {
   parcelIds       String        @default("") @map("parcel_ids")
   parcelArea      Float?        @map("parcel_area")
   parcelGeometry  String?       @map("parcel_geometry") // GeoJSON
+  existingBuildingsData Json?   @map("existing_buildings_data") // GeoJSON FeatureCollection from IGN BDTOPO
   northAngle      Float?        @map("north_angle")    // degrees from cadastre
   status          ProjectStatus @default(DRAFT)
   projectType     String?       @map("project_type") // construction, extension, renovation

@@ -51,6 +51,10 @@ export async function PUT(
   if (body.parcelGeometry !== undefined) {
     data.parcelGeometry = typeof body.parcelGeometry === "string" ? body.parcelGeometry : (body.parcelGeometry != null ? JSON.stringify(body.parcelGeometry) : null);
   }
+  if (body.existingBuildingsData !== undefined) {
+    // Store as JSON (Prisma Json? field) — GeoJSON FeatureCollection from IGN BDTOPO
+    data.existingBuildingsData = body.existingBuildingsData ?? null;
+  }
   const updated = await prisma.project.update({
     where: { id },
     data,

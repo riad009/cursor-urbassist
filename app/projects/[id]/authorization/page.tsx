@@ -76,6 +76,7 @@ interface WorkItem {
   existingFloorArea?: number;
   shelterHeight?: number;
   inUrbanZone: boolean;
+  changeOfUseOrFacade?: boolean;
 }
 
 const CONSTRUCTION_RANGES: AreaRange[] = [
@@ -163,6 +164,9 @@ export default function AuthorizationPage({
     explanation: string;
     architectRequired?: boolean;
     cannotOffer?: boolean;
+    projectType?: ProjectTypeChoice;
+    changeOfUseOrFacade?: boolean;
+    shelterHeight?: number;
   } | null>(null);
 
   // Options
@@ -297,9 +301,10 @@ export default function AuthorizationPage({
 
   function computeResult() {
     // Determine strictest result across all selected categories
-    let strictest: { determination: DeterminationType; explanation: string; architectRequired?: boolean } = {
+    let strictest: { determination: DeterminationType; explanation: string; architectRequired?: boolean; projectType?: ProjectTypeChoice; changeOfUseOrFacade?: boolean; shelterHeight?: number } = {
       determination: "NONE",
       explanation: "",
+      projectType: "new_construction",
     };
 
     const severity: Record<string, number> = { NONE: 0, DP: 1, PC: 2, ARCHITECT_REQUIRED: 3, REVIEW: 1 };
@@ -315,12 +320,13 @@ export default function AuthorizationPage({
         submitterType: submitterType || undefined,
       });
       if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-        strictest = r;
+        strictest = { ...r, projectType: "new_construction" };
       }
     }
 
     // Extension
     if (selectedCategories.has("existing_extension") && extensionFootprint > 0) {
+      const changeOfUseOrFacade = extensionSubTypes.has("convert") || extensionSubTypes.has("renovate");
       const r = calculateDpPc({
         projectType: "existing_extension",
         floorAreaCreated: extensionFloorArea,
@@ -329,9 +335,10 @@ export default function AuthorizationPage({
         inUrbanZone: isUrbanZone,
         dpThreshold,
         submitterType: submitterType || undefined,
+        changeOfUseOrFacade,
       });
       if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-        strictest = r;
+        strictest = { ...r, projectType: "existing_extension", changeOfUseOrFacade };
       }
     }
 
@@ -340,7 +347,7 @@ export default function AuthorizationPage({
       if (outdoorTags.has("fence_gate")) {
         const r = calculateDpPc({ projectType: "outdoor_fence", floorAreaCreated: 0 });
         if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-          strictest = r;
+          strictest = { ...r, projectType: "outdoor_fence" };
         }
       }
       if (outdoorTags.has("swimming_pool") && outdoorSurface > 0) {
@@ -350,13 +357,13 @@ export default function AuthorizationPage({
           shelterHeight: hasPoolShelter ? poolShelterHeight : 0,
         });
         if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-          strictest = r;
+          strictest = { ...r, projectType: "swimming_pool", shelterHeight: hasPoolShelter ? poolShelterHeight : 0 };
         }
       }
       if (outdoorTags.has("raised_terrace") || outdoorFreeText) {
         const r = calculateDpPc({ projectType: "outdoor_other", floorAreaCreated: 0 });
         if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-          strictest = r;
+          strictest = { ...r, projectType: "outdoor_other" };
         }
       }
     }
@@ -431,13 +438,15 @@ export default function AuthorizationPage({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             projectId,
-            projectType: categories[0] ?? "new_construction",
+            projectType: r.projectType ?? (categories[0] ?? "new_construction"),
             floorAreaCreated: totalFloorArea,
-            footprintCreated: constructionFootprint || extensionFootprint,
+            footprintCreated: constructionFootprint || extensionFootprint || outdoorSurface,
             existingFloorArea: existingArea || undefined,
             coordinates: projectData?.coordinates,
             citycode: projectData?.citycode,
             submitterType,
+            changeOfUseOrFacade: r.changeOfUseOrFacade,
+            shelterHeight: r.shelterHeight,
           }),
         });
         if (decisionRes.ok) {
@@ -974,6 +983,7 @@ export default function AuthorizationPage({
                             footprintCreated: extensionFootprint,
                             existingFloorArea: existingArea || undefined,
                             inUrbanZone: isUrbanZone,
+                            changeOfUseOrFacade: extensionSubTypes.has("convert") || extensionSubTypes.has("renovate"),
                           });
                         }}
                         className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
@@ -1227,6 +1237,7 @@ export default function AuthorizationPage({
                               existingFloorArea: item.existingFloorArea,
                               shelterHeight: item.shelterHeight,
                               inUrbanZone: item.inUrbanZone,
+                              changeOfUseOrFacade: item.changeOfUseOrFacade,
                             });
                             return res.determination === "ARCHITECT_REQUIRED";
                           });
@@ -1268,6 +1279,7 @@ export default function AuthorizationPage({
                             existingFloorArea: item.existingFloorArea,
                             shelterHeight: item.shelterHeight,
                             inUrbanZone: item.inUrbanZone,
+                            changeOfUseOrFacade: item.changeOfUseOrFacade,
                           });
                           const badgeColor =
                             res.determination === "PC" || res.determination === "ARCHITECT_REQUIRED"
