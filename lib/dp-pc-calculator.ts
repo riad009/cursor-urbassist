@@ -81,8 +81,10 @@ export interface DpPcInput {
   existingFloorArea?: number;
   /** Extension: ground area of extension (for 40 m² rule) */
   groundAreaExtension?: number;
-  /** Change of use or facade modification → PC regardless of area */
-  changeOfUseOrFacade?: boolean;
+  /** Change of use (Changement de destination) */
+  changeOfUse?: boolean;
+  /** Modifying the exterior appearance (Modification aspect extérieur / façade) */
+  facadeModification?: boolean;
   /** Urban zone (PLU U, UD, AUD…) for extension rules */
   inUrbanZone?: boolean;
   /**
@@ -201,7 +203,8 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     floorAreaCreated: floorArea,
     footprintCreated,
     existingFloorArea = 0,
-    changeOfUseOrFacade,
+    changeOfUse,
+    facadeModification,
     inUrbanZone = true,
     submitterType,
   } = input;
@@ -212,25 +215,29 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
   // 150 m² architect threshold uses ONLY total floor area (not footprint)
   const totalFloorAfterWork = existingFloorArea + floorArea;
 
-  // Facade modification or change of use → PC regardless
-  if (changeOfUseOrFacade) {
+  // Change of use AND facade modification → PC regardless
+  if (changeOfUse && facadeModification) {
     const result: DpPcResult = {
       determination: "PC",
       explanation:
-        "Un projet avec changement de destination ou modification de façade est soumis au permis de construire, quelle que soit la surface.",
-      detail: "facade_change",
+        "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur (ou structure porteuse) de la construction est soumis au permis de construire (Art. R421-14).",
+      detail: "changeOfUse_AND_facade",
     };
     if (totalFloorAfterWork > 150) {
       return {
+        ...result,
         determination: "ARCHITECT_REQUIRED",
-        explanation: `${result.explanation} De plus, la surface de plancher totale après travaux (${totalFloorAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
-        detail: "facade_change_architect",
+        explanation: `${result.explanation} De plus, la surface totale après travaux (${totalFloorAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
         architectRequired: true,
         cannotOffer: true,
       };
     }
     return applyCompanyArchitect(result, submitterType);
   }
+
+  // If changeOfUse OR facadeModification (but not both), it's at least DP (or PC if area thresholds crossed)
+  // E.g., Article R421-17 -> DP
+  const isolatedModification = changeOfUse || facadeModification;
 
   // ── Threshold depends on zone type ──
   // When dpThreshold is provided by the API (GPU/PLU detection), use it directly.
@@ -249,7 +256,7 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
         determination: "DP",
         explanation: inUrbanZone
           ? `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) en zone urbaine. Surface totale après travaux : ${totalFloorAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`
-          : `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) hors zone urbaine. Une déclaration préalable suffit.`,
+          : `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) hors zone urbaine. Une déclaration préalable suffit.` + (isolatedModification ? " Les modifications de façade ou changement de destination simples relèvent également de la déclaration préalable." : ""),
         detail: `ext<=${dpThreshold}`,
       };
     }
@@ -335,17 +342,17 @@ function applyCompanyArchitect(result: DpPcResult, submitterType?: SubmitterType
  * Company submitter → ARCHITECT_REQUIRED when PC is determined
  */
 export function calculateDpPc(input: DpPcInput): DpPcResult {
-  const { projectType, changeOfUseOrFacade } = input;
+  const { projectType, changeOfUse, facadeModification } = input;
 
-  // Facade/change of use override (applies to any type)
-  if (changeOfUseOrFacade && projectType !== "swimming_pool") {
+  // Global override for change of use AND facade modification combined
+  if (changeOfUse && facadeModification && projectType !== "swimming_pool") {
     const totalAfterWork = (input.existingFloorArea ?? 0) + input.floorAreaCreated;
     if (totalAfterWork > 150) {
       return {
         determination: "ARCHITECT_REQUIRED",
         explanation:
-          "Un projet avec changement de destination ou modification de façade est soumis au permis de construire. De plus, la surface totale dépasse 150 m², le recours à un architecte est obligatoire.",
-        detail: "changeOfUseOrFacade_architect",
+          "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur (ou de la structure porteuse) est soumis au permis de construire. De plus, la surface totale dépasse 150 m², le recours à un architecte est obligatoire.",
+        detail: "changeOfUse_AND_facade_architect",
         architectRequired: true,
         cannotOffer: true,
       };
@@ -353,8 +360,8 @@ export function calculateDpPc(input: DpPcInput): DpPcResult {
     const result: DpPcResult = {
       determination: "PC",
       explanation:
-        "Un projet avec changement de destination ou modification de façade est soumis au permis de construire, quelle que soit la surface.",
-      detail: "changeOfUseOrFacade",
+        "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur est soumis au permis de construire (Art. R421-14).",
+      detail: "changeOfUse_AND_facade",
     };
     return applyCompanyArchitect(result, input.submitterType);
   }

@@ -26,6 +26,7 @@ import {
   Plus,
   Activity,
   Home,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
@@ -76,7 +77,8 @@ interface WorkItem {
   existingFloorArea?: number;
   shelterHeight?: number;
   inUrbanZone: boolean;
-  changeOfUseOrFacade?: boolean;
+  changeOfUse?: boolean;
+  facadeModification?: boolean;
 }
 
 const CONSTRUCTION_RANGES: AreaRange[] = [
@@ -154,6 +156,8 @@ export default function AuthorizationPage({
   // API-derived DP threshold — overrides hardcoded inUrbanZone logic
   const [dpThreshold, setDpThreshold] = useState<number>(40);
   const [isRnu, setIsRnu] = useState(false);
+  // Simulated heritage protection (clickable override)
+  const [simIsProtectedZone, setSimIsProtectedZone] = useState(false);
 
   // ── Submitter ──
   const [submitterType, setSubmitterType] = useState<SubmitterType | null>(null);
@@ -165,7 +169,8 @@ export default function AuthorizationPage({
     architectRequired?: boolean;
     cannotOffer?: boolean;
     projectType?: ProjectTypeChoice;
-    changeOfUseOrFacade?: boolean;
+    changeOfUse?: boolean;
+    facadeModification?: boolean;
     shelterHeight?: number;
   } | null>(null);
 
@@ -221,6 +226,11 @@ export default function AuthorizationPage({
             coordinates: coords,
             citycode: proj.citycode,
           });
+          // Sync the simulated heritage state
+          const isProtected = (proj.protectedAreas ?? []).some(
+            (a: { type: string }) => ["ABF", "HERITAGE", "MONUMENT_HISTORIQUE", "SITE_PATRIMONIAL"].includes(a.type)
+          );
+          setSimIsProtectedZone(isProtected);
           // Auto-detect urban zone from PLU zone
           const zone = (proj.regulatoryAnalysis?.zoneType || proj.zoneType || "").toUpperCase();
           if (zone.startsWith("U") || zone.startsWith("AU")) {
@@ -301,7 +311,7 @@ export default function AuthorizationPage({
 
   function computeResult() {
     // Determine strictest result across all selected categories
-    let strictest: { determination: DeterminationType; explanation: string; architectRequired?: boolean; projectType?: ProjectTypeChoice; changeOfUseOrFacade?: boolean; shelterHeight?: number } = {
+    let strictest: { determination: DeterminationType; explanation: string; architectRequired?: boolean; projectType?: ProjectTypeChoice; changeOfUse?: boolean; facadeModification?: boolean; shelterHeight?: number } = {
       determination: "NONE",
       explanation: "",
       projectType: "new_construction",
@@ -326,7 +336,8 @@ export default function AuthorizationPage({
 
     // Extension
     if (selectedCategories.has("existing_extension") && extensionFootprint > 0) {
-      const changeOfUseOrFacade = extensionSubTypes.has("convert") || extensionSubTypes.has("renovate");
+      const changeOfUse = extensionSubTypes.has("convert");
+      const facadeModification = extensionSubTypes.has("renovate");
       const r = calculateDpPc({
         projectType: "existing_extension",
         floorAreaCreated: extensionFloorArea,
@@ -335,10 +346,11 @@ export default function AuthorizationPage({
         inUrbanZone: isUrbanZone,
         dpThreshold,
         submitterType: submitterType || undefined,
-        changeOfUseOrFacade,
+        changeOfUse,
+        facadeModification,
       });
       if ((severity[r.determination] || 0) > (severity[strictest.determination] || 0)) {
-        strictest = { ...r, projectType: "existing_extension", changeOfUseOrFacade };
+        strictest = { ...r, projectType: "existing_extension", changeOfUse, facadeModification };
       }
     }
 
@@ -445,7 +457,8 @@ export default function AuthorizationPage({
             coordinates: projectData?.coordinates,
             citycode: projectData?.citycode,
             submitterType,
-            changeOfUseOrFacade: r.changeOfUseOrFacade,
+            changeOfUse: r.changeOfUse,
+            facadeModification: r.facadeModification,
             shelterHeight: r.shelterHeight,
           }),
         });
@@ -655,54 +668,70 @@ export default function AuthorizationPage({
             </div>
           )}
 
-          {/* Smart guide banner — always above the two-column layout, always centered */}
+          {/* Smart guide banner — ALWAYS visible as accordion toggle */}
           {step === "form" && (
             <div className="flex justify-center w-full mb-2">
               <button
                 type="button"
                 onClick={() => {
                   setShowCategoryCards((v) => {
-                    if (v) setSelectedCategories(new Set());
+                    if (v) {
+                      setSelectedCategories(new Set());
+                    } else {
+                      // Auto-select new construction by default when opening
+                      setSelectedCategories(new Set(["new_construction"]));
+                    }
                     return !v;
                   });
                 }}
-                className="relative w-full max-w-2xl rounded-2xl overflow-hidden text-left group transition-all duration-300 hover:-translate-y-0.5"
+                className={`relative w-full max-w-2xl rounded-2xl overflow-hidden text-center group transition-all duration-300 hover:-translate-y-0.5 ${
+                  showCategoryCards
+                    ? "border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-md"
+                    : "hover:shadow-xl hover:shadow-violet-500/30"
+                }`}
               >
-                {/* Background: gray when open, gradient when closed */}
-                <div className={`absolute inset-0 transition-all duration-300 ${showCategoryCards ? "bg-slate-100" : "bg-gradient-to-br from-violet-500 via-indigo-500 to-purple-600 group-hover:from-violet-600 group-hover:via-indigo-600 group-hover:to-purple-700"}`} />
-                {/* Decorative blobs */}
-                <div className="pointer-events-none absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
-                <div className="pointer-events-none absolute -bottom-4 -left-4 w-24 h-24 rounded-full bg-indigo-300/20 blur-xl" />
-                <div className="pointer-events-none absolute top-1/2 right-16 w-16 h-16 rounded-full bg-purple-300/15 blur-lg" />
+                {/* Background */}
+                <div className={`absolute inset-0 transition-all duration-300 ${
+                  showCategoryCards
+                    ? "bg-indigo-50 group-hover:bg-indigo-100"
+                    : "bg-indigo-600 group-hover:bg-indigo-700"
+                }`} />
+                {/* Decorative blobs — only when closed */}
+                {!showCategoryCards && (
+                  <>
+                    <div className="pointer-events-none absolute -top-6 -right-6 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
+                    <div className="pointer-events-none absolute -bottom-4 -left-4 w-32 h-32 rounded-full bg-indigo-300/20 blur-xl" />
+                  </>
+                )}
                 {/* Content */}
-                <div className="relative flex items-center gap-4 p-4">
-                  <div className={`shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg border transition-all duration-300 ${showCategoryCards ? "bg-slate-200 border-slate-300 shadow-slate-200/50" : "bg-white/20 backdrop-blur-sm border-white/20 shadow-black/10"}`}>
-                    <ClipboardCheck className={`w-7 h-7 transition-colors duration-300 ${showCategoryCards ? "text-slate-600" : "text-white"}`} />
+                <div className={`relative flex flex-col items-center gap-3 px-8 transition-all duration-300 ${showCategoryCards ? "py-5" : "py-10"}`}>
+                  {/* Icon circle */}
+                  <div className={`rounded-full flex items-center justify-center border-2 transition-all duration-300 ${
+                    showCategoryCards
+                      ? "w-11 h-11 bg-indigo-100 border-indigo-300"
+                      : "w-16 h-16 bg-white/20 border-white/30"
+                  }`}>
+                    <ClipboardCheck className={`transition-colors duration-300 ${showCategoryCards ? "w-5 h-5 text-indigo-600" : "w-8 h-8 text-white"}`} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest border transition-all duration-300 ${showCategoryCards ? "bg-violet-100 border-violet-200 text-violet-600" : "bg-white/20 border-white/30 text-white"}`}>
-                        ✦ {isEn ? "Smart guide" : "Guide intelligent"}
-                      </span>
-                    </div>
-                    <p className={`text-lg font-bold leading-snug transition-colors duration-300 ${showCategoryCards ? "text-slate-800" : "text-white"}`}>
-                      {isEn ? "Describe your work or constructions" : "Décrivez vos travaux ou constructions"}
-                    </p>
-                    <p className={`text-sm mt-1 transition-colors duration-300 ${showCategoryCards ? "text-slate-500" : "text-white/70"}`}>
-                      {isEn ? "We'll identify the exact permit you need in seconds." : "Nous identifions l'autorisation exacte dont vous avez besoin."}
-                    </p>
-                  </div>
-                  <div className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border transition-all duration-200 shadow-md ${showCategoryCards ? "bg-white text-slate-600 border-slate-300 hover:bg-slate-50" : "bg-white/20 text-white border-white/30 group-hover:bg-white group-hover:text-violet-700 group-hover:border-white"}`}>
-                    {showCategoryCards ? (isEn ? "Close" : "Fermer") : (isEn ? "Start" : "Commencer")}
-                    <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${showCategoryCards ? "rotate-90" : "group-hover:translate-x-0.5"}`} />
-                  </div>
+                  {/* Title */}
+                  <p className={`font-bold leading-snug transition-colors duration-300 ${
+                    showCategoryCards ? "text-base text-indigo-700" : "text-xl text-white"
+                  }`}>
+                    {isEn ? "Describe your work or constructions." : "Décrivez vos travaux ou constructions."}
+                  </p>
+                  {/* Subtitle */}
+                  <p className={`text-sm transition-colors duration-300 ${showCategoryCards ? "text-indigo-400" : "text-white/75"}`}>
+                    {showCategoryCards
+                      ? (isEn ? "Click to close the guide." : "Cliquez pour fermer le guide.")
+                      : (isEn ? "We will guide you to quickly identify the permit required for your project." : "Nous vous guidons pour identifier rapidement l'autorisation requise.")}
+                  </p>
                 </div>
               </button>
             </div>
           )}
 
           {/* Two-column layout for form step */}
-          <div className={step === "form" ? "flex gap-6 items-start" : "max-w-3xl mx-auto"}>
+          <div className={step === "form" ? "flex gap-6 items-stretch" : "max-w-3xl mx-auto"}>
 
             {/* LEFT COLUMN */}
             <div className={step === "form" ? "flex-1 min-w-0 space-y-5" : "space-y-6"}>
@@ -711,88 +740,230 @@ export default function AuthorizationPage({
               {step === "form" && (
                 <div className="space-y-5">
 
-                  {/* ── Category multi-select cards (side by side) – shown after clicking banner ── */}
+                  {/* ── Regulatory Context Card ── */}
                   {showCategoryCards && (
-                    <div className="grid grid-cols-3 gap-3">
-                      <CategoryCard
-                        icon={<Building2 className="w-7 h-7" />}
-                        title={isEn ? "Independent Construction" : "Construction Indépendante"}
-                        description={isEn ? "House, garage, shed…" : "Maison, garage, abri…"}
-                        selected={selectedCategories.has("new_construction")}
-                        onClick={() => toggleCategory("new_construction")}
-                        color="blue"
-                      />
-                      <CategoryCard
-                        icon={<Hammer className="w-7 h-7" />}
-                        title={isEn ? "Works on Existing" : "Travaux sur Existant"}
-                        description={isEn ? "Extension, conversion…" : "Extension, aménagement…"}
-                        selected={selectedCategories.has("existing_extension")}
-                        onClick={() => toggleCategory("existing_extension")}
-                        color="amber"
-                      />
-                      <CategoryCard
-                        icon={<TreePine className="w-7 h-7" />}
-                        title={isEn ? "Outdoor Development" : "Aménagement Extérieur"}
-                        description={isEn ? "Pool, fence…" : "Piscine, clôture…"}
-                        selected={selectedCategories.has("outdoor")}
-                        onClick={() => toggleCategory("outdoor")}
-                        color="emerald"
-                      />
+                    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+                      {/* Card header */}
+                      <div className="px-6 pt-5 pb-4 flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <Home className="w-4 h-4 text-indigo-500" />
+                            <h3 className="text-sm font-bold text-slate-900">
+                              {isEn ? "Regulatory Context" : "Contexte Réglementaire"}
+                            </h3>
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            {isEn ? "Automatic simulation of local urban planning regulations" : "Simulation automatique des règles d'urbanisme locales"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Refresh: reset zone to auto-detected
+                            const zone = (projectData?.zoneType || "").toUpperCase();
+                            if (zone.startsWith("U") || zone.startsWith("AU")) { setIsUrbanZone(true); setDpThreshold(40); setIsRnu(false); }
+                            else if (zone === "RNU") { setIsUrbanZone(false); setDpThreshold(20); setIsRnu(true); }
+                            else if (zone.startsWith("A") || zone.startsWith("N")) { setIsUrbanZone(false); setDpThreshold(20); setIsRnu(false); }
+                          }}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                          <Activity className="w-3.5 h-3.5" />
+                          {isEn ? "Generate another location" : "Simuler un autre lieu"}
+                        </button>
+                      </div>
+
+                      {/* Project location bar */}
+                      <div className="mx-6 mb-4 rounded-xl bg-slate-900 px-4 py-3 text-center">
+                        <p className="text-sm font-bold text-white uppercase tracking-wide">
+                          {isEn ? "PROJECT" : "PROJET"} – {(projectData?.address?.split(",").slice(-2, -1)[0] || projectData?.address || "–").trim().toUpperCase()}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5 flex items-center justify-center gap-1">
+                          <span>📍</span>
+                          <span>{projectData?.address || (isEn ? "Address not available" : "Adresse non disponible")}</span>
+                        </p>
+                      </div>
+
+                      {/* Two regulation panels */}
+                      <div className="px-6 pb-5 grid grid-cols-2 gap-3">
+                        {/* Zone panel — clickable to toggle */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            // Cycle through: Urban → Natural/Agri → RNU → Urban
+                            if (isUrbanZone && !isRnu) { setIsUrbanZone(false); setDpThreshold(20); setIsRnu(false); }
+                            else if (!isUrbanZone && !isRnu) { setIsUrbanZone(false); setDpThreshold(20); setIsRnu(true); }
+                            else { setIsUrbanZone(true); setDpThreshold(40); setIsRnu(false); }
+                            // Blur immediately so the browser does NOT auto-scroll to keep this button in view
+                            e.currentTarget.blur();
+                          }}
+                          className="text-left rounded-xl border border-slate-200 p-3 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors flex flex-col"
+                          style={{height: "130px", overflow: "hidden"}}
+                        >
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                            {isEn ? "Applicable Regulations" : "Réglementation Applicable"}
+                          </p>
+                          {isRnu ? (
+                            <>
+                              <p className="text-sm font-bold text-orange-600">
+                                {isEn ? "RNU Zone" : "Zone RNU"}
+                              </p>
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <span className="text-orange-500 text-xs">⚠</span>
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {isEn ? "National urban rules apply. Extension limited to 20m²." : "Règlement national d'urbanisme. Extension limitée à 20m²."}
+                                </p>
+                              </div>
+                            </>
+                          ) : isUrbanZone ? (
+                            <>
+                              <p className="text-sm font-bold text-indigo-700">
+                                {isEn ? "Urban Zone (U)" : "Zone Urbaine (U)"}
+                              </p>
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <Check className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {isEn ? "Densely populated area. Extension threshold raised to 40m²." : "Zone densément peuplée. Seuil extension relevé à 40m²."}
+                                </p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-bold text-orange-600">
+                                {isEn ? "Natural/Agricultural Area (N/A)" : "Zone Nat./Agricole (N/A)"}
+                              </p>
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <span className="text-orange-500 text-xs">⚠</span>
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {isEn ? "Outside urban area. Extension limited to 20m²." : "Hors zone urbaine. Extension limitée à 20m²."}
+                                </p>
+                              </div>
+                            </>
+                          )}
+                        </button>
+
+                        {/* ABF / Heritage panel — clickable to toggle */}
+                        <button
+                          type="button"
+                          onClick={() => setSimIsProtectedZone(v => !v)}
+                          className="text-left rounded-xl border border-slate-200 p-3 hover:border-amber-300 hover:bg-amber-50/40 transition-colors flex flex-col"
+                          style={{height: "130px", overflow: "hidden"}}
+                        >
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                            {isEn ? "Heritage Protection" : "Protection Patrimoniale"}
+                          </p>
+                          {simIsProtectedZone ? (
+                            <>
+                              <p className="text-sm font-bold text-orange-600">
+                                {isEn ? "Protected Area (ABF)" : "Zone Protégée (ABF)"}
+                              </p>
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <span className="text-orange-500 text-xs">⚠</span>
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {isEn ? "Site classified or surroundings of a historical monument (AC1)." : "Site classé ou abords d'un monument historique (AC1)."}
+                                </p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-bold text-emerald-700">
+                                {isEn ? "Unprotected Sector" : "Secteur Non Protégé"}
+                              </p>
+                              <div className="flex items-start gap-1.5 mt-1">
+                                <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {isEn ? "No specific heritage constraints." : "Aucune contrainte patrimoniale spécifique."}
+                                </p>
+                              </div>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Hint */}
+                      <div className="px-6 pb-4">
+                        <p className="text-xs text-indigo-500 italic text-center">
+                          {isEn ? "Click on the areas above to manually simulate other constraints." : "Cliquez sur les zones ci-dessus pour simuler d'autres contraintes."}
+                        </p>
+                      </div>
                     </div>
                   )}
 
-                  {/* ═══ Total Floor Area Banner — shown at top once data exists ═══ */}
-                  {showCategoryCards && (constructionFootprint > 0 || extensionFootprint > 0) && (
-                    <div className="rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold uppercase tracking-widest text-blue-600">
-                          {isEn ? "Total Floor Area Created" : "Surface de Plancher Totale Créée"}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {!editingFloorArea && (
-                            <button
-                              type="button"
-                              onClick={() => { setEditingFloorArea(true); setManualTotalFloorArea(totalFloorArea); }}
-                              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 transition-all"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              {isEn ? "Edit" : "Modifier"}
-                            </button>
-                          )}
-                          <span className="text-xs font-medium px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 uppercase tracking-wide">
-                            {editingFloorArea ? (isEn ? "Manual" : "Manuel") : (isEn ? "Auto" : "Auto")}
-                          </span>
-                        </div>
-                      </div>
-                      {editingFloorArea ? (
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="number"
-                            value={manualTotalFloorArea || ""}
-                            onChange={(e) => setManualTotalFloorArea(Number(e.target.value))}
-                            className="w-32 px-3 py-2 rounded-lg bg-white border border-blue-300 text-slate-900 text-2xl font-semibold focus:ring-2 focus:ring-blue-500/20"
-                            placeholder="0"
-                            min={0}
-                            autoFocus
-                          />
-                          <span className="text-lg text-slate-500">m²</span>
+                  {/* ── Add Jobs Card with integrated type selector ── */}
+                  {showCategoryCards && (
+                    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+                      {/* Card header */}
+                      <div className="px-6 pt-5 pb-4 border-b border-slate-100">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold text-slate-900">+</span>
+                            <h3 className="text-base font-bold text-slate-900">
+                              {isEn ? "Add jobs" : "Ajouter des travaux"}
+                            </h3>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => { setEditingFloorArea(false); setManualTotalFloorArea(0); }}
-                            className="text-xs text-slate-400 hover:text-slate-600 underline"
+                            onClick={() => { setShowCategoryCards(false); setSelectedCategories(new Set()); }}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
                           >
-                            {isEn ? "Reset to auto" : "Retour auto"}
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
-                      ) : (
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-xl font-semibold text-slate-900">{totalFloorArea}</span>
-                          <span className="text-sm text-slate-500">m²</span>
-                        </div>
-                      )}
-
+                        <p className="text-sm text-slate-500">
+                          {isEn ? "What is the nature of your project?" : "Quelle est la nature de votre projet ?"}
+                        </p>
+                      </div>
+                      {/* Inline type buttons */}
+                      <div className="px-6 py-4 grid grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleCategory("new_construction")}
+                          className={cn(
+                            "flex flex-col items-start gap-2 px-4 py-4 rounded-xl border-2 text-left transition-all",
+                            selectedCategories.has("new_construction")
+                              ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                          )}
+                        >
+                          <Building2 className={cn("w-5 h-5", selectedCategories.has("new_construction") ? "text-white" : "text-indigo-500")} />
+                          <span className="text-sm font-semibold leading-snug">
+                            {isEn ? "New detached construction" : "Construction neuve"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleCategory("existing_extension")}
+                          className={cn(
+                            "flex flex-col items-start gap-2 px-4 py-4 rounded-xl border-2 text-left transition-all",
+                            selectedCategories.has("existing_extension")
+                              ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                          )}
+                        >
+                          <Hammer className={cn("w-5 h-5", selectedCategories.has("existing_extension") ? "text-white" : "text-amber-500")} />
+                          <span className="text-sm font-semibold leading-snug">
+                            {isEn ? "Work on existing" : "Travaux sur existant"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleCategory("outdoor")}
+                          className={cn(
+                            "flex flex-col items-start gap-2 px-4 py-4 rounded-xl border-2 text-left transition-all",
+                            selectedCategories.has("outdoor")
+                              ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                          )}
+                        >
+                          <TreePine className={cn("w-5 h-5", selectedCategories.has("outdoor") ? "text-white" : "text-emerald-500")} />
+                          <span className="text-sm font-semibold leading-snug">
+                            {isEn ? "Outdoor landscaping" : "Aménagement extérieur"}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   )}
+
+                  {/* Total Floor Area Banner removed as per requirements */}
 
                   {/* ═══ Construction Indépendante Section ═══ */}
                   {selectedCategories.has("new_construction") && (
@@ -944,20 +1115,26 @@ export default function AuthorizationPage({
                             min={0}
                           />
                         </div>
-                        {/* Floor area (auto-estimated) */}
+                        {/* Floor area (editable) */}
                         <div className="space-y-1.5">
                           <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                             {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
                             <span className="text-slate-400">🧮</span>
                           </label>
-                          <div className={cn(
-                            "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all",
-                            extensionFloorArea > 0
-                              ? "bg-amber-50 border-amber-200 text-amber-700"
-                              : "bg-slate-50 border-slate-200 text-slate-400"
-                          )}>
-                            {extensionFloorArea > 0 ? extensionFloorArea.toFixed(2) : "—"}
-                          </div>
+                          <input
+                            type="number"
+                            value={extensionFloorAreaOverride > 0 ? extensionFloorAreaOverride : (extensionFloorArea > 0 ? parseFloat(extensionFloorArea.toFixed(2)) : "")}
+                            onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
+                            className={cn(
+                              "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all focus:outline-none focus:ring-2 focus:ring-amber-400",
+                              extensionFloorArea > 0
+                                ? "bg-amber-50 border-amber-300 text-amber-700 focus:border-amber-400"
+                                : "bg-slate-50 border-slate-200 text-slate-400"
+                            )}
+                            placeholder="—"
+                            min={0}
+                            step={0.01}
+                          />
                           {extensionFootprint > 0 && (
                             <p className="text-[10px] text-slate-400">
                               = {extensionFootprint} m² × {extensionLevels} {extensionLevels > 1 ? (isEn ? "levels" : "niveaux") : (isEn ? "level" : "niveau")} × 0.9
@@ -983,7 +1160,8 @@ export default function AuthorizationPage({
                             footprintCreated: extensionFootprint,
                             existingFloorArea: existingArea || undefined,
                             inUrbanZone: isUrbanZone,
-                            changeOfUseOrFacade: extensionSubTypes.has("convert") || extensionSubTypes.has("renovate"),
+                            changeOfUse: extensionSubTypes.has("convert"),
+                            facadeModification: extensionSubTypes.has("renovate"),
                           });
                         }}
                         className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
@@ -1184,153 +1362,200 @@ export default function AuthorizationPage({
 
             </div>{/* end LEFT COLUMN */}
 
-            {/* RIGHT COLUMN — Live Analysis Panel (only shown on form step when banner is expanded) */}
+            {/* RIGHT COLUMN — Live Analysis Panel */}
             {step === "form" && showCategoryCards && (
-              <div className="w-[480px] shrink-0 sticky top-6 self-start">
-                <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
+              <div className="w-[480px] shrink-0 sticky top-6" style={{alignSelf: "stretch"}}>
+                <div
+                  className="rounded-2xl overflow-hidden shadow-lg flex flex-col h-full"
+                  style={{background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 60%, #4338ca 100%)", minHeight: "520px"}}
+                >
                   {/* Panel header */}
-                  <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <div className="px-5 py-4 border-b border-white/10 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
                     <div>
-                      <p className="text-sm font-bold text-slate-900">
-                        {isEn ? "Authorization Analysis" : "Analyse type d'autorisation"}
+                      <p className="text-sm font-bold text-white">
+                        {isEn ? "Analysis of the type of authorization required" : "Analyse type d'autorisation"}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {isEn ? "Auto-updated as you fill in your works" : "Mise à jour automatique selon vos travaux"}
+                      <p className="text-[11px] text-indigo-300 mt-0.5">
+                        {isEn ? "Automatic updates based on your work" : "Mise à jour automatique selon vos travaux"}
                       </p>
                     </div>
                   </div>
 
-                  {workItems.length === 0 ? (
-                    /* Empty state */
-                    <div className="px-5 py-10 flex flex-col items-center gap-3 text-center">
-                      <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
-                        <Activity className="w-5 h-5 text-slate-300" />
-                      </div>
-                      <p className="text-sm text-slate-400 leading-relaxed max-w-[200px]">
-                        {isEn
-                          ? "Add projects using the buttons below each category to see the analysis here."
-                          : "Ajoutez des travaux via les boutons sous chaque catégorie pour voir l'analyse ici."}
+                  {/* ── Overall Summary — always shown ── */}
+                  <div className="px-5 py-4 border-b border-white/10 space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
+                      {isEn ? "Overall Summary" : "Synthèse Globale"}
+                    </p>
+                    {(() => {
+                      const newItems = workItems.filter(w => w.projectType === "new_construction");
+                      const existingItems = workItems.filter(w => w.projectType === "existing_extension");
+                      const totalNewCreated = newItems.reduce((s, w) => s + w.floorAreaCreated, 0);
+                      const totalExisting = existingItems.reduce((s, w) => s + (w.existingFloorArea || 0), 0);
+                      const totalExistingCreated = existingItems.reduce((s, w) => s + w.floorAreaCreated, 0);
+                      const architectNeeded = workItems.some((item) => {
+                        const r = calculateDpPc({
+                          projectType: item.projectType, floorAreaCreated: item.floorAreaCreated,
+                          footprintCreated: item.footprintCreated, existingFloorArea: item.existingFloorArea,
+                          shelterHeight: item.shelterHeight, inUrbanZone: item.inUrbanZone,
+                          changeOfUse: item.changeOfUse,
+                          facadeModification: item.facadeModification,
+                        });
+                        return r.determination === "ARCHITECT_REQUIRED";
+                      });
+
+                      if (workItems.length === 0) return (
+                        <div className="space-y-2">
+                          {/* Default: No architect required badge */}
+                          <div className="flex items-center gap-2 p-3 rounded-xl" style={{background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.35)"}}>
+                            <Check className="w-4 h-4 text-green-400 shrink-0" />
+                            <div>
+                              <p className="text-xs font-bold text-green-300">{isEn ? "No architect required" : "Architecte non requis"}</p>
+                              <p className="text-[11px] text-green-400/80 mt-0.5">{isEn ? "Architect thresholds not reached." : "Seuils d'architecte non atteints."}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+
+                      return (
+                        <div className="space-y-2">
+                          {/* New buildings section */}
+                          {newItems.length > 0 && (
+                            <div className="rounded-xl overflow-hidden" style={{background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)"}}>
+                              <div className="px-3 py-2 border-b border-white/10">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">{isEn ? "New Buildings" : "Nouvelles Constructions"}</p>
+                              </div>
+                              <div className="px-3 py-2 flex items-center justify-between">
+                                <span className="text-xs text-indigo-200">{isEn ? "Created" : "Créée"}</span>
+                                <span className="text-sm font-bold text-white">{totalNewCreated.toFixed(1)} m²</span>
+                              </div>
+                            </div>
+                          )}
+                          {/* Existing work section */}
+                          {existingItems.length > 0 && (
+                            <div className="rounded-xl overflow-hidden" style={{background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)"}}>
+                              <div className="px-3 py-2 border-b border-white/10">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">{isEn ? "Work on Existing" : "Travaux sur Existant"}</p>
+                              </div>
+                              <div className="px-3 py-2 flex items-center justify-between">
+                                <span className="text-xs text-indigo-200">{isEn ? "Existing" : "Existant"}</span>
+                                <span className="text-sm font-bold text-white">{totalExisting > 0 ? `${totalExisting.toFixed(1)} m²` : "—"}</span>
+                              </div>
+                              <div className="px-3 py-2 flex items-center justify-between border-t border-white/10">
+                                <span className="text-xs text-indigo-200">{isEn ? "Created" : "Créée"}</span>
+                                <span className="text-sm font-bold text-white">{totalExistingCreated.toFixed(1)} m²</span>
+                              </div>
+                              <div className="px-3 py-2 flex items-center justify-between border-t border-white/10 bg-white/5">
+                                <span className="text-xs font-semibold text-indigo-200">{isEn ? "Total After Works" : "Total après travaux"}</span>
+                                <span className="text-sm font-bold text-white">{(totalExisting + totalExistingCreated).toFixed(1)} m²</span>
+                              </div>
+                            </div>
+                          )}
+                          {/* Architect status */}
+                          {architectNeeded ? (
+                            <div className="flex items-center gap-2 p-3 rounded-xl" style={{background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)"}}>
+                              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                              <div>
+                                <p className="text-xs font-bold text-red-300 uppercase tracking-wide">{isEn ? "Architect Required" : "Architecte Obligatoire"}</p>
+                                <p className="text-[11px] text-red-400/80 mt-0.5">{isEn ? "Architect thresholds reached." : "Seuils d'architecte atteints."}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 p-3 rounded-xl" style={{background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.35)"}}>
+                              <Check className="w-4 h-4 text-green-400 shrink-0" />
+                              <div>
+                                <p className="text-xs font-bold text-green-300">{isEn ? "No architect required" : "Architecte non requis"}</p>
+                                <p className="text-[11px] text-green-400/80 mt-0.5">{isEn ? "Architect thresholds not reached." : "Seuils d'architecte non atteints."}</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* ── List of works ── */}
+                  <div className="px-5 py-4 flex-1 space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
+                      {isEn ? `List of works (${workItems.length})` : `Liste des travaux (${workItems.length})`}
+                    </p>
+                    {workItems.length === 0 ? (
+                      <p className="text-[11px] text-indigo-400 italic">
+                        {isEn ? "Add all the work you plan to do to this folder." : "Ajoutez tous vos travaux à ce dossier."}
                       </p>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100">
-                      {/* Global summary */}
-                      <div className="px-5 py-4 bg-slate-50/60 space-y-2">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                          {isEn ? "Global Summary" : "Synthèse Globale"}
-                        </p>
-                        {(() => {
-                          // Only building-type items contribute to surface de plancher
-                          const buildingItems = workItems.filter(w =>
-                            w.projectType === "new_construction" || w.projectType === "existing_extension"
-                          );
-                          const totalCreated = buildingItems.reduce((sum, w) => sum + w.floorAreaCreated, 0);
-                          const totalExisting = buildingItems.reduce((sum, w) => sum + (w.existingFloorArea || 0), 0);
-                          const totalAfter = totalExisting + totalCreated;
-                          // Use per-item calculateDpPc to determine if architect is actually needed
-                          const architectNeeded = workItems.some((item) => {
-                            const res = calculateDpPc({
-                              projectType: item.projectType,
-                              floorAreaCreated: item.floorAreaCreated,
-                              footprintCreated: item.footprintCreated,
-                              existingFloorArea: item.existingFloorArea,
-                              shelterHeight: item.shelterHeight,
-                              inUrbanZone: item.inUrbanZone,
-                              changeOfUseOrFacade: item.changeOfUseOrFacade,
-                            });
-                            return res.determination === "ARCHITECT_REQUIRED";
-                          });
-                          return (
-                            <div className="space-y-2">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-slate-500">{isEn ? "Floor area created" : "Surface créée"}</span>
-                                <span className="font-semibold text-slate-900">{totalCreated.toFixed(1)} m²</span>
-                              </div>
-                              {totalExisting > 0 && (
-                                <div className="flex justify-between text-xs">
-                                  <span className="text-slate-500">{isEn ? "Total after works" : "Totale après travaux"}</span>
-                                  <span className="font-semibold text-slate-900">{totalAfter.toFixed(1)} m²</span>
-                                </div>
-                              )}
-                              {architectNeeded && (
-                                <div className="flex items-start gap-2 mt-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
-                                  <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
-                                  <p className="text-[11px] font-semibold text-red-700 uppercase tracking-wide">
-                                    {isEn ? "Architect required" : "Architecte obligatoire"}
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
+                    ) : workItems.map((item) => {
+                      const res = calculateDpPc({
+                        projectType: item.projectType, floorAreaCreated: item.floorAreaCreated,
+                        footprintCreated: item.footprintCreated, existingFloorArea: item.existingFloorArea,
+                        shelterHeight: item.shelterHeight, inUrbanZone: item.inUrbanZone,
+                        changeOfUse: item.changeOfUse,
+                        facadeModification: item.facadeModification,
+                      });
+                      const badgeColor =
+                        res.determination === "PC" || res.determination === "ARCHITECT_REQUIRED"
+                          ? "bg-amber-400/25 text-amber-300 border-amber-400/40"
+                          : res.determination === "DP"
+                            ? "bg-blue-400/25 text-blue-300 border-blue-400/40"
+                            : "bg-emerald-400/25 text-emerald-300 border-emerald-400/40";
+                      const badgeLabel =
+                        res.determination === "PC" ? (isEn ? "BUILDING PERMIT" : "PERMIS DE CONSTRUIRE")
+                          : res.determination === "ARCHITECT_REQUIRED" ? (isEn ? "BUILDING PERMIT" : "PERMIS DE CONSTRUIRE")
+                            : res.determination === "DP" ? (isEn ? "PRIOR DECLARATION" : "DÉCLARATION PRÉALABLE")
+                              : (isEn ? "NO AUTHORIZATION" : "AUCUNE AUTORISATION");
+                      // Split explanation into bullet points
+                      const bullets = res.explanation
+                        ? res.explanation.split(/\. (?=[A-ZÀ-Ö]|[a-zà-ö])/).filter(Boolean)
+                        : [];
+                      return (
+                        <div key={item.id} className="rounded-xl p-3 space-y-2" style={{background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)"}}>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-bold text-white leading-snug flex-1">{item.label}</p>
+                            <button
+                              type="button"
+                              onClick={() => removeWorkItem(item.id)}
+                              className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center bg-red-500/20 text-red-400 border border-red-400/30 hover:bg-red-500/30 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeColor}`}>
+                            {badgeLabel}
+                          </span>
+                          {(item.floorAreaCreated > 0 || item.footprintCreated > 0) && (
+                            <p className="text-[11px] text-indigo-300">
+                              {item.floorAreaCreated > 0 && `• ${isEn ? "Floor area" : "Plancher"}: ${item.floorAreaCreated.toFixed(1)} m²`}
+                              {item.footprintCreated > 0 && ` | ${isEn ? "Footprint" : "Emprise"}: ${item.footprintCreated} m²`}
+                            </p>
+                          )}
+                          {bullets.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {bullets.slice(0, 4).map((b, i) => (
+                                <li key={i} className="text-[11px] text-indigo-300/80 leading-relaxed flex gap-1">
+                                  <span className="shrink-0 mt-0.5">•</span>
+                                  <span>{b.replace(/\.$/, '')}.</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {res.determination === "ARCHITECT_REQUIRED" && (
+                            <p className="text-[11px] text-amber-300 font-semibold flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              {isEn ? "Architect Signature Required" : "Signature Architecte Requise"}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                      {/* Work items list */}
-                      <div className="px-5 py-3 space-y-1">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                          {isEn ? `Works list (${workItems.length})` : `Liste des travaux (${workItems.length})`}
-                        </p>
-                        {workItems.map((item) => {
-                          const res = calculateDpPc({
-                            projectType: item.projectType,
-                            floorAreaCreated: item.floorAreaCreated,
-                            footprintCreated: item.footprintCreated,
-                            existingFloorArea: item.existingFloorArea,
-                            shelterHeight: item.shelterHeight,
-                            inUrbanZone: item.inUrbanZone,
-                            changeOfUseOrFacade: item.changeOfUseOrFacade,
-                          });
-                          const badgeColor =
-                            res.determination === "PC" || res.determination === "ARCHITECT_REQUIRED"
-                              ? "bg-amber-100 text-amber-700 border-amber-300"
-                              : res.determination === "DP"
-                                ? "bg-blue-100 text-blue-700 border-blue-300"
-                                : "bg-emerald-100 text-emerald-700 border-emerald-300";
-                          const badgeLabel =
-                            res.determination === "PC" ? (isEn ? "BUILDING PERMIT" : "PERMIS DE CONSTRUIRE")
-                              : res.determination === "ARCHITECT_REQUIRED" ? (isEn ? "PERMIT + ARCHITECT" : "PC + ARCHITECTE")
-                                : res.determination === "DP" ? (isEn ? "PRIOR DECLARATION" : "DÉCLARATION PRÉALABLE")
-                                  : (isEn ? "NO AUTHORIZATION" : "AUCUNE AUTORISATION");
-                          return (
-                            <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="text-xs font-semibold text-slate-900 leading-snug flex-1">{item.label}</p>
-                                <button
-                                  type="button"
-                                  onClick={() => removeWorkItem(item.id)}
-                                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-red-50 text-red-400 border border-red-200 hover:bg-red-100 hover:text-red-600 transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeColor}`}>
-                                  {badgeLabel}
-                                </span>
-                              </div>
-                              {item.floorAreaCreated > 0 && (
-                                <p className="text-[11px] text-slate-400">
-                                  {isEn ? "Floor" : "Plancher"}: {item.floorAreaCreated.toFixed(1)} m²
-                                  {item.footprintCreated > 0 && ` | ${isEn ? "Footprint" : "Emprise"}: ${item.footprintCreated} m²`}
-                                </p>
-                              )}
-                              <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-3">{res.explanation}</p>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Footer */}
-                      <div className="px-5 py-3">
-                        <p className="text-[10px] text-slate-400 leading-relaxed italic">
-                          {isEn
-                            ? "Results are indicative. Consult your town hall or local PLU for final validation."
-                            : "Ces résultats sont donnés à titre indicatif. Consultez votre mairie ou le PLU local pour validation définitive."}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  {/* Footer */}
+                  <div className="px-5 py-3 border-t border-white/10">
+                    <p className="text-[10px] text-indigo-400/70 leading-relaxed italic">
+                      {isEn
+                        ? "These results are indicative only. Consult your town hall or the local urban development plan (PLU) for final confirmation."
+                        : "Ces résultats sont donnés à titre indicatif. Consultez votre mairie ou le PLU local pour validation définitive."}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

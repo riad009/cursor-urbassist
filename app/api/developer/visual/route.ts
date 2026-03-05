@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, HARDCODED_USER_ID, isUnrestrictedAdmin } from "@/lib/auth";
+import { getSession, isUnrestrictedAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateImage, isImageGenerationEnabled } from "@/lib/imageGeneration";
 
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     // Deduct credits (skip for hardcoded demo user and admin)
     const cost = 5;
-    if (!isUnrestrictedAdmin(user) && user.id !== HARDCODED_USER_ID && user.credits >= cost) {
+    if (!isUnrestrictedAdmin(user) && user.credits >= cost) {
       await prisma.user.update({
         where: { id: user.id },
         data: { credits: { decrement: cost } },

@@ -4,7 +4,7 @@ import * as bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  // Create subscription plans
+  // ── Subscription Plans ──────────────────────────────────────────────────────
   await prisma.subscriptionPlan.upsert({
     where: { slug: "free" },
     update: {},
@@ -61,11 +61,13 @@ async function main() {
     },
   });
 
-  // Create demo admin user (password: admin123)
+  // ── Admin Account ────────────────────────────────────────────────────────────
+  // Login: admin@urbassist.fr / admin123
+  // Change the password immediately after first login in production!
   const adminHash = await bcrypt.hash("admin123", 10);
   await prisma.user.upsert({
     where: { email: "admin@urbassist.fr" },
-    update: {},
+    update: { role: "ADMIN", credits: 1000 },
     create: {
       email: "admin@urbassist.fr",
       passwordHash: adminHash,
@@ -75,26 +77,13 @@ async function main() {
     },
   });
 
-  // Create demo user (password: demo123)
-  const demoHash = await bcrypt.hash("demo123", 10);
-  await prisma.user.upsert({
-    where: { email: "demo@urbassist.fr" },
-    update: {},
-    create: {
-      email: "demo@urbassist.fr",
-      passwordHash: demoHash,
-      name: "Demo User",
-      role: "USER",
-      credits: 50,
-    },
-  });
-
-  console.log("Seed completed successfully");
+  console.log("✅ Seed completed successfully");
+  console.log("   Admin login: admin@urbassist.fr / admin123");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("❌ Seed failed:", e);
     process.exit(1);
   })
   .finally(async () => {

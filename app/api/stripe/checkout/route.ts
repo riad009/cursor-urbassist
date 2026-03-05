@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, HARDCODED_USER_ID } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
@@ -98,19 +98,17 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          // Record payment intent in DB (skip for hardcoded demo user who has no DB row)
-          if (user.id !== HARDCODED_USER_ID) {
-            await prisma.payment.create({
-              data: {
-                userId: user.id,
-                stripeSessionId: session.id,
-                amount: pkg.price / 100,
-                type: "credits",
-                creditsAmount: pkg.credits,
-                status: "pending",
-              },
-            });
-          }
+          // Record payment intent in DB
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: pkg.price / 100,
+              type: "credits",
+              creditsAmount: pkg.credits,
+              status: "pending",
+            },
+          });
 
           return NextResponse.json({ url: session.url });
         } catch (stripeErr) {
@@ -120,13 +118,7 @@ export async function POST(request: NextRequest) {
       }
 
       // ── No Stripe key or Stripe failed → demo mode: add credits directly ──
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json({
-          success: true,
-          credits: user.credits + pkg.credits,
-          message: `${pkg.credits} credits added (demo mode - set STRIPE_SECRET_KEY to enable real payments)`,
-        });
-      }
+
 
       await prisma.user.update({
         where: { id: user.id },
@@ -191,18 +183,16 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          if (user.id !== HARDCODED_USER_ID) {
-            await prisma.payment.create({
-              data: {
-                userId: user.id,
-                stripeSessionId: session.id,
-                amount: pack.price / 100,
-                type: "rendering_pack",
-                creditsAmount: pack.credits,
-                status: "pending",
-              },
-            });
-          }
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: pack.price / 100,
+              type: "rendering_pack",
+              creditsAmount: pack.credits,
+              status: "pending",
+            },
+          });
 
           return NextResponse.json({ url: session.url });
         } catch (stripeErr) {
@@ -210,14 +200,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Demo mode: add credits immediately
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json({
-          success: true,
-          credits: user.credits + pack.credits,
-          message: `${pack.credits} rendering credits added (demo mode)`,
-        });
-      }
+
 
       await prisma.user.update({ where: { id: user.id }, data: { credits: { increment: pack.credits } } });
       await prisma.creditTransaction.create({
@@ -304,18 +287,16 @@ export async function POST(request: NextRequest) {
           });
 
           // Record pending payment
-          if (user.id !== HARDCODED_USER_ID) {
-            await prisma.payment.create({
-              data: {
-                userId: user.id,
-                stripeSessionId: session.id,
-                amount: priceEur,
-                type: "plu_analysis",
-                status: "pending",
-                metadata: { projectId, isRelaunch },
-              },
-            });
-          }
+          await prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripeSessionId: session.id,
+              amount: priceEur,
+              type: "plu_analysis",
+              status: "pending",
+              metadata: { projectId, isRelaunch },
+            },
+          });
 
           return NextResponse.json({ url: session.url });
         } catch (stripeErr) {
@@ -332,17 +313,15 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      if (user.id !== HARDCODED_USER_ID) {
-        await prisma.creditTransaction.create({
-          data: {
-            userId: user.id,
-            amount: 0,
-            type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
-            description: `PLU analysis (demo mode) — €${priceEur}`,
-            metadata: { projectId, isRelaunch, priceEur },
-          },
-        });
-      }
+      await prisma.creditTransaction.create({
+        data: {
+          userId: user.id,
+          amount: 0,
+          type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
+          description: `PLU analysis (demo mode) — €${priceEur}`,
+          metadata: { projectId, isRelaunch, priceEur },
+        },
+      });
 
       return NextResponse.json({
         success: true,
@@ -366,14 +345,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Hardcoded user: instant demo subscription
-      if (user.id === HARDCODED_USER_ID) {
-        return NextResponse.json({
-          success: true,
-          message: `Subscribed to ${plan.name} (demo). Register an account to persist credits.`,
-          credits: user.credits + plan.creditsPerMonth,
-        });
-      }
+
 
       if (STRIPE_SECRET && plan.stripePriceId) {
         try {
