@@ -1301,17 +1301,7 @@ export default function AuthorizationPage({
 
                   {/* ═══ Total Floor Area Banner — now shown at top, removed from here ═══ */}
 
-                  {/* Continue button */}
-                  {showCategoryCards && (
-                    <button
-                      type="button"
-                      onClick={handleContinue}
-                      disabled={!canContinue}
-                      className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-base font-bold disabled:opacity-40 hover:shadow-lg hover:shadow-purple-500/20 transition-all flex items-center justify-center gap-2"
-                    >
-                      {isEn ? "Next: List of documents" : "Suivant : Liste des documents"} <ChevronRight className="w-5 h-5" />
-                    </button>
-                  )}
+                  {/* Continue button — only shown when at least one work item has been added */}
                 </div>
               )}
 
@@ -1562,8 +1552,34 @@ export default function AuthorizationPage({
 
           </div>{/* end two-column wrapper */}
 
+          {/* ═══ Bottom Bar — appears once items are added ═══ */}
+          {step === "form" && showCategoryCards && workItems.length > 0 && (
+            <div
+              className="mt-6 rounded-2xl bg-white border border-slate-200 shadow-[0_4px_24px_rgba(0,0,0,0.08)] px-6 py-5 flex items-center justify-between"
+              style={{ animation: "slide-up 0.35s cubic-bezier(0.16,1,0.3,1)" }}
+            >
+              <div>
+                <p className="text-base font-bold text-slate-900">
+                  {isEn ? "Is your application complete?" : "Votre dossier est-il complet ?"}
+                </p>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {isEn ? "Proceed to the next step to obtain the parts list." : "Passez à l'étape suivante pour obtenir la liste des pièces."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleContinue}
+                className="shrink-0 px-8 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold transition-all shadow-md hover:shadow-lg hover:shadow-indigo-500/25 flex items-center gap-2"
+              >
+                {isEn ? "See the required documents" : "Voir les documents requis"} <span className="text-lg">→</span>
+              </button>
+            </div>
+          )}
+
         </div>{/* end max-w-7xl */}
       </div >
+
+
 
       {/* ═══ Auto Detection Modal ═══ */}
       {

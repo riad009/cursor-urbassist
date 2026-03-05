@@ -40,23 +40,7 @@ export async function POST(request: NextRequest) {
       const cost = getPluAnalysisCost(project.pluAnalysisCount);
       const isRelaunch = project.pluAnalysisCount > 0;
 
-      // Admin bypass
-      if (isUnrestrictedAdmin(user)) {
-        await prisma.project.update({
-          where: { id: projectId },
-          data: {
-            pluAnalysisCount: { increment: 1 },
-            paidAt: project.paidAt ?? new Date(),
-          },
-        });
-        return NextResponse.json({
-          success: true,
-          creditsSpent: 0,
-          creditsRemaining: user.credits,
-          pluAnalysisCount: project.pluAnalysisCount + 1,
-          isRelaunch,
-        });
-      }
+      // Note: Admin users also pay credits — no bypass
 
       // Check sufficient credits
       // Re-fetch for latest balance (getSession may be cached)

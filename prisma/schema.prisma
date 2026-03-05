@@ -17,7 +17,7 @@ model User {
   credits            Int                 @default(0)
   stripeCustomerId   String?
   createdAt          DateTime            @default(now())
-  updatedAt          DateTime
+  updatedAt          DateTime            @updatedAt
   tokens             BigInt              @default(100)
   Chat               Chat[]
   creditTransactions CreditTransaction[]
@@ -112,7 +112,7 @@ model Project {
   pluAnalysisCount         Int                   @default(0) @map("plu_analysis_count")
   scale                    String                @default("1:100")
   createdAt                DateTime              @default(now())
-  updatedAt                DateTime
+  updatedAt                DateTime              @updatedAt
   category                 String?               @default("business") @db.VarChar(100)
   content                  Json?                 @default("{}")
   editor_data              Json?
@@ -264,7 +264,7 @@ model Chat {
   messages  Json     @default("[]")
   userId    String
   createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
   User      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId], map: "idx_chat_userid")
