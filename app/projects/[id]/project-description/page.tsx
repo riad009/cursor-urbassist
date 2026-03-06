@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, use, useEffect, useMemo } from "react";
+import React, { useState, use, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
@@ -26,6 +26,7 @@ import {
     X,
     Printer,
     Pencil,
+    Search,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -65,12 +66,14 @@ interface Job {
 // ─── Document list (right panel) ────────────────────────────────────────────
 
 const ADMIN_DOCS = [
-    { code: "PC1 / DPC1", label: "Site plan", unlocked: true },
-    { code: "PC2 / DPC2", label: "Site plan", unlocked: false },
-    { code: "PC3", label: "Cutting Plan", unlocked: false },
-    { code: "PC4 / DPC 8-1", label: "Descriptive notice", unlocked: false },
-    { code: "PC5 / DPC4", label: "Plan of facades and roofs", unlocked: false },
-    { code: "PC6 / DPC6", label: "3D Landscape Insertion", unlocked: false },
+    { code: "PC1 / DPC1", labelEn: "PC1 / DPC1 - Site plan", labelFr: "PC1 / DPC1 - Plan de situation", unlocked: true },
+    { code: "PC2 / DPC2", labelEn: "PC2 / DPC2 - Site layout plan", labelFr: "PC2 / DPC2 - Plan de masse", unlocked: false },
+    { code: "PC3 / DPC3", labelEn: "PC3 / DPC3 - Cross-section plan", labelFr: "PC3 / DPC3 - Plan de coupe", unlocked: false },
+    { code: "PC4 / DPC 8-1", labelEn: "PC4 / DPC 8-1 - Descriptive notice", labelFr: "PC4 / DPC 8-1 - Notice descriptive", unlocked: false },
+    { code: "PC5 / DPC4", labelEn: "PC5 / DPC4 - Facades and roofs plan", labelFr: "PC5 / DPC4 - Plan des façades et toitures", unlocked: false },
+    { code: "PC6 / DPC6", labelEn: "PC6 / DPC6 - 3D landscape insertion", labelFr: "PC6 / DPC6 - Insertion paysagère 3D", unlocked: false },
+    { code: "DPC11 / PCMI", labelEn: "DPC11 - Materials notice", labelFr: "DPC11 - Notice matériaux", unlocked: false },
+    { code: "CERFA", labelEn: "Pre-filled CERFA form", labelFr: "Formulaire CERFA pré-rempli", unlocked: false },
 ];
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -87,6 +90,7 @@ export default function ProjectDescriptionPage({
 
     const [step, setStep] = useState<WizardStep>(0);
     const [saving, setSaving] = useState(false);
+    const [authorizationType, setAuthorizationType] = useState<string>("PC");
 
     // Step 1 — Environment
     const [projectAddress, setProjectAddress] = useState("");
@@ -94,6 +98,12 @@ export default function ProjectDescriptionPage({
     const [farPhoto, setFarPhoto] = useState<File | null>(null);
     const [terrainInitial, setTerrainInitial] = useState("");
     const [accessVerts, setAccessVerts] = useState("");
+
+    // Address editing
+    const [editingAddress, setEditingAddress] = useState(false);
+    const [addressQuery, setAddressQuery] = useState("");
+    const [addressSuggestions, setAddressSuggestions] = useState<{ label: string; city: string; postcode: string; coordinates?: number[] }[]>([]);
+    const [loadingAddressSearch, setLoadingAddressSearch] = useState(false);
 
     // Step 2 — Works
     const [jobs, setJobs] = useState<Job[]>([]);
@@ -187,6 +197,7 @@ export default function ProjectDescriptionPage({
                 if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
+                if (d.project?.authorizationType) setAuthorizationType(d.project.authorizationType);
 
                 // ── Pre-populate jobs from authorization data ──────────────
                 const desc = d.project?.projectDescription;
@@ -261,6 +272,36 @@ export default function ProjectDescriptionPage({
         if (addFootprint <= 0) return 0;
         return estimateFloorAreaCreated(addFootprint, addLevels);
     }, [addFootprint, addLevels]);
+
+    // ─── Address search (debounced) ─────────────────────────────────────
+    const searchAddress = useCallback(() => {
+        if (!addressQuery.trim() || addressQuery.length < 4) { setAddressSuggestions([]); return; }
+        setLoadingAddressSearch(true);
+        fetch("/api/address/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: addressQuery }) })
+            .then((r) => r.json())
+            .then((d) => setAddressSuggestions(d.results || []))
+            .catch(() => setAddressSuggestions([]))
+            .finally(() => setLoadingAddressSearch(false));
+    }, [addressQuery]);
+
+    useEffect(() => { const timer = setTimeout(searchAddress, 400); return () => clearTimeout(timer); }, [addressQuery, searchAddress]);
+
+    const selectAddress = useCallback((addr: { label: string; city: string; postcode: string; coordinates?: number[] }) => {
+        setProjectAddress(addr.label);
+        setAddressQuery("");
+        setAddressSuggestions([]);
+        setEditingAddress(false);
+        // Persist updated address to backend
+        fetch(`/api/projects/${projectId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                address: addr.label,
+                municipality: addr.city,
+                coordinates: addr.coordinates,
+            }),
+        }).catch(() => { /* silent */ });
+    }, [projectId]);
 
     // ─── Overall DPC calculation from jobs ──────────────────────────────────
     const dpcResult = useMemo(() => {
@@ -569,12 +610,12 @@ export default function ProjectDescriptionPage({
                                                     </span>
                                                 </div>
                                                 <h2 className="text-xl font-bold mb-2">
-                                                    {isEn ? "Describe your project" : "Décrivez votre projet"}
+                                                    {isEn ? "Next step: Describe your project" : "Prochaine étape : Décrivez votre projet"}
                                                 </h2>
                                                 <p className="text-sm text-indigo-100 mb-5 max-w-md">
                                                     {isEn
-                                                        ? "Complete the technical description to allow the AI to generate your descriptive notice."
-                                                        : "Complétez la description technique pour permettre à l'IA de générer votre notice descriptive."}
+                                                        ? "Complete the technical description and your personal information to automatically generate your CERFA."
+                                                        : "Complétez la description technique et vos informations personnelles pour générer automatiquement votre CERFA."}
                                                 </p>
                                                 <button
                                                     type="button"
@@ -660,23 +701,62 @@ export default function ProjectDescriptionPage({
                                                     </label>
                                                     <button
                                                         type="button"
-                                                        onClick={() => router.push("/projects/new")}
+                                                        onClick={() => {
+                                                            setEditingAddress(!editingAddress);
+                                                            if (!editingAddress) {
+                                                                setAddressQuery(projectAddress);
+                                                                setAddressSuggestions([]);
+                                                            }
+                                                        }}
                                                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-semibold hover:bg-indigo-100 hover:text-indigo-700 transition-all border border-indigo-200 hover:border-indigo-300 hover:shadow-sm"
                                                     >
                                                         <Pencil className="w-3 h-3" />
-                                                        {isEn ? "Change address" : "Changer l'adresse"}
+                                                        {editingAddress
+                                                            ? (isEn ? "Cancel" : "Annuler")
+                                                            : (isEn ? "Change address" : "Changer l'adresse")}
                                                     </button>
                                                 </div>
-                                                <div className="relative">
-                                                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                                    <input
-                                                        type="text"
-                                                        value={projectAddress}
-                                                        onChange={(e) => setProjectAddress(e.target.value)}
-                                                        className="w-full pl-9 pr-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                                        placeholder={isEn ? "Enter the plot address..." : "Entrez l'adresse de la parcelle..."}
-                                                    />
-                                                </div>
+                                                {editingAddress ? (
+                                                    <div className="relative">
+                                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-500" />
+                                                        <input
+                                                            type="text"
+                                                            value={addressQuery}
+                                                            onChange={(e) => setAddressQuery(e.target.value)}
+                                                            autoFocus
+                                                            className="w-full pl-9 pr-10 py-3 rounded-xl bg-white border-2 border-indigo-300 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"
+                                                            placeholder={isEn ? "Search for an address..." : "Rechercher une adresse..."}
+                                                        />
+                                                        {loadingAddressSearch && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 animate-spin" />}
+                                                        {addressSuggestions.length > 0 && (
+                                                            <div className="absolute z-30 top-full left-0 right-0 mt-1 rounded-xl bg-white border border-slate-200 overflow-hidden shadow-xl max-h-60 overflow-y-auto">
+                                                                {addressSuggestions.map((a, i) => (
+                                                                    <button
+                                                                        key={i}
+                                                                        type="button"
+                                                                        onClick={() => selectAddress(a)}
+                                                                        className="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-indigo-50 flex items-center gap-3 transition-colors border-b border-slate-50 last:border-b-0"
+                                                                    >
+                                                                        <MapPin className="w-4 h-4 text-indigo-500 shrink-0" />
+                                                                        <span className="truncate flex-1">{a.label}</span>
+                                                                        <span className="text-slate-400 text-xs shrink-0">{a.postcode} {a.city}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="relative">
+                                                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                                        <input
+                                                            type="text"
+                                                            value={projectAddress}
+                                                            readOnly
+                                                            className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm cursor-default"
+                                                            placeholder={isEn ? "No address set" : "Aucune adresse définie"}
+                                                        />
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {/* AI auto-generation info card */}
@@ -2278,7 +2358,7 @@ export default function ProjectDescriptionPage({
                                         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
                                             <div>
                                                 <p className="text-sm font-bold text-slate-900">
-                                                    {isEn ? "Your administrative documents" : "Vos documents administratifs"}
+                                                    {isEn ? "Your administrative documents" : "Vos pièces administratives"}
                                                 </p>
                                             </div>
                                             <div className="flex items-center gap-2">
@@ -2295,7 +2375,11 @@ export default function ProjectDescriptionPage({
                                         {/* Document list */}
                                         <div className="divide-y divide-slate-50">
                                             {ADMIN_DOCS.map((doc) => {
-                                                const isReady = doc.unlocked || (doc.code === "PC4 / DPC 8-1" && step >= 5) || step >= 7;
+                                                const isReady = doc.unlocked
+                                                    || (doc.code === "PC4 / DPC 8-1" && step >= 5)
+                                                    || (doc.code === "DPC11 / PCMI" && step >= 4)
+                                                    || (doc.code === "CERFA" && step >= 5)
+                                                    || step >= 7;
                                                 return (
                                                     <div key={doc.code} className={cn(
                                                         "px-4 py-3 flex items-center gap-3",
@@ -2315,7 +2399,7 @@ export default function ProjectDescriptionPage({
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-[10px] font-bold text-slate-400 uppercase">{doc.code}</p>
-                                                            <p className="text-xs font-medium text-slate-800 truncate">{doc.label}</p>
+                                                            <p className="text-xs font-medium text-slate-800 truncate">{isEn ? doc.labelEn : doc.labelFr}</p>
                                                         </div>
                                                         {isReady ? (
                                                             <div className="flex items-center gap-1.5">
