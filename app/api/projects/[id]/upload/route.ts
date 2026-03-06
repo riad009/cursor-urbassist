@@ -49,10 +49,12 @@ export async function POST(
             );
         }
 
-        // Only allow PDF for now
-        if (!file.name.toLowerCase().endsWith(".pdf")) {
+        // Allow PDF and common image formats
+        const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif"];
+        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf("."));
+        if (!allowedExtensions.includes(ext)) {
             return NextResponse.json(
-                { error: "Only PDF files are allowed" },
+                { error: "Only PDF and image files (JPG, PNG, WebP, GIF) are allowed" },
                 { status: 400 }
             );
         }

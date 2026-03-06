@@ -524,6 +524,41 @@ export default function AuthorizationPage({
 
   // ─── Quick action: skip directly to documents ─────────────────────
 
+  // Build projectDescription payload from current form state
+  function buildProjectDescription() {
+    return {
+      categories: Array.from(selectedCategories),
+      extensionSubTypes: Array.from(extensionSubTypes),
+      outdoorTags: Array.from(outdoorTags),
+      outdoorFreeText: outdoorFreeText || undefined,
+      constructionFootprint: constructionFootprint || undefined,
+      constructionLevels,
+      constructionFloorArea: constructionFloorArea || undefined,
+      extensionFootprint: extensionFootprint || undefined,
+      extensionLevels,
+      extensionFloorArea: extensionFloorArea || undefined,
+      existingFloorArea: existingArea || undefined,
+      outdoorSurface: outdoorSurface || undefined,
+      totalFloorArea: totalFloorArea || undefined,
+      submitterType,
+      poolShelterHeight: poolShelterHeight || undefined,
+      // Save the full list of individual work items
+      workItems: workItems.map(w => ({
+        id: w.id,
+        label: w.label,
+        projectType: w.projectType,
+        floorAreaCreated: w.floorAreaCreated,
+        footprintCreated: w.footprintCreated,
+        existingFloorArea: w.existingFloorArea,
+        shelterHeight: w.shelterHeight,
+        inUrbanZone: w.inUrbanZone,
+        changeOfUse: w.changeOfUse,
+        facadeModification: w.facadeModification,
+        localDeliberation: w.localDeliberation,
+      })),
+    };
+  }
+
   async function handleQuickAction(authType: "DP" | "PC") {
     setSaving(true);
     try {
@@ -535,6 +570,7 @@ export default function AuthorizationPage({
           authorizationExplanation: authType === "DP"
             ? (isEn ? "Quick action: Preliminary Declaration selected" : "Action rapide : Déclaration Préalable sélectionnée")
             : (isEn ? "Quick action: Building Permit selected" : "Action rapide : Permis de Construire sélectionné"),
+          projectDescription: buildProjectDescription(),
         }),
       });
       router.push(`/projects/${projectId}/payment`);
@@ -1876,6 +1912,15 @@ export default function AuthorizationPage({
                       setAutoDetectPaying(true);
                       setAutoDetectError(null);
                       try {
+                        // Save project data BEFORE payment
+                        await fetch(`/api/projects/${projectId}`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            authorizationType: result?.determination === "PC" || result?.determination === "ARCHITECT_REQUIRED" ? "PC" : "DP",
+                            projectDescription: buildProjectDescription(),
+                          }),
+                        });
                         const res = await fetch("/api/stripe/checkout", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -1983,25 +2028,23 @@ export default function AuthorizationPage({
 
                 {/* ── Legal entity warning ── */}
                 {quickModal.step === "legal-entity" && (
-                  <div className="p-8 space-y-5 text-center">
-                    <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
-                      <AlertTriangle className="w-8 h-8 text-red-500" />
+                  <div className="p-8 space-y-5">
+                    <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
+                      <AlertTriangle className="w-7 h-7 text-red-500" />
                     </div>
-                    <div className="space-y-2">
-                      <h2 className="text-xl font-bold text-red-600">
-                        {isEn ? "Mandatory Architect's Opinion" : "Avis d'architecte obligatoire"}
-                      </h2>
-                      <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 text-left">
-                        {isEn
-                          ? "Legal entities (SCI, companies, etc.) must use an architect for any Building Permit, regardless of the surface area."
-                          : "Les personnes morales (SCI, sociétés, etc.) doivent obligatoirement recourir à un architecte pour tout Permis de Construire, quelle que soit la surface."}
-                      </div>
-                      <p className="text-sm font-bold text-slate-800 pt-1">
-                        {isEn
-                          ? "Our platform does not handle cases requiring the signature of an architect."
-                          : "Notre plateforme ne traite pas les cas nécessitant la signature d'un architecte."}
-                      </p>
+                    <h2 className="text-xl font-bold text-red-600">
+                      {isEn ? "Mandatory Architect's Opportunity" : "Recours obligatoire à l'architecte"}
+                    </h2>
+                    <div className="rounded-lg bg-red-50 border-l-4 border-red-400 px-4 py-3 text-sm text-red-700">
+                      {isEn
+                        ? "Legal entities (SCI, companies, etc.) must use an architect for any Building Permit, regardless of the surface area."
+                        : "Les personnes morales (SCI, sociétés, etc.) doivent obligatoirement recourir à un architecte pour tout Permis de Construire, quelle que soit la surface."}
                     </div>
+                    <p className="text-sm font-bold text-slate-800">
+                      {isEn
+                        ? "Our platform does not handle cases requiring the signature of an architect."
+                        : "Notre plateforme ne traite pas les cas nécessitant la signature d'un architecte."}
+                    </p>
                     <button
                       type="button"
                       onClick={() => setQuickModal(null)}
@@ -2211,6 +2254,15 @@ export default function AuthorizationPage({
                         setQuickModalPaying(true);
                         setQuickModalError(null);
                         try {
+                          // Save project data BEFORE payment
+                          await fetch(`/api/projects/${projectId}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              authorizationType: quickModal.type,
+                              projectDescription: buildProjectDescription(),
+                            }),
+                          });
                           const res = await fetch("/api/stripe/checkout", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },

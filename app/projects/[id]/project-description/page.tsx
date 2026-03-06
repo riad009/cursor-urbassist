@@ -27,6 +27,7 @@ import {
     Printer,
     Pencil,
     Search,
+    Sparkles,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -44,7 +45,7 @@ type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 type NatureType = "new_construction" | "existing_extension" | "outdoor";
 type LevelCount = 1 | 2 | 3;
 type WorkType = "extension" | "change_destination" | "change_exterior";
-type OutdoorLayout = "pool" | "fence_gate";
+type OutdoorLayout = "pool" | "fence_gate" | "other";
 
 interface Job {
     id: string;
@@ -63,16 +64,33 @@ interface Job {
     displayLabel?: string;
 }
 
-// ─── Document list (right panel) ────────────────────────────────────────────
+// ─── Document lists by authorization type ───────────────────────────────────
 
-const ADMIN_DOCS = [
-    { code: "PC1 / DPC1", labelEn: "PC1 / DPC1 - Site plan", labelFr: "PC1 / DPC1 - Plan de situation", unlocked: true },
-    { code: "PC2 / DPC2", labelEn: "PC2 / DPC2 - Site layout plan", labelFr: "PC2 / DPC2 - Plan de masse", unlocked: false },
-    { code: "PC3 / DPC3", labelEn: "PC3 / DPC3 - Cross-section plan", labelFr: "PC3 / DPC3 - Plan de coupe", unlocked: false },
-    { code: "PC4 / DPC 8-1", labelEn: "PC4 / DPC 8-1 - Descriptive notice", labelFr: "PC4 / DPC 8-1 - Notice descriptive", unlocked: false },
-    { code: "PC5 / DPC4", labelEn: "PC5 / DPC4 - Facades and roofs plan", labelFr: "PC5 / DPC4 - Plan des façades et toitures", unlocked: false },
-    { code: "PC6 / DPC6", labelEn: "PC6 / DPC6 - 3D landscape insertion", labelFr: "PC6 / DPC6 - Insertion paysagère 3D", unlocked: false },
-    { code: "DPC11 / PCMI", labelEn: "DPC11 - Materials notice", labelFr: "DPC11 - Notice matériaux", unlocked: false },
+type DocEntry = { code: string; labelEn: string; labelFr: string; unlocked: boolean; photoType?: "near" | "far" };
+
+const DP_DOCS: DocEntry[] = [
+    { code: "DPC1", labelEn: "DPC1 - Site plan", labelFr: "DPC1 - Plan de situation", unlocked: true },
+    { code: "DPC2", labelEn: "DPC2 - Site plan", labelFr: "DPC2 - Plan de masse", unlocked: false },
+    { code: "DPC3", labelEn: "DPC3 - Cutting Plan", labelFr: "DPC3 - Plan de coupe", unlocked: false },
+    { code: "DPC4", labelEn: "DPC4 - Plan of facades and roofs", labelFr: "DPC4 - Plan des façades et toitures", unlocked: false },
+    { code: "DPC5", labelEn: "DPC5 - Representation of the external appearance", labelFr: "DPC5 - Représentation de l'aspect extérieur", unlocked: false },
+    { code: "DPC6", labelEn: "DPC6 - Graphic document (3D landscape insertion)", labelFr: "DPC6 - Document graphique (insertion paysagère 3D)", unlocked: false },
+    { code: "DPC7", labelEn: "DPC7 - Photography of the immediate environment", labelFr: "DPC7 - Photographie de l'environnement proche", unlocked: false, photoType: "near" },
+    { code: "DPC8", labelEn: "DPC8 - Far Environment Photography", labelFr: "DPC8 - Photographie de l'environnement lointain", unlocked: false, photoType: "far" },
+    { code: "DPC8-1", labelEn: "DPC8-1 - Product Description", labelFr: "DPC8-1 - Notice descriptive", unlocked: false },
+    { code: "CERFA", labelEn: "Pre-filled CERFA form", labelFr: "Formulaire CERFA pré-rempli", unlocked: false },
+];
+
+const PC_DOCS: DocEntry[] = [
+    { code: "PC1", labelEn: "PC1 - Site plan", labelFr: "PC1 - Plan de situation", unlocked: true },
+    { code: "PC2", labelEn: "PC2 - Site layout plan", labelFr: "PC2 - Plan de masse", unlocked: false },
+    { code: "PC3", labelEn: "PC3 - Cross-section plan", labelFr: "PC3 - Plan de coupe", unlocked: false },
+    { code: "PC4", labelEn: "PC4 - Descriptive notice", labelFr: "PC4 - Notice descriptive", unlocked: false },
+    { code: "PC5", labelEn: "PC5 - Facades and roofs plan", labelFr: "PC5 - Plan des façades et toitures", unlocked: false },
+    { code: "PC6", labelEn: "PC6 - 3D landscape insertion", labelFr: "PC6 - Insertion paysagère 3D", unlocked: false },
+    { code: "PC7", labelEn: "PC7 - Photography of the immediate environment", labelFr: "PC7 - Photographie de l'environnement proche", unlocked: false, photoType: "near" },
+    { code: "PC8", labelEn: "PC8 - Far Environment Photography", labelFr: "PC8 - Photographie de l'environnement lointain", unlocked: false, photoType: "far" },
+    { code: "PCMI", labelEn: "PCMI - Materials notice", labelFr: "PCMI - Notice matériaux", unlocked: false },
     { code: "CERFA", labelEn: "Pre-filled CERFA form", labelFr: "Formulaire CERFA pré-rempli", unlocked: false },
 ];
 
@@ -90,6 +108,7 @@ export default function ProjectDescriptionPage({
 
     const [step, setStep] = useState<WizardStep>(0);
     const [saving, setSaving] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(false);
     const [authorizationType, setAuthorizationType] = useState<string>("PC");
 
     // Step 1 — Environment
@@ -98,6 +117,19 @@ export default function ProjectDescriptionPage({
     const [farPhoto, setFarPhoto] = useState<File | null>(null);
     const [terrainInitial, setTerrainInitial] = useState("");
     const [accessVerts, setAccessVerts] = useState("");
+
+    // Photo upload state
+    const [nearPhotoPreview, setNearPhotoPreview] = useState<string | null>(null);
+    const [farPhotoPreview, setFarPhotoPreview] = useState<string | null>(null);
+    const [nearPhotoUploaded, setNearPhotoUploaded] = useState(false);
+    const [farPhotoUploaded, setFarPhotoUploaded] = useState(false);
+    const [uploadingNear, setUploadingNear] = useState(false);
+    const [uploadingFar, setUploadingFar] = useState(false);
+
+    // AI photo analysis state
+    const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
+    const [photoAnalysis, setPhotoAnalysis] = useState<Record<string, string> | null>(null);
+    const [analysisError, setAnalysisError] = useState<string | null>(null);
 
     // Address editing
     const [editingAddress, setEditingAddress] = useState(false);
@@ -189,6 +221,7 @@ export default function ProjectDescriptionPage({
     const [projectProtectedAreas, setProjectProtectedAreas] = useState<{ type: string; name: string }[]>([]);
 
     useEffect(() => {
+        setInitialLoading(true);
         fetch(`/api/projects/${projectId}`)
             .then((r) => r.json())
             .then((d) => {
@@ -201,70 +234,132 @@ export default function ProjectDescriptionPage({
 
                 // ── Pre-populate jobs from authorization data ──────────────
                 const desc = d.project?.projectDescription;
+                console.log("Project description data from DB:", desc);
                 if (desc) {
-                    // If jobs were previously saved by this page, restore them
+                    // Priority 1: If jobs were previously saved by this page, restore them
                     if (Array.isArray(desc.jobs) && desc.jobs.length > 0) {
+                        console.log("Restoring saved jobs:", desc.jobs);
                         setJobs(desc.jobs);
-                    } else if (Array.isArray(desc.categories) && desc.categories.length > 0) {
-                        // Convert authorization data into Job objects
-                        const preJobs: Job[] = [];
+                    }
+                    // Priority 2: If individual workItems were saved from authorization page
+                    else if (Array.isArray(desc.workItems) && desc.workItems.length > 0) {
+                        console.log("Converting authorization workItems to jobs:", desc.workItems);
+                        const preJobs: Job[] = desc.workItems.map((w: {
+                            id: string; label: string; projectType: string;
+                            floorAreaCreated: number; footprintCreated: number;
+                            existingFloorArea?: number; shelterHeight?: number;
+                            changeOfUse?: boolean; facadeModification?: boolean;
+                        }) => {
+                            const nature: NatureType = w.projectType === "new_construction" ? "new_construction"
+                                : w.projectType === "existing_extension" ? "existing_extension"
+                                    : "outdoor";
 
-                        if (desc.categories.includes("new_construction") && desc.constructionFootprint > 0) {
+                            const job: Job = {
+                                id: w.id || `auth-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                                nature,
+                                levels: 1 as LevelCount,
+                                footprint: Number(w.footprintCreated) || 0,
+                                floorAreaEstimated: Number(w.floorAreaCreated) || 0,
+                                displayLabel: w.label,
+                            };
+
+                            // Extension-specific fields
+                            if (nature === "existing_extension") {
+                                job.currentLivingArea = Number(w.existingFloorArea) || undefined;
+                                const workTypes: WorkType[] = [];
+                                if (w.changeOfUse) workTypes.push("change_destination");
+                                if (w.facadeModification) workTypes.push("change_exterior");
+                                if (workTypes.length === 0) workTypes.push("extension");
+                                job.workTypes = workTypes;
+                            }
+
+                            // Outdoor-specific fields
+                            if (nature === "outdoor") {
+                                const lowerLabel = (w.label || "").toLowerCase();
+                                if (lowerLabel.includes("pool") || lowerLabel.includes("piscine")) {
+                                    job.outdoorLayout = "pool";
+                                    job.poolSurfaceArea = Number(w.footprintCreated) || 0;
+                                } else if (lowerLabel.includes("fence") || lowerLabel.includes("clôture") || lowerLabel.includes("gate") || lowerLabel.includes("portail")) {
+                                    job.outdoorLayout = "fence_gate";
+                                } else {
+                                    job.outdoorLayout = "other";
+                                }
+                            }
+
+                            return job;
+                        });
+
+                        console.log("Pre-populated jobs from workItems:", preJobs);
+                        setJobs(preJobs);
+                    }
+                    // Priority 3: Fall back to inferring from summary fields
+                    else {
+                        const cats: string[] = Array.isArray(desc.categories) ? desc.categories : [];
+                        const hasConstruction = cats.includes("new_construction") || Number(desc.constructionFootprint) > 0;
+                        const hasExtension = cats.includes("existing_extension") || Number(desc.extensionFootprint) > 0 || (Array.isArray(desc.extensionSubTypes) && desc.extensionSubTypes.length > 0);
+                        const hasOutdoor = cats.includes("outdoor") || (Array.isArray(desc.outdoorTags) && desc.outdoorTags.length > 0);
+
+                        const preJobs: Job[] = [];
+                        const ts = Date.now();
+
+                        if (hasConstruction) {
+                            const fp = Number(desc.constructionFootprint) || 0;
+                            const levels = (desc.constructionLevels === 2 ? 2 : desc.constructionLevels === 3 ? 3 : 1) as LevelCount;
                             preJobs.push({
-                                id: `auth-construction-${Date.now()}`,
+                                id: `auth-construction-${ts}`,
                                 nature: "new_construction",
-                                levels: (desc.constructionLevels === 2 ? 2 : desc.constructionLevels === 3 ? 3 : 1) as LevelCount,
-                                footprint: desc.constructionFootprint,
-                                floorAreaEstimated: desc.constructionFloorArea || estimateFloorAreaCreated(desc.constructionFootprint, desc.constructionLevels || 1),
+                                levels,
+                                footprint: fp,
+                                floorAreaEstimated: Number(desc.constructionFloorArea) || estimateFloorAreaCreated(fp, levels),
                                 displayLabel: isEn ? "Independent Construction 1" : "Construction Indépendante 1",
                             });
                         }
 
-                        if (desc.categories.includes("existing_extension") && desc.extensionFootprint > 0) {
+                        if (hasExtension) {
+                            const fp = Number(desc.extensionFootprint) || 0;
+                            const levels = (desc.extensionLevels === 2 ? 2 : desc.extensionLevels === 3 ? 3 : 1) as LevelCount;
                             preJobs.push({
-                                id: `auth-extension-${Date.now()}`,
+                                id: `auth-extension-${ts + 1}`,
                                 nature: "existing_extension",
-                                levels: (desc.extensionLevels === 2 ? 2 : desc.extensionLevels === 3 ? 3 : 1) as LevelCount,
-                                footprint: desc.extensionFootprint,
-                                floorAreaEstimated: desc.extensionFloorArea || estimateFloorAreaCreated(desc.extensionFootprint, desc.extensionLevels || 1),
-                                currentLivingArea: desc.existingFloorArea || undefined,
+                                levels,
+                                footprint: fp,
+                                floorAreaEstimated: Number(desc.extensionFloorArea) || estimateFloorAreaCreated(fp, levels),
+                                currentLivingArea: Number(desc.existingFloorArea) || undefined,
+                                workTypes: Array.isArray(desc.extensionSubTypes) ? desc.extensionSubTypes as WorkType[] : undefined,
                                 displayLabel: isEn ? "Work on existing" : "Travaux sur existant",
                             });
                         }
 
-                        if (desc.categories.includes("outdoor") && Array.isArray(desc.outdoorTags)) {
-                            if (desc.outdoorTags.includes("swimming_pool") && desc.outdoorSurface > 0) {
+                        if (hasOutdoor) {
+                            const tags: string[] = Array.isArray(desc.outdoorTags) ? desc.outdoorTags : [];
+                            if (tags.includes("swimming_pool")) {
                                 preJobs.push({
-                                    id: `auth-pool-${Date.now()}`,
-                                    nature: "outdoor",
-                                    levels: 1,
-                                    footprint: desc.outdoorSurface,
-                                    floorAreaEstimated: 0,
-                                    outdoorLayout: "pool",
-                                    poolSurfaceArea: desc.outdoorSurface,
+                                    id: `auth-pool-${ts + 2}`,
+                                    nature: "outdoor", levels: 1, footprint: Number(desc.outdoorSurface) || 0,
+                                    floorAreaEstimated: 0, outdoorLayout: "pool",
+                                    poolSurfaceArea: Number(desc.outdoorSurface) || 0,
                                     displayLabel: isEn ? "Pool" : "Piscine",
                                 });
                             }
-                            if (desc.outdoorTags.includes("fence_gate")) {
+                            if (tags.includes("fence_gate")) {
                                 preJobs.push({
-                                    id: `auth-fence-${Date.now()}`,
-                                    nature: "outdoor",
-                                    levels: 1,
-                                    footprint: 0,
-                                    floorAreaEstimated: 0,
-                                    outdoorLayout: "fence_gate",
+                                    id: `auth-fence-${ts + 3}`,
+                                    nature: "outdoor", levels: 1, footprint: 0,
+                                    floorAreaEstimated: 0, outdoorLayout: "fence_gate",
                                     displayLabel: isEn ? "Fence / Gate" : "Clôture / Portail",
                                 });
                             }
                         }
 
                         if (preJobs.length > 0) {
+                            console.log("Pre-populated jobs from summary fields:", preJobs);
                             setJobs(preJobs);
                         }
                     }
                 }
             })
-            .catch(() => { });
+            .catch(() => { })
+            .finally(() => setInitialLoading(false));
     }, [projectId]);
 
     // ─── Estimated floor area for add-job form ──────────────────────────────
@@ -284,7 +379,7 @@ export default function ProjectDescriptionPage({
             .finally(() => setLoadingAddressSearch(false));
     }, [addressQuery]);
 
-    useEffect(() => { const timer = setTimeout(searchAddress, 400); return () => clearTimeout(timer); }, [addressQuery, searchAddress]);
+    useEffect(() => { const timer = setTimeout(searchAddress, 300); return () => clearTimeout(timer); }, [addressQuery, searchAddress]);
 
     const selectAddress = useCallback((addr: { label: string; city: string; postcode: string; coordinates?: number[] }) => {
         setProjectAddress(addr.label);
@@ -303,7 +398,100 @@ export default function ProjectDescriptionPage({
         }).catch(() => { /* silent */ });
     }, [projectId]);
 
-    // ─── Overall DPC calculation from jobs ──────────────────────────────────
+    // ─── Photo upload handler ──────────────────────────────────────────
+    const uploadPhoto = useCallback(async (file: File, type: "near_photo" | "far_photo") => {
+        const isNear = type === "near_photo";
+        if (isNear) { setUploadingNear(true); } else { setUploadingFar(true); }
+
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("type", type);
+
+            const res = await fetch(`/api/projects/${projectId}/upload`, {
+                method: "POST",
+                body: formData,
+            });
+
+            // Create preview URL regardless of upload result
+            const previewUrl = URL.createObjectURL(file);
+            if (isNear) {
+                setNearPhoto(file);
+                setNearPhotoPreview(previewUrl);
+                setNearPhotoUploaded(true);
+            } else {
+                setFarPhoto(file);
+                setFarPhotoPreview(previewUrl);
+                setFarPhotoUploaded(true);
+            }
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({ error: "Unknown error" }));
+                console.warn("Photo upload to server failed:", res.status, errData.error || errData);
+                // Photo still works locally — AI analysis will try server copy first, then fall back
+            }
+        } catch (err) {
+            // Even on network error, still show the photo locally
+            const previewUrl = URL.createObjectURL(file);
+            if (isNear) {
+                setNearPhoto(file);
+                setNearPhotoPreview(previewUrl);
+                setNearPhotoUploaded(true);
+            } else {
+                setFarPhoto(file);
+                setFarPhotoPreview(previewUrl);
+                setFarPhotoUploaded(true);
+            }
+            console.warn("Photo upload network error:", err);
+        } finally {
+            if (isNear) { setUploadingNear(false); } else { setUploadingFar(false); }
+        }
+    }, [projectId]);
+
+    // ─── AI photo analysis handler ─────────────────────────────────────
+    const analyzePhotosWithAI = useCallback(async () => {
+        setAnalyzingPhotos(true);
+        setAnalysisError(null);
+
+        try {
+            // Send photos directly via FormData
+            const formData = new FormData();
+            if (nearPhoto) formData.append("near_photo", nearPhoto);
+            if (farPhoto) formData.append("far_photo", farPhoto);
+
+            const res = await fetch(`/api/projects/${projectId}/analyze-photos`, {
+                method: "POST",
+                body: formData,
+            });
+
+            const data = await res.json();
+
+            if (res.ok && data.analysis) {
+                console.log("AI Photo Analysis result:", data.analysis);
+                setPhotoAnalysis(data.analysis);
+                // Auto-fill terrain description — try multiple fallback fields
+                const autoText = data.analysis.fullDescriptionFr
+                    || data.analysis.terrainDescriptionFr
+                    || data.analysis.terrainDescription
+                    || data.analysis.existingConditionsFr
+                    || "";
+                if (autoText) {
+                    setTerrainInitial(autoText);
+                }
+            } else {
+                setAnalysisError(data.error || "Analysis failed");
+            }
+        } catch {
+            setAnalysisError("Network error — please try again.");
+        } finally {
+            setAnalyzingPhotos(false);
+        }
+    }, [projectId, nearPhoto, farPhoto]);
+
+    // ─── Dynamic document list based on authorization type ─────────────
+    const activeDocs = useMemo(() => {
+        return authorizationType === "DP" ? DP_DOCS : PC_DOCS;
+    }, [authorizationType]);
     const dpcResult = useMemo(() => {
         if (jobs.length === 0) return null;
         const severity: Record<string, number> = { NONE: 0, DP: 1, PC: 2, ARCHITECT_REQUIRED: 3, REVIEW: 1 };
@@ -748,13 +936,19 @@ export default function ProjectDescriptionPage({
                                                 ) : (
                                                     <div className="relative">
                                                         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                                        <input
-                                                            type="text"
-                                                            value={projectAddress}
-                                                            readOnly
-                                                            className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm cursor-default"
-                                                            placeholder={isEn ? "No address set" : "Aucune adresse définie"}
-                                                        />
+                                                        {initialLoading ? (
+                                                            <div className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-400 text-sm animate-pulse">
+                                                                {isEn ? "Loading address..." : "Chargement de l'adresse..."}
+                                                            </div>
+                                                        ) : (
+                                                            <input
+                                                                type="text"
+                                                                value={projectAddress}
+                                                                readOnly
+                                                                className="w-full pl-9 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm cursor-default"
+                                                                placeholder={isEn ? "No address set" : "Aucune adresse définie"}
+                                                            />
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -776,41 +970,201 @@ export default function ProjectDescriptionPage({
 
                                             {/* Photo upload areas */}
                                             <div className="grid grid-cols-2 gap-4">
+                                                {/* Near photo */}
                                                 <div className="space-y-2">
                                                     <label className="text-sm font-semibold text-slate-800">
                                                         {isEn ? "Photo of the immediate surroundings" : "Photo des abords immédiats"} <span className="text-red-500">*</span>
                                                     </label>
-                                                    <label className="flex flex-col items-center justify-center gap-2 py-8 px-4 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/50 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all">
-                                                        <Upload className="w-6 h-6 text-slate-400" />
-                                                        <span className="text-sm font-medium text-slate-600">
-                                                            {nearPhoto ? nearPhoto.name : (isEn ? "Drag or click to add" : "Glisser ou cliquer pour ajouter")}
-                                                        </span>
-                                                        <span className="text-[11px] text-slate-400 text-center italic">
-                                                            {isEn
-                                                                ? "Take a close-up photo, focusing on the exact area where the work will take place."
-                                                                : "Prenez une photo rapprochée, en vous concentrant sur la zone exacte des travaux."}
-                                                        </span>
-                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => setNearPhoto(e.target.files?.[0] || null)} />
+                                                    <label className={cn(
+                                                        "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed cursor-pointer transition-all overflow-hidden",
+                                                        nearPhotoUploaded
+                                                            ? "border-emerald-400 bg-emerald-50/30"
+                                                            : "border-slate-300 bg-slate-50/50 hover:border-indigo-300 hover:bg-indigo-50/30",
+                                                        nearPhotoPreview ? "p-1" : "py-8 px-4"
+                                                    )}>
+                                                        {uploadingNear ? (
+                                                            <div className="py-8 flex flex-col items-center gap-2">
+                                                                <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                                                                <span className="text-xs text-indigo-600 font-medium">{isEn ? "Uploading..." : "Envoi en cours..."}</span>
+                                                            </div>
+                                                        ) : nearPhotoPreview ? (
+                                                            <div className="relative w-full">
+                                                                <img src={nearPhotoPreview} alt="Near environment" className="w-full h-32 object-cover rounded-lg" />
+                                                                <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                                                                    <Check className="w-3 h-3 text-white" />
+                                                                </div>
+                                                                <p className="text-[10px] text-slate-500 mt-1 px-1 truncate">{nearPhoto?.name}</p>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <Upload className="w-6 h-6 text-slate-400" />
+                                                                <span className="text-sm font-medium text-slate-600">
+                                                                    {isEn ? "Drag or click to add" : "Glisser ou cliquer pour ajouter"}
+                                                                </span>
+                                                                <span className="text-[11px] text-slate-400 text-center italic">
+                                                                    {isEn
+                                                                        ? "Take a close-up photo, focusing on the exact area where the work will take place."
+                                                                        : "Prenez une photo rapprochée, en vous concentrant sur la zone exacte des travaux."}
+                                                                </span>
+                                                            </>
+                                                        )}
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                                            const f = e.target.files?.[0];
+                                                            if (f) uploadPhoto(f, "near_photo");
+                                                        }} />
                                                     </label>
                                                 </div>
+                                                {/* Far photo */}
                                                 <div className="space-y-2">
                                                     <label className="text-sm font-semibold text-slate-800">
                                                         {isEn ? "Photo of the distant environment" : "Photo de l'environnement lointain"} <span className="text-red-500">*</span>
                                                     </label>
-                                                    <label className="flex flex-col items-center justify-center gap-2 py-8 px-4 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/50 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all">
-                                                        <Upload className="w-6 h-6 text-slate-400" />
-                                                        <span className="text-sm font-medium text-slate-600">
-                                                            {farPhoto ? farPhoto.name : (isEn ? "Drag or click to add" : "Glisser ou cliquer pour ajouter")}
-                                                        </span>
-                                                        <span className="text-[11px] text-slate-400 text-center italic">
-                                                            {isEn
-                                                                ? "Preferably from a public space (street). The context must be visible: neighboring houses, street, general atmosphere."
-                                                                : "De préférence depuis un espace public (rue). Le contexte doit être visible : maisons voisines, rue, ambiance générale."}
-                                                        </span>
-                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => setFarPhoto(e.target.files?.[0] || null)} />
+                                                    <label className={cn(
+                                                        "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed cursor-pointer transition-all overflow-hidden",
+                                                        farPhotoUploaded
+                                                            ? "border-emerald-400 bg-emerald-50/30"
+                                                            : "border-slate-300 bg-slate-50/50 hover:border-indigo-300 hover:bg-indigo-50/30",
+                                                        farPhotoPreview ? "p-1" : "py-8 px-4"
+                                                    )}>
+                                                        {uploadingFar ? (
+                                                            <div className="py-8 flex flex-col items-center gap-2">
+                                                                <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+                                                                <span className="text-xs text-indigo-600 font-medium">{isEn ? "Uploading..." : "Envoi en cours..."}</span>
+                                                            </div>
+                                                        ) : farPhotoPreview ? (
+                                                            <div className="relative w-full">
+                                                                <img src={farPhotoPreview} alt="Far environment" className="w-full h-32 object-cover rounded-lg" />
+                                                                <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                                                                    <Check className="w-3 h-3 text-white" />
+                                                                </div>
+                                                                <p className="text-[10px] text-slate-500 mt-1 px-1 truncate">{farPhoto?.name}</p>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <Upload className="w-6 h-6 text-slate-400" />
+                                                                <span className="text-sm font-medium text-slate-600">
+                                                                    {isEn ? "Drag or click to add" : "Glisser ou cliquer pour ajouter"}
+                                                                </span>
+                                                                <span className="text-[11px] text-slate-400 text-center italic">
+                                                                    {isEn
+                                                                        ? "Preferably from a public space (street). The context must be visible: neighboring houses, street, general atmosphere."
+                                                                        : "De préférence depuis un espace public (rue). Le contexte doit être visible : maisons voisines, rue, ambiance générale."}
+                                                                </span>
+                                                            </>
+                                                        )}
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                                            const f = e.target.files?.[0];
+                                                            if (f) uploadPhoto(f, "far_photo");
+                                                        }} />
                                                     </label>
                                                 </div>
                                             </div>
+
+                                            {/* AI Analysis button — appears after at least one photo uploaded */}
+                                            {(nearPhotoUploaded || farPhotoUploaded) && (
+                                                <div className="space-y-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={analyzePhotosWithAI}
+                                                        disabled={analyzingPhotos}
+                                                        className={cn(
+                                                            "w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all",
+                                                            analyzingPhotos
+                                                                ? "bg-violet-100 text-violet-400 cursor-wait"
+                                                                : "bg-gradient-to-r from-violet-500 to-purple-600 text-white hover:shadow-lg hover:shadow-purple-500/20"
+                                                        )}
+                                                    >
+                                                        {analyzingPhotos ? (
+                                                            <>
+                                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                                {isEn ? "Analyzing with AI..." : "Analyse IA en cours..."}
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Sparkles className="w-4 h-4" />
+                                                                {isEn ? "✨ Analyze photos with AI" : "✨ Analyser les photos avec l'IA"}
+                                                            </>
+                                                        )}
+                                                    </button>
+
+                                                    {analysisError && (
+                                                        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
+                                                            {analysisError}
+                                                        </div>
+                                                    )}
+
+                                                    {photoAnalysis && (
+                                                        <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 p-4 space-y-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <Check className="w-4 h-4 text-emerald-600" />
+                                                                <p className="text-sm font-bold text-emerald-800">
+                                                                    {isEn ? "AI Analysis Complete" : "Analyse IA terminée"}
+                                                                </p>
+                                                            </div>
+                                                            <div className="space-y-2 text-xs text-emerald-700">
+                                                                {(photoAnalysis.terrainDescriptionFr || photoAnalysis.terrainDescription) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🏗 {isEn ? "Terrain:" : "Terrain :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.terrainDescription || photoAnalysis.terrainDescriptionFr) : (photoAnalysis.terrainDescriptionFr || photoAnalysis.terrainDescription)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.existingConditionsFr || photoAnalysis.existingConditions) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🏠 {isEn ? "Existing conditions:" : "État existant :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.existingConditions || photoAnalysis.existingConditionsFr) : (photoAnalysis.existingConditionsFr || photoAnalysis.existingConditions)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.vegetationFr || photoAnalysis.vegetation) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🌿 {isEn ? "Vegetation:" : "Végétation :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.vegetation || photoAnalysis.vegetationFr) : (photoAnalysis.vegetationFr || photoAnalysis.vegetation)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.surroundingsFr || photoAnalysis.surroundings) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🏘 {isEn ? "Surroundings:" : "Environnement :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.surroundings || photoAnalysis.surroundingsFr) : (photoAnalysis.surroundingsFr || photoAnalysis.surroundings)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.atmosphereFr || photoAnalysis.atmosphere) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🌤 {isEn ? "Atmosphere:" : "Ambiance :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.atmosphere || photoAnalysis.atmosphereFr) : (photoAnalysis.atmosphereFr || photoAnalysis.atmosphere)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.accessibilityFr || photoAnalysis.accessibility) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">🚗 {isEn ? "Access:" : "Accès :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.accessibility || photoAnalysis.accessibilityFr) : (photoAnalysis.accessibilityFr || photoAnalysis.accessibility)}</p>
+                                                                    </div>
+                                                                )}
+                                                                {(photoAnalysis.notableFeaturesFr || photoAnalysis.notableFeatures) && (
+                                                                    <div>
+                                                                        <span className="font-semibold">📌 {isEn ? "Notable features:" : "Éléments notables :"}</span>
+                                                                        <p className="mt-0.5">{isEn ? (photoAnalysis.notableFeatures || photoAnalysis.notableFeaturesFr) : (photoAnalysis.notableFeaturesFr || photoAnalysis.notableFeatures)}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Editable terrain description textarea */}
+                                                    {photoAnalysis && (terrainInitial || photoAnalysis.fullDescriptionFr || photoAnalysis.terrainDescriptionFr) && (
+                                                        <div className="space-y-2">
+                                                            <label className="text-sm font-semibold text-slate-800">
+                                                                {isEn ? "Terrain Description (AI-generated, editable)" : "Description du terrain (générée par IA, modifiable)"}
+                                                            </label>
+                                                            <textarea
+                                                                value={terrainInitial || photoAnalysis.fullDescriptionFr || photoAnalysis.terrainDescriptionFr || ""}
+                                                                onChange={(e) => setTerrainInitial(e.target.value)}
+                                                                rows={5}
+                                                                className="w-full px-4 py-3 rounded-xl bg-white border-2 border-emerald-200 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:border-emerald-400 transition-all resize-y"
+                                                                placeholder={isEn ? "AI-generated terrain description will appear here..." : "La description du terrain générée par l'IA apparaîtra ici..."}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="flex justify-center pt-2">
@@ -2363,7 +2717,7 @@ export default function ProjectDescriptionPage({
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold uppercase">
-                                                    AUTO
+                                                    {authorizationType || "DP"}
                                                 </span>
                                                 <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-colors">
                                                     <Download className="w-3 h-3" />
@@ -2374,10 +2728,13 @@ export default function ProjectDescriptionPage({
 
                                         {/* Document list */}
                                         <div className="divide-y divide-slate-50">
-                                            {ADMIN_DOCS.map((doc) => {
+                                            {activeDocs.map((doc: DocEntry) => {
+                                                const isPhotoReady = doc.photoType === "near" ? nearPhotoUploaded : doc.photoType === "far" ? farPhotoUploaded : false;
                                                 const isReady = doc.unlocked
-                                                    || (doc.code === "PC4 / DPC 8-1" && step >= 5)
-                                                    || (doc.code === "DPC11 / PCMI" && step >= 4)
+                                                    || isPhotoReady
+                                                    || (doc.code.includes("8-1") && step >= 5)
+                                                    || (doc.code === "PC4" && step >= 5)
+                                                    || (doc.code === "PCMI" && step >= 4)
                                                     || (doc.code === "CERFA" && step >= 5)
                                                     || step >= 7;
                                                 return (
