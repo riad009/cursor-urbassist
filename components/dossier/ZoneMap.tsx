@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { ParcelWithGeometry } from "./ZoneMapInner";
 
@@ -34,5 +34,17 @@ export interface ZoneMapProps {
 }
 
 export function ZoneMap(props: ZoneMapProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted) {
+    return (
+      <div className="rounded-xl bg-slate-800/50 border border-white/10 flex items-center justify-center h-[500px] text-slate-500">
+        Loading zone map…
+      </div>
+    );
+  }
+
   return <ZoneMapInner {...props} />;
 }
+

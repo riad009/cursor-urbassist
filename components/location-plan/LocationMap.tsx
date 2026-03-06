@@ -29,5 +29,17 @@ const MapInner = dynamic(
 );
 
 export function LocationMap(props: LocationMapProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-500">
+        <span>Loading map…</span>
+      </div>
+    );
+  }
+
   return <MapInner {...props} />;
 }
+

@@ -6,11 +6,9 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    // Use the pooled DATABASE_URL for normal queries (pgbouncer handles pooling)
     datasourceUrl: process.env.DATABASE_URL,
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
-
-// Eagerly connect on first import to avoid cold-start delay on the first request
-prisma.$connect().catch(() => {});
 

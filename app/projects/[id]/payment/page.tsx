@@ -131,7 +131,7 @@ export default function PaymentPage({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paidAt: new Date().toISOString() }),
-      }).then(() => router.push(`/projects/${projectId}/dashboard`));
+      }).then(() => router.push(`/projects/${projectId}/project-description`));
     }
   }, [success, project, projectId, router]);
 
@@ -160,7 +160,7 @@ export default function PaymentPage({
         return;
       }
       await refreshUser();
-      router.push(`/projects/${projectId}/dashboard`);
+      router.push(`/projects/${projectId}/project-description`);
     } catch {
       setError(isEn ? "An error occurred" : "Une erreur est survenue");
     }
@@ -191,7 +191,7 @@ export default function PaymentPage({
         window.location.href = data.url;
       } else if (data.success) {
         await refreshUser();
-        router.push(`/projects/${projectId}/dashboard`);
+        router.push(`/projects/${projectId}/project-description`);
       }
     } catch {
       setError(isEn ? "An error occurred" : "Une erreur est survenue");
@@ -281,7 +281,7 @@ export default function PaymentPage({
             <h2 className="text-2xl font-bold text-slate-900 mb-2">{t("pay.confirmed")}</h2>
             <p className="text-sm text-slate-500 mb-5">{t("pay.activeMessage")}</p>
             <button
-              onClick={() => router.push(`/projects/${projectId}/dashboard`)}
+              onClick={() => router.push(`/projects/${projectId}/project-description`)}
               className="px-8 py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
             >
               {t("pay.continueDesc")}

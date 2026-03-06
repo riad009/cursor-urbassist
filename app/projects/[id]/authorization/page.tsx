@@ -515,7 +515,7 @@ export default function AuthorizationPage({
           },
         }),
       });
-      router.push(`/projects/${projectId}/documents`);
+      router.push(`/projects/${projectId}/payment`);
     } catch (err) {
       console.error("Save failed:", err);
     }
@@ -537,7 +537,7 @@ export default function AuthorizationPage({
             : (isEn ? "Quick action: Building Permit selected" : "Action rapide : Permis de Construire sélectionné"),
         }),
       });
-      router.push(`/projects/${projectId}/documents`);
+      router.push(`/projects/${projectId}/payment`);
     } catch (err) {
       console.error("Quick action failed:", err);
     }
@@ -2219,7 +2219,7 @@ export default function AuthorizationPage({
                           const data = await res.json();
                           if (!res.ok) { setQuickModalError(data.error || "Payment failed"); return; }
                           if (data.url) window.location.href = data.url;
-                          else if (data.success) router.push(`/projects/${projectId}`);
+                          else if (data.success) router.push(`/projects/${projectId}/project-description`);
                         } catch { setQuickModalError(isEn ? "Payment failed" : "Paiement échoué"); }
                         finally { setQuickModalPaying(false); }
                       }}
