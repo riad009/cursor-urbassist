@@ -272,7 +272,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                                         )}>
                                             {project.authorizationType === "PC"
                                                 ? (isEn ? "Building Permit (PC)" : "Permis de Construire (PC)")
-                                                : (isEn ? "Prior Declaration (DP)" : "Déclaration Préalable (DP)")}
+                                                : (isEn ? "Preliminary Declaration (DP)" : "Déclaration Préalable (DP)")}
                                         </span>
                                     )}
                                     {project.paidAt && (

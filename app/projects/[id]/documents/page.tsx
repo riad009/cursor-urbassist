@@ -114,7 +114,7 @@ export default function DocumentsPage({
 
     const titleText = isPC
         ? (isEn ? "Generate my building permit" : "Générer mon permis de construire")
-        : (isEn ? "Generate my prior declaration" : "Générer ma déclaration préalable");
+        : (isEn ? "Generate my preliminary declaration" : "Générer ma déclaration préalable");
 
     async function handleConfirm() {
         setSaving(true);

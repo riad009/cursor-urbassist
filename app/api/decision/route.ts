@@ -42,7 +42,8 @@ interface DecisionRequest {
   coordinates?: [number, number]; // [lng, lat]
   citycode?: string;
   submitterType?: SubmitterType;
-  changeOfUseOrFacade?: boolean;
+  changeOfUse?: boolean;
+  facadeModification?: boolean;
   shelterHeight?: number;
   isGarage?: boolean;
 }
@@ -215,7 +216,8 @@ export async function POST(request: NextRequest) {
       floorAreaCreated: body.floorAreaCreated,
       footprintCreated: body.footprintCreated,
       existingFloorArea: body.existingFloorArea,
-      changeOfUseOrFacade: body.changeOfUseOrFacade,
+      changeOfUse: body.changeOfUse,
+      facadeModification: body.facadeModification,
       inUrbanZone: pluData.isUrbanZone,
       dpThreshold: pluData.dpThreshold, // API-derived, not hardcoded
       submitterType: body.submitterType,

@@ -98,11 +98,12 @@ function getProjectIcon(type: SimProjectType): React.ReactNode {
 
 function mapToCalculatorType(type: SimProjectType): {
     projectType: ProjectTypeChoice;
-    changeOfUseOrFacade?: boolean;
+    changeOfUse?: boolean;
+    facadeModification?: boolean;
 } {
     switch (type) {
         case "change_of_use":
-            return { projectType: "existing_extension", changeOfUseOrFacade: true };
+            return { projectType: "existing_extension", changeOfUse: true };
         case "extension":
             return { projectType: "existing_extension" };
         case "new_construction":
@@ -266,7 +267,8 @@ export default function SimulatorPage() {
                 floorAreaCreated: project.floorArea,
                 footprintCreated: project.footprint > 0 ? project.footprint : undefined,
                 existingFloorArea: isExtensionType ? existingFloorArea : undefined,
-                changeOfUseOrFacade: mapping.changeOfUseOrFacade,
+                changeOfUse: mapping.changeOfUse,
+                facadeModification: mapping.facadeModification,
                 inUrbanZone: isUrbanZone,
             };
 

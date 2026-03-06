@@ -1132,7 +1132,7 @@ export default function ProjectDescriptionPage({
                                                         dpcResult.determination === "DP" ? "text-blue-700" : "text-amber-700"
                                                     )}>
                                                         {dpcResult.determination === "DP"
-                                                            ? (isEn ? "Prior Declaration (DP) required" : "Déclaration Préalable (DP) requise")
+                                                            ? (isEn ? "Preliminary Declaration (DP) required" : "Déclaration Préalable (DP) requise")
                                                             : (isEn ? "Building Permit (PC) required" : "Permis de Construire (PC) requis")}
                                                     </p>
                                                     <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{dpcResult.explanation}</p>

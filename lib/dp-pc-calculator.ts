@@ -197,6 +197,18 @@ function calculateNewConstruction(input: DpPcInput): DpPcResult {
 }
 
 // ─── Existing Building Extension Rules ──────────────────────────────────────
+// Based on Articles R421-14 (PC) and R421-17 (DP) of the Code de l'urbanisme.
+//
+// Official French law summary:
+//  1. Change of destination + facade/structure modification → PC (Art. R421-14 c)
+//  2. Change of destination alone (no facade/structure) → DP (Art. R421-17 b)
+//  3. Modification of exterior appearance alone → DP (Art. R421-17 a)
+//  4. Extension / Raising the Height → area-based thresholds:
+//     - < 5 m² → NONE
+//     - 5–20 m² → DP
+//     - 20–40 m² in urban zone (PLU U) → DP (unless total > 150 m²)
+//     - > 40 m² (or > 20 m² outside urban zone) → PC
+//     - Total floor area after work > 150 m² → ARCHITECT_REQUIRED
 
 function calculateExistingExtension(input: DpPcInput): DpPcResult {
   const {
@@ -210,17 +222,19 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
   } = input;
 
   const footprint = footprintCreated ?? floorArea;
-  // Use the stricter (larger) of footprint and floor area for DP/PC threshold
+  // Use the stricter (larger) of footprint and floor area for threshold comparison
   const stricterArea = Math.max(footprint, floorArea);
   // 150 m² architect threshold uses ONLY total floor area (not footprint)
   const totalFloorAfterWork = existingFloorArea + floorArea;
+  // DP threshold: 40 m² in urban zone (PLU), 20 m² outside
+  const dpThreshold = input.dpThreshold ?? (inUrbanZone ? 40 : 20);
 
-  // Change of use AND facade modification → PC regardless
+  // ── Rule 1: Change of destination + facade/structure modification → PC (Art. R421-14 c)
   if (changeOfUse && facadeModification) {
     const result: DpPcResult = {
       determination: "PC",
       explanation:
-        "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur (ou structure porteuse) de la construction est soumis au permis de construire (Art. R421-14).",
+        "Un projet comportant à la fois un changement de destination et la modification de la façade ou de la structure porteuse est soumis au permis de construire (Art. R421-14 c).",
       detail: "changeOfUse_AND_facade",
     };
     if (totalFloorAfterWork > 150) {
@@ -235,47 +249,63 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     return applyCompanyArchitect(result, submitterType);
   }
 
-  // If changeOfUse OR facadeModification (but not both), it's at least DP (or PC if area thresholds crossed)
-  // E.g., Article R421-17 -> DP
-  const isolatedModification = changeOfUse || facadeModification;
-
-  // ── Threshold depends on zone type ──
-  // When dpThreshold is provided by the API (GPU/PLU detection), use it directly.
-  // Otherwise fall back to: Urban zone (PLU/PLUi U-zones) = 40 m², Non-urban = 20 m².
-  const dpThreshold = input.dpThreshold ?? (inUrbanZone ? 40 : 20);
-
-  // ── Extension ≤ threshold → DP (check 150 m² for architect) ──
-  if (stricterArea <= dpThreshold) {
-    // Extensions < 20 m² (both footprint AND floor area) are ALWAYS DP
-    // regardless of total floor area — the 150 m² architect rule does not override this.
-    // For non-urban zones where dpThreshold = 20, extensions exactly at 20 m² are also DP.
-    const alwaysDp = stricterArea < 20 || (dpThreshold === 20 && stricterArea <= 20);
-
-    if (alwaysDp || totalFloorAfterWork <= 150) {
-      return {
-        determination: "DP",
-        explanation: inUrbanZone
-          ? `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) en zone urbaine. Surface totale après travaux : ${totalFloorAfterWork} m² (≤ 150 m²). Une déclaration préalable suffit.`
-          : `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²) hors zone urbaine. Une déclaration préalable suffit.` + (isolatedModification ? " Les modifications de façade ou changement de destination simples relèvent également de la déclaration préalable." : ""),
-        detail: `ext<=${dpThreshold}`,
-      };
-    }
-    // Total floor area > 150 AND extension ≥ 20 m² → PC + architect required
+  // ── Rule 2: Change of destination alone (no facade changes) → DP (Art. R421-17 b)
+  if (changeOfUse && !facadeModification) {
     return {
-      determination: "ARCHITECT_REQUIRED",
-      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²), mais la surface de plancher totale après travaux est de ${totalFloorAfterWork} m² (> 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
-      detail: "ext_total>150_architect",
-      architectRequired: true,
-      cannotOffer: true,
+      determination: "DP",
+      explanation:
+        "Un changement de destination sans modification de la façade ni de la structure porteuse est soumis à une déclaration préalable (Art. R421-17 b).",
+      detail: "changeOfUse_alone_dp",
     };
   }
 
-  // ── Extension > threshold → PC (check 150 m² for architect) ──
+  // ── Rule 3: Modification of exterior appearance alone → DP (Art. R421-17 a)
+  if (facadeModification && !changeOfUse) {
+    return {
+      determination: "DP",
+      explanation:
+        "Les travaux modifiant l'aspect extérieur d'un bâtiment existant sont soumis à une déclaration préalable (Art. R421-17 a).",
+      detail: "facade_alone_dp",
+    };
+  }
+
+  // ── Rule 4: Extension / Raising the Height → area-based thresholds
+
+  // 4a. < 5 m² → No authorization required
+  if (stricterArea < 5) {
+    return {
+      determination: "NONE",
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher : ${floorArea} m² (les deux < 5 m²). Aucune autorisation n'est requise pour cette extension.`,
+      detail: "extension<5",
+    };
+  }
+
+  // 4b. ≤ dpThreshold (20 or 40 m²) → DP
+  //     But check if total after work > 150 m² → then PC + architect
+  if (stricterArea <= dpThreshold) {
+    if (totalFloorAfterWork > 150) {
+      return {
+        determination: "ARCHITECT_REQUIRED",
+        explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²). Cependant, la surface totale après travaux (${totalFloorAfterWork} m²) dépasse 150 m². Un permis de construire est nécessaire et le recours à un architecte est obligatoire.`,
+        detail: "extension_dp_but_architect",
+        architectRequired: true,
+        cannotOffer: true,
+      };
+    }
+    return {
+      determination: "DP",
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (≤ ${dpThreshold} m²)${inUrbanZone ? " en zone urbaine" : ""}. Surface totale après travaux : ${totalFloorAfterWork} m². Une déclaration préalable suffit.`,
+      detail: "extension_dp",
+    };
+  }
+
+  // 4c. > dpThreshold → PC
+  //     Check for architect (total > 150 m²)
   if (totalFloorAfterWork > 150) {
     return {
       determination: "ARCHITECT_REQUIRED",
-      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (> ${dpThreshold} m²)${existingFloorArea ? `, surface existante : ${existingFloorArea} m²` : ""}. Surface totale après travaux : ${totalFloorAfterWork} m² (> 150 m²). Un permis de construire avec architecte obligatoire est nécessaire.`,
-      detail: "ext_architect",
+      explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (supérieure à ${dpThreshold} m²). Un permis de construire est nécessaire. De plus, la surface totale après travaux (${totalFloorAfterWork} m²) dépasse 150 m², le recours à un architecte est obligatoire.`,
+      detail: "extension>threshold_architect",
       architectRequired: true,
       cannotOffer: true,
     };
@@ -283,8 +313,8 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
 
   const result: DpPcResult = {
     determination: "PC",
-    explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (> ${dpThreshold} m²)${existingFloorArea ? `, surface existante : ${existingFloorArea} m²` : ""}. Surface totale après travaux : ${totalFloorAfterWork} m² (≤ 150 m²). Un permis de construire est nécessaire.`,
-    detail: `ext>${dpThreshold}`,
+    explanation: `Emprise au sol : ${footprint} m², surface de plancher créée : ${floorArea} m² (supérieure à ${dpThreshold} m²). Un permis de construire est nécessaire.`,
+    detail: "extension>threshold",
   };
   return applyCompanyArchitect(result, submitterType);
 }
@@ -318,53 +348,38 @@ function applyCompanyArchitect(result: DpPcResult, submitterType?: SubmitterType
 
 /**
  * Compute DP vs PC (and architect requirement) from project type and areas.
- * 
- * Rules implemented:
- * 
+ *
+ * Rules implemented per Code de l'urbanisme (Art. R421-14 / R421-17):
+ *
  * Independent constructions (new_construction):
  *   < 5 m²  → NONE (no authorization)
  *   5–20 m² → DP
  *   > 20 m² → PC
  *   Total > 150 m² → ARCHITECT_REQUIRED
- * 
+ *
  * Existing building work (existing_extension):
- *   < 20 m² → DP
- *   20–40 m² urban zone, total ≤ 150 → DP
- *   20–40 m² urban zone, total > 150 → ARCHITECT_REQUIRED
- *   > 40 m² → PC (or ARCHITECT if total > 150)
- *   Facade/use change → PC regardless
- * 
+ *   Change of destination + facade/structure → PC (Art. R421-14 c)
+ *   Change of destination alone → DP (Art. R421-17 b)
+ *   Facade modification alone → DP (Art. R421-17 a)
+ *   Extension:
+ *     < 5 m² → NONE
+ *     5–20 m² → DP
+ *     20–40 m² in urban zone (PLU), total ≤ 150 → DP
+ *     > 40 m² (or > 20 m² non-urban) → PC
+ *     Total > 150 m² → ARCHITECT_REQUIRED
+ *
  * Swimming pools (swimming_pool):
  *   < 10 m²  → NONE
  *   10–100 m² → DP (shelter > 1.80m → PC)
  *   > 100 m² → PC
- * 
+ *
  * Company submitter → ARCHITECT_REQUIRED when PC is determined
  */
 export function calculateDpPc(input: DpPcInput): DpPcResult {
-  const { projectType, changeOfUse, facadeModification } = input;
+  const { projectType } = input;
 
-  // Global override for change of use AND facade modification combined
-  if (changeOfUse && facadeModification && projectType !== "swimming_pool") {
-    const totalAfterWork = (input.existingFloorArea ?? 0) + input.floorAreaCreated;
-    if (totalAfterWork > 150) {
-      return {
-        determination: "ARCHITECT_REQUIRED",
-        explanation:
-          "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur (ou de la structure porteuse) est soumis au permis de construire. De plus, la surface totale dépasse 150 m², le recours à un architecte est obligatoire.",
-        detail: "changeOfUse_AND_facade_architect",
-        architectRequired: true,
-        cannotOffer: true,
-      };
-    }
-    const result: DpPcResult = {
-      determination: "PC",
-      explanation:
-        "Un projet comportant à la fois un changement de destination et la modification de l'aspect extérieur est soumis au permis de construire (Art. R421-14).",
-      detail: "changeOfUse_AND_facade",
-    };
-    return applyCompanyArchitect(result, input.submitterType);
-  }
+  // No global override — each project type handles changeOfUse/facadeModification
+  // internally according to the correct legal articles.
 
   switch (projectType) {
     case "swimming_pool":
@@ -377,10 +392,11 @@ export function calculateDpPc(input: DpPcInput): DpPcResult {
       return calculateExistingExtension(input);
 
     case "facade_change":
+      // Legacy project type — facade-only changes are DP (Art. R421-17 a)
       return {
-        determination: "PC",
+        determination: "DP",
         explanation:
-          "Une modification de façade ou un changement de destination nécessite un permis de construire.",
+          "Les travaux modifiant l'aspect extérieur d'un bâtiment existant sont soumis à une déclaration préalable (Art. R421-17 a).",
         detail: "facade_change_type",
       };
 

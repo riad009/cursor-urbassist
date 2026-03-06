@@ -79,6 +79,7 @@ interface WorkItem {
   inUrbanZone: boolean;
   changeOfUse?: boolean;
   facadeModification?: boolean;
+  localDeliberation?: boolean;
 }
 
 const CONSTRUCTION_RANGES: AreaRange[] = [
@@ -133,6 +134,7 @@ export default function AuthorizationPage({
   const [constructionFootprint, setConstructionFootprint] = useState<number>(0);
   const [constructionLevels, setConstructionLevels] = useState<number>(1);
   const [constructionRange, setConstructionRange] = useState<AreaRange | null>(null);
+  const [constructionFloorAreaOverride, setConstructionFloorAreaOverride] = useState<number | null | undefined>(undefined);
 
   // ── Travaux sur Existant state ──
   const [extensionSubTypes, setExtensionSubTypes] = useState<Set<ExtensionSubType>>(new Set());
@@ -140,7 +142,7 @@ export default function AuthorizationPage({
   const [extensionFootprint, setExtensionFootprint] = useState<number>(0);
   const [extensionLevels, setExtensionLevels] = useState<number>(1);
   const [extensionRange, setExtensionRange] = useState<AreaRange | null>(null);
-  const [extensionFloorAreaOverride, setExtensionFloorAreaOverride] = useState<number>(0);
+  const [extensionFloorAreaOverride, setExtensionFloorAreaOverride] = useState<number | null | undefined>(undefined);
 
   // ── Aménagement Extérieur state ──
   const [outdoorTags, setOutdoorTags] = useState<Set<OutdoorTag>>(new Set());
@@ -150,6 +152,7 @@ export default function AuthorizationPage({
   // ── Pool shelter (shown when swimming_pool tag is selected) ──
   const [poolShelterHeight, setPoolShelterHeight] = useState<number>(0);
   const [hasPoolShelter, setHasPoolShelter] = useState<boolean | null>(null);
+  const [fenceLocalDeliberation, setFenceLocalDeliberation] = useState(false);
 
   // ── Zone detection (auto from address) ──
   const [isUrbanZone, setIsUrbanZone] = useState(true);
@@ -262,12 +265,13 @@ export default function AuthorizationPage({
 
   const constructionFloorArea = useMemo(() => {
     if (!selectedCategories.has("new_construction") || constructionFootprint <= 0) return 0;
+    if (constructionFloorAreaOverride != null && constructionFloorAreaOverride > 0) return constructionFloorAreaOverride;
     return estimateFloorAreaCreated(constructionFootprint, constructionLevels);
-  }, [selectedCategories, constructionFootprint, constructionLevels]);
+  }, [selectedCategories, constructionFootprint, constructionLevels, constructionFloorAreaOverride]);
 
   const extensionFloorArea = useMemo(() => {
     if (!selectedCategories.has("existing_extension") || extensionFootprint <= 0) return 0;
-    if (extensionFloorAreaOverride > 0) return extensionFloorAreaOverride;
+    if (extensionFloorAreaOverride != null && extensionFloorAreaOverride > 0) return extensionFloorAreaOverride;
     return estimateFloorAreaCreated(extensionFootprint, extensionLevels);
   }, [selectedCategories, extensionFootprint, extensionLevels, extensionFloorAreaOverride]);
 
@@ -999,19 +1003,23 @@ export default function AuthorizationPage({
                             {isEn ? "Floor area (estimated)" : "Surface de plancher (estimée)"}
                             <span className="text-slate-400">🧮</span>
                           </label>
-                          <div className={cn(
-                            "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all",
-                            constructionFloorArea > 0
-                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                              : "bg-slate-50 border-slate-200 text-slate-400"
-                          )}>
-                            {constructionFloorArea > 0 ? constructionFloorArea.toFixed(2) : "—"}
-                          </div>
+                          <input
+                            type="number"
+                            value={constructionFloorAreaOverride === undefined ? (constructionFloorArea > 0 ? parseFloat(constructionFloorArea.toFixed(2)) : "") : (constructionFloorAreaOverride !== null ? constructionFloorAreaOverride : "")}
+                            onChange={(e) => setConstructionFloorAreaOverride(e.target.value === "" ? null : Number(e.target.value))}
+                            className={cn(
+                              "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400",
+                              constructionFloorArea > 0
+                                ? "bg-indigo-50 border-indigo-300 text-indigo-700 focus:border-indigo-400"
+                                : "bg-slate-50 border-slate-200 text-slate-400"
+                            )}
+                            placeholder="—"
+                            min={0}
+                            step={0.01}
+                          />
                           {constructionFootprint > 0 && (
-                            <p className="text-xs text-slate-400 leading-snug">
-                              {isEn
-                                ? `Automatic calculation: (0.90 × Footprint × Levels) - Hoppers. Modifiable.`
-                                : `Calcul automatique : (0,90 × Emprise × Niveaux) - Trémies. Modifiable.`}
+                            <p className="text-[10px] text-slate-400">
+                              = {constructionFootprint} m² × {constructionLevels} {constructionLevels > 1 ? (isEn ? "levels" : "niveaux") : (isEn ? "level" : "niveau")} × 0.9
                             </p>
                           )}
                         </div>
@@ -1123,8 +1131,8 @@ export default function AuthorizationPage({
                           </label>
                           <input
                             type="number"
-                            value={extensionFloorAreaOverride > 0 ? extensionFloorAreaOverride : (extensionFloorArea > 0 ? parseFloat(extensionFloorArea.toFixed(2)) : "")}
-                            onChange={(e) => setExtensionFloorAreaOverride(Number(e.target.value))}
+                            value={extensionFloorAreaOverride === undefined ? (extensionFloorArea > 0 ? parseFloat(extensionFloorArea.toFixed(2)) : "") : (extensionFloorAreaOverride !== null ? extensionFloorAreaOverride : "")}
+                            onChange={(e) => setExtensionFloorAreaOverride(e.target.value === "" ? null : Number(e.target.value))}
                             className={cn(
                               "w-full px-4 py-3 rounded-xl border-2 text-base font-bold transition-all focus:outline-none focus:ring-2 focus:ring-amber-400",
                               extensionFloorArea > 0
@@ -1174,100 +1182,156 @@ export default function AuthorizationPage({
                   {/* ═══ Aménagement Extérieur Section ═══ */}
                   {selectedCategories.has("outdoor") && (
                     <div className="rounded-2xl bg-white border border-emerald-500/20 p-6 space-y-5">
-                      <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-                        <TreePine className="w-5 h-5 text-emerald-600" />
-                        {isEn ? "Outdoor Development" : "Aménagement Extérieur"}
-                      </h3>
 
-                      {/* Tag pills */}
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          { value: "swimming_pool" as OutdoorTag, label: isEn ? "Pool" : "Piscine" },
-                          { value: "fence_gate" as OutdoorTag, label: isEn ? "Fence / Gate" : "Clôture / Portail" },
-                          { value: "raised_terrace" as OutdoorTag, label: isEn ? "Raised terrace" : "Terrasse surélevée" },
-                        ]).map((tag) => (
-                          <button key={tag.value} type="button"
-                            onClick={() => toggleOutdoorTag(tag.value)}
-                            className={cn("px-4 py-2 rounded-xl text-sm font-medium transition-all border",
-                              outdoorTags.has(tag.value)
-                                ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 ring-2 ring-emerald-500/20"
-                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                            )}>
-                            {tag.label}
-                          </button>
-                        ))}
+                      {/* Specify the layout — radio-style like client simulation */}
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 space-y-3">
+                        <p className="text-sm font-semibold text-slate-700">
+                          {isEn ? "Specify the layout:" : "Précisez l'aménagement :"}
+                        </p>
+                        <div className="space-y-2">
+                          {([
+                            { value: "swimming_pool" as OutdoorTag, label: isEn ? "Pool" : "Piscine" },
+                            { value: "fence_gate" as OutdoorTag, label: isEn ? "Fence / Gate" : "Clôture / Portail" },
+                          ]).map((tag) => (
+                            <label key={tag.value} className="flex items-center gap-3 cursor-pointer group">
+                              <span className={cn(
+                                "w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
+                                outdoorTags.has(tag.value)
+                                  ? "border-indigo-500 bg-indigo-500"
+                                  : "border-slate-300 bg-white group-hover:border-slate-400"
+                              )}>
+                                {outdoorTags.has(tag.value) && (
+                                  <span className="w-2 h-2 rounded-full bg-white" />
+                                )}
+                              </span>
+                              <span className={cn(
+                                "text-sm font-medium transition-colors",
+                                outdoorTags.has(tag.value) ? "text-slate-900" : "text-slate-600"
+                              )}>
+                                {tag.label}
+                              </span>
+                              <input
+                                type="radio"
+                                name="outdoor_layout"
+                                className="sr-only"
+                                checked={outdoorTags.has(tag.value)}
+                                onChange={() => toggleOutdoorTag(tag.value)}
+                              />
+                            </label>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Free text for other */}
-                      <input
-                        type="text"
-                        value={outdoorFreeText}
-                        onChange={(e) => setOutdoorFreeText(e.target.value)}
-                        className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
-                        placeholder={isEn ? "Other (Carport, Wooden shed…)" : "Autre (Carport, Abri bois…)"}
-                      />
-
-                      {/* Pool shelter question */}
+                      {/* ── Pool fields ── */}
                       {outdoorTags.has("swimming_pool") && (
-                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 space-y-3">
-                          <p className="text-sm text-slate-600 font-medium">
-                            {isEn ? "Will the pool have a shelter?" : "La piscine aura-t-elle un abri ?"}
-                          </p>
-                          <div className="flex gap-2">
-                            <button type="button"
-                              onClick={() => setHasPoolShelter(true)}
-                              className={cn("px-4 py-2 rounded-xl text-sm font-medium border transition-all",
-                                hasPoolShelter === true
-                                  ? "bg-amber-100 text-amber-700 border-amber-500/40 ring-2 ring-amber-500/20"
-                                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                              )}>
-                              {isEn ? "Yes" : "Oui"}
-                            </button>
-                            <button type="button"
-                              onClick={() => { setHasPoolShelter(false); setPoolShelterHeight(0); }}
-                              className={cn("px-4 py-2 rounded-xl text-sm font-medium border transition-all",
-                                hasPoolShelter === false
-                                  ? "bg-blue-100 text-blue-700 border-blue-300 ring-2 ring-blue-500/20"
-                                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                              )}>
-                              {isEn ? "No" : "Non"}
-                            </button>
+                        <>
+                          {/* Pool surface area */}
+                          <div className="space-y-2">
+                            <label className="text-sm font-semibold text-slate-700">
+                              {isEn ? "Pool surface area (m²)" : "Surface de la piscine (m²)"}
+                            </label>
+                            <input
+                              type="number"
+                              value={outdoorSurface || ""}
+                              onChange={(e) => setOutdoorSurface(Number(e.target.value))}
+                              className="w-full px-4 py-3 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all"
+                              placeholder={isEn ? "e.g. 50" : "ex. 50"}
+                              min={0}
+                            />
                           </div>
-                          {hasPoolShelter && (
-                            <div className="space-y-1">
-                              <label className="text-xs text-slate-400">{isEn ? "Shelter height (m)" : "Hauteur de l'abri (m)"}</label>
+
+                          {/* Is there a pool enclosure? — checkbox style like client demo */}
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 space-y-3">
+                            <label className="flex items-center gap-3 cursor-pointer">
                               <input
-                                type="number"
-                                value={poolShelterHeight || ""}
-                                onChange={(e) => setPoolShelterHeight(Number(e.target.value))}
-                                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm"
-                                placeholder="Ex: 1.80"
-                                step={0.1} min={0}
+                                type="checkbox"
+                                checked={hasPoolShelter === true}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setHasPoolShelter(true);
+                                  } else {
+                                    setHasPoolShelter(false);
+                                    setPoolShelterHeight(0);
+                                  }
+                                }}
+                                className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                               />
-                              <p className="text-[11px] text-slate-500">
-                                {isEn ? "Shelter > 1.80 m → Building Permit required" : "Abri > 1,80 m → Permis de Construire requis"}
-                              </p>
+                              <span className="text-sm font-medium text-slate-700">
+                                {isEn ? "Is there a pool enclosure?" : "Y a-t-il un abri de piscine ?"}
+                              </span>
+                            </label>
+                            {hasPoolShelter && (
+                              <div className="space-y-1 ml-8">
+                                <label className="text-xs text-slate-500 font-medium">
+                                  {isEn ? "Shelter height (m)" : "Hauteur de l'abri (m)"}
+                                </label>
+                                <input
+                                  type="number"
+                                  value={poolShelterHeight || ""}
+                                  onChange={(e) => setPoolShelterHeight(Number(e.target.value))}
+                                  className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm"
+                                  placeholder="0.05"
+                                  step={0.01} min={0}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {/* ── Fence / Gate — local deliberation checkbox ── */}
+                      {outdoorTags.has("fence_gate") && (
+                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 space-y-1">
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={fenceLocalDeliberation}
+                              onChange={(e) => setFenceLocalDeliberation(e.target.checked)}
+                              className="w-5 h-5 mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <div>
+                              <span className="text-sm font-semibold text-slate-800 block">
+                                {isEn ? "Local deliberation?" : "Délibération locale ?"}
+                              </span>
+                              <span className="text-xs text-slate-500 leading-snug block mt-0.5">
+                                {isEn
+                                  ? "Has the municipality introduced the requirement for prior authorization (DP) for fences (or protected areas)?"
+                                  : "La commune a-t-elle instauré l'obligation de déclaration préalable (DP) pour les clôtures (ou zones protégées) ?"}
+                              </span>
                             </div>
-                          )}
+                          </label>
                         </div>
                       )}
 
-                      {/* Total ground surface for outdoor */}
-                      <div className="space-y-2">
-                        <label className="text-base font-medium text-slate-700">
-                          {isEn ? "Total ground surface occupied (m²)" : "Surface totale occupée au sol (m²)"}
-                        </label>
-                        <input
-                          type="number"
-                          value={outdoorSurface || ""}
-                          onChange={(e) => setOutdoorSurface(Number(e.target.value))}
-                          className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all placeholder:text-slate-500 placeholder:font-semibold"
-                          placeholder="Ex: 30"
-                          min={0}
-                        />
-                      </div>
+                      {/* ── Other option — text description + surface area ── */}
+                      {!outdoorTags.has("swimming_pool") && !outdoorTags.has("fence_gate") && (
+                        <>
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={outdoorFreeText}
+                              onChange={(e) => setOutdoorFreeText(e.target.value)}
+                              className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                              placeholder={isEn ? "Other (Carport, Wooden shed…)" : "Autre (Carport, Abri bois…)"}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-semibold text-slate-700">
+                              {isEn ? "Total ground surface occupied (m²)" : "Surface totale occupée au sol (m²)"}
+                            </label>
+                            <input
+                              type="number"
+                              value={outdoorSurface || ""}
+                              onChange={(e) => setOutdoorSurface(Number(e.target.value))}
+                              className="w-full px-4 py-3.5 rounded-xl bg-white border-2 border-slate-300 text-slate-900 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition-all"
+                              placeholder={isEn ? "e.g. 50" : "ex. 50"}
+                              min={0}
+                            />
+                          </div>
+                        </>
+                      )}
 
-                      {/* Add project button */}
+                      {/* Add to folder button */}
                       <button
                         type="button"
                         disabled={outdoorTags.size === 0 && !outdoorFreeText}
@@ -1280,8 +1344,7 @@ export default function AuthorizationPage({
                               : "outdoor_other";
                           const tagLabel = outdoorTags.has("swimming_pool") ? (isEn ? "Pool" : "Piscine")
                             : outdoorTags.has("fence_gate") ? (isEn ? "Fence / Gate" : "Clôture / Portail")
-                              : outdoorTags.has("raised_terrace") ? (isEn ? "Raised Terrace" : "Terrasse Surlevée")
-                                : (isEn ? "Outdoor Work" : "Aménagement Extérieur");
+                              : outdoorFreeText || (isEn ? "Other" : "Autre");
                           addWorkItem({
                             label: `${tagLabel} ${count}`,
                             projectType: mainTag as ProjectTypeChoice,
@@ -1289,12 +1352,12 @@ export default function AuthorizationPage({
                             footprintCreated: outdoorSurface,
                             shelterHeight: hasPoolShelter ? poolShelterHeight : 0,
                             inUrbanZone: isUrbanZone,
+                            localDeliberation: outdoorTags.has("fence_gate") ? fenceLocalDeliberation : undefined,
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-base font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                       >
-                        <Plus className="w-5 h-5" />
-                        {isEn ? "Add to analysis" : "Ajouter à l'analyse"}
+                        {isEn ? "Add to folder" : "Ajouter au dossier"}
                       </button>
                     </div>
                   )}
@@ -1490,11 +1553,22 @@ export default function AuthorizationPage({
                       const badgeLabel =
                         res.determination === "PC" ? (isEn ? "BUILDING PERMIT" : "PERMIS DE CONSTRUIRE")
                           : res.determination === "ARCHITECT_REQUIRED" ? (isEn ? "BUILDING PERMIT" : "PERMIS DE CONSTRUIRE")
-                            : res.determination === "DP" ? (isEn ? "PRIOR DECLARATION" : "DÉCLARATION PRÉALABLE")
+                            : res.determination === "DP" ? (isEn ? "PRELIMINARY DECLARATION" : "DÉCLARATION PRÉALABLE")
                               : (isEn ? "NO AUTHORIZATION" : "AUCUNE AUTORISATION");
+                      // Override explanation for fence with local deliberation
+                      let explanationText = res.explanation;
+                      if (item.projectType === "outdoor_fence" && item.localDeliberation) {
+                        explanationText = isEn
+                          ? "The fence is subject to public consultation by local resolution."
+                          : "La clôture est soumise à déclaration préalable par délibération locale.";
+                      } else if (item.projectType === "outdoor_fence" && !item.localDeliberation) {
+                        explanationText = isEn
+                          ? "Fences do not require authorization (no local deliberation)."
+                          : "Les clôtures ne nécessitent pas d'autorisation (pas de délibération locale).";
+                      }
                       // Split explanation into bullet points
-                      const bullets = res.explanation
-                        ? res.explanation.split(/\. (?=[A-ZÀ-Ö]|[a-zà-ö])/).filter(Boolean)
+                      const bullets = explanationText
+                        ? explanationText.split(/\. (?=[A-ZÀ-Ö]|[a-zà-ö])/).filter(Boolean)
                         : [];
                       return (
                         <div key={item.id} className="rounded-xl p-3 space-y-2" style={{background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)"}}>
