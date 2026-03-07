@@ -69,7 +69,15 @@ export default function DocumentsPage({
         fetch(`/api/projects/${projectId}`)
             .then((r) => r.json())
             .then((d) => {
-                if (d.project) setProject(d.project);
+                if (d.project) {
+                    setProject(d.project);
+                    // Initialize add-on selections from saved project data
+                    const desc = d.project.projectDescription as Record<string, unknown> | null;
+                    if (desc) {
+                        if (typeof desc.wantCerfa === "boolean") setWantCerfa(desc.wantCerfa);
+                        if (typeof desc.wantPluAnalysis === "boolean") setWantPlu(desc.wantPluAnalysis);
+                    }
+                }
             })
             .catch(() => { })
             .finally(() => setLoading(false));

@@ -356,6 +356,15 @@ export const translations: Record<string, Record<Locale, string>> = {
     "pay.costInCredits": { fr: "Coût en crédits", en: "Cost in credits" },
     "pay.creditsPurchased": { fr: "Crédits achetés !", en: "Credits purchased!" },
     "pay.creditsAdded": { fr: "Vos crédits ont été ajoutés.", en: "Your credits have been added." },
+    "pay.accessEditor": { fr: "Accédez à notre éditeur intelligent", en: "Access our smart editor" },
+    "pay.completeFile": { fr: "Dossier complet", en: "Complete file" },
+    "pay.confirmAccess": { fr: "Confirmer et accéder à l'éditeur", en: "Confirm and access the editor" },
+    "pay.secureStripe": { fr: "Paiement sécurisé Stripe", en: "Secure Stripe payment" },
+    "pay.byFile": { fr: "par dossier", en: "by file" },
+    "pay.autoGraphics": { fr: "Éléments graphiques générés automatiquement", en: "Automatically generated graphic elements" },
+    "pay.autoDescription": { fr: "Information descriptive générée automatiquement", en: "Descriptive information automatically generated" },
+    "pay.autoCerfaCompletion": { fr: "Remplissage automatique du formulaire CERFA", en: "Automatic CERFA form completion" },
+    "pay.payCredits": { fr: "Payer avec des crédits", en: "Pay with credits" },
 
     // ─── Overview Page ───────────────────────────────────────────────────────────
     "overview.pluCompleted": { fr: "Analyse PLU effectuée", en: "PLU analysis completed" },

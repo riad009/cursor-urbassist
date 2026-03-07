@@ -16,27 +16,17 @@ import {
   RefreshCw,
   Coins,
   ArrowRight,
-  Euro,
-  Zap,
-  Star,
-  ChevronDown,
-  ChevronUp,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
+import {
+  getDocumentsForProject,
+  type AuthorizationDocument,
+} from "@/lib/authorization-documents";
 
 /* ─── Types ──────────────────────────────────────────────────── */
-
-interface CreditPackage {
-  id: string;
-  credits: number;
-  price: number;
-  label: string;
-  priceFormatted: string;
-  pricePerCredit: string;
-  popular?: boolean;
-}
 
 interface CreditCosts {
   pluFirstAnalysis: number;
@@ -62,18 +52,22 @@ export default function PaymentPage({
     name?: string;
     address?: string;
     authorizationType?: string;
+    projectType?: string;
     pluAnalysisCount?: number;
+    protectedAreas?: { type: string; name: string }[];
+    regulatoryAnalysis?: { isProtectedArea?: boolean; abfRequired?: boolean; heritageTypes?: string[] };
     projectDescription?: {
       architectRequired?: boolean;
       wantPluAnalysis?: boolean;
       wantCerfa?: boolean;
+      categories?: string[];
+      workItems?: { projectType: string }[];
     };
     paidAt?: string;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [spending, setSpending] = useState(false);
-  const [buyingCredits, setBuyingCredits] = useState(false);
   const [payingEuro, setPayingEuro] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creditCosts, setCreditCosts] = useState<CreditCosts>({
@@ -81,10 +75,7 @@ export default function PaymentPage({
     pluRelaunch: 1,
   });
   const [euroPrices, setEuroPrices] = useState({ first: 15, relaunch: 5 });
-  const [packages, setPackages] = useState<CreditPackage[]>([]);
-  const [showPackages, setShowPackages] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"credits" | "euro">("credits");
+  const [useCredits, setUseCredits] = useState(false);
 
   const success = searchParams.get("success");
   const purchasedCredits = searchParams.get("purchasedCredits");
@@ -94,8 +85,7 @@ export default function PaymentPage({
     Promise.all([
       fetch(`/api/projects/${projectId}`).then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()).catch(() => ({})),
-      fetch("/api/stripe/checkout").then((r) => r.json()).catch(() => ({ packages: [] })),
-    ]).then(([projectData, settings, checkoutData]) => {
+    ]).then(([projectData, settings]) => {
       if (projectData.project) setProject(projectData.project);
       if (settings.creditCosts) {
         setCreditCosts({
@@ -107,14 +97,6 @@ export default function PaymentPage({
         first: settings.pluFirstAnalysisPriceEur ?? 15,
         relaunch: settings.pluRelaunchPriceEur ?? 5,
       });
-      if (checkoutData.packages) {
-        setPackages(
-          checkoutData.packages.map((p: CreditPackage, i: number) => ({
-            ...p,
-            popular: i === 1,
-          }))
-        );
-      }
       setLoading(false);
     });
   }, [projectId]);
@@ -142,6 +124,47 @@ export default function PaymentPage({
   const euroCost = isRelaunch ? euroPrices.relaunch : euroPrices.first;
   const userCredits = user?.credits ?? 0;
   const hasEnoughCredits = userCredits >= creditCost;
+
+  // Dynamic document data
+  const authType = project?.authorizationType;
+  const isDP = authType === "DP";
+  const isPC = authType === "PC" || authType === "ARCHITECT_REQUIRED";
+  const wantPluAnalysis = project?.projectDescription?.wantPluAnalysis ?? false;
+  const wantCerfa = project?.projectDescription?.wantCerfa ?? false;
+
+  // ABF detection (same logic as documents page)
+  const protectedAreasABF = (project?.protectedAreas || []).some(
+    (a) =>
+      a.type === "ABF" || a.type === "HERITAGE" || a.type === "abf" ||
+      a.type === "heritage" || a.type === "MONUMENT_HISTORIQUE" || a.type === "SITE_PATRIMONIAL"
+  );
+  const regulatoryABF = project?.regulatoryAnalysis?.isProtectedArea === true ||
+    project?.regulatoryAnalysis?.abfRequired === true;
+  const hasABF = protectedAreasABF || regulatoryABF;
+
+  // Existing structure detection (same logic as documents page)
+  const projectDescCategories = project?.projectDescription?.categories || [];
+  const projectDescWorkItems = project?.projectDescription?.workItems || [];
+  const isExistingStructure =
+    project?.projectType === "extension" ||
+    project?.projectType === "existing_extension" ||
+    project?.projectType === "renovation" ||
+    project?.projectType === "facade_change" ||
+    projectDescCategories.includes("existing_extension") ||
+    projectDescCategories.includes("renovation") ||
+    projectDescWorkItems.some((w) =>
+      ["existing_extension", "facade_change"].includes(w.projectType)
+    );
+
+  // Get actual document list
+  const documents = getDocumentsForProject(authType, { hasABF, isExistingStructure });
+  const docCount = documents.length;
+
+  // Calculate dynamic euro price: base + options
+  const cerfaPrice = 5;
+  const pluPrice = 15;
+  const baseEuroCost = euroCost;
+  const displayEuroCost = baseEuroCost + (wantCerfa ? cerfaPrice : 0) + (wantPluAnalysis ? pluPrice : 0);
 
   /* ─── Handlers ──────────────────────────────────────────── */
   const handleSpendCredits = useCallback(async () => {
@@ -199,37 +222,13 @@ export default function PaymentPage({
     setPayingEuro(false);
   }, [projectId, isRelaunch, refreshUser, router, isEn]);
 
-  const handleBuyCredits = useCallback(async (packageId: string) => {
-    setBuyingCredits(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "credits",
-          packageId,
-          projectId,
-          successUrl: `/projects/${projectId}/payment?purchasedCredits=true`,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || (isEn ? "Purchase failed" : "Échec de l'achat"));
-        setBuyingCredits(false);
-        return;
-      }
-      if (data.url) {
-        window.location.href = data.url;
-      } else if (data.success) {
-        await refreshUser();
-        setShowPackages(false);
-      }
-    } catch {
-      setError(isEn ? "An error occurred" : "Une erreur est survenue");
+  const handleConfirm = useCallback(() => {
+    if (useCredits && hasEnoughCredits) {
+      handleSpendCredits();
+    } else {
+      handlePayEuro();
     }
-    setBuyingCredits(false);
-  }, [projectId, refreshUser, isEn]);
+  }, [useCredits, hasEnoughCredits, handleSpendCredits, handlePayEuro]);
 
   /* ─── Loading state ────────────────────────────────────── */
   if (loading) {
@@ -292,27 +291,165 @@ export default function PaymentPage({
     );
   }
 
-  /* ─── Derived display vars ─────────────────────────────── */
-  const authType = project?.authorizationType;
-  const isDP = authType === "DP";
-  const architectRequired = project?.projectDescription?.architectRequired;
-  const wantPluAnalysis = project?.projectDescription?.wantPluAnalysis ?? true;
-  const wantCerfa = project?.projectDescription?.wantCerfa ?? true;
+  /* ─── Feature list: dynamic based on actual documents and selections ── */
+  const isProcessing = spending || payingEuro;
+
+  // Permit type labels
+  const permitLabel = isPC ? t("pay.pcLabel") : t("pay.dpLabel");
+  const permitSubLabel = isPC ? t("pay.pcComplete") : t("pay.dpComplete");
+  const permitCode = isPC ? "PC" : "DP";
+
+  // Build the feature list matching client demo exactly
+  const featureItems: { label: string; included: boolean; isDocCount?: boolean }[] = [
+    // First item: document count (always included, with file icon)
+    {
+      label: `${docCount} ${t("pay.regDocs")}`,
+      included: true,
+      isDocCount: true,
+    },
+    // Automatic regulatory analysis — depends on user selection
+    {
+      label: t("pay.autoAnalysis"),
+      included: wantPluAnalysis,
+    },
+    // Automatic CERFA form completion — depends on user selection
+    {
+      label: t("pay.autoCerfaCompletion"),
+      included: wantCerfa,
+    },
+    // Site plan + floor plan — always included
+    {
+      label: t("pay.sitePlan"),
+      included: true,
+    },
+    // Automatically generated graphic elements — always included
+    {
+      label: t("pay.autoGraphics"),
+      included: true,
+    },
+    // Descriptive information automatically generated — always included
+    {
+      label: t("pay.autoDescription"),
+      included: true,
+    },
+  ];
 
   return (
     <Navigation>
-      <div className="min-h-screen p-4 lg:p-8 flex items-start justify-center">
-        <div className="w-full max-w-[520px] space-y-5">
+      <div
+        className="min-h-screen flex items-start justify-center p-4 lg:p-8"
+        style={{ background: "linear-gradient(180deg, #f0f4ff 0%, #f8fafc 50%)" }}
+      >
+        <div className="w-full max-w-[560px] space-y-6 pt-6">
 
           {/* ═══ Header ═══ */}
-          <div className="text-center space-y-2 pt-2">
+          <div className="text-center space-y-1.5">
             <h1 className="text-2xl font-bold text-slate-900">
-              {isEn ? "Payment" : "Paiement"}
+              {t("pay.accessEditor")}
             </h1>
             <p className="text-sm text-slate-400">
-              {isEn ? "Choose how you'd like to pay" : "Choisissez votre mode de paiement"}
+              {project?.name || (isEn ? "Your project" : "Votre projet")}
             </p>
           </div>
+
+          {/* ═══ Main Permit Card ═══ */}
+          <div className="rounded-2xl bg-white border border-slate-200 shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden">
+
+            {/* ── Permit Header ── */}
+            <div className="px-6 pt-6 pb-4 flex items-start justify-between">
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                  {isDP
+                    ? <FileText className="w-5 h-5 text-amber-600" />
+                    : <ClipboardCheck className="w-5 h-5 text-amber-600" />}
+                </div>
+                <div>
+                  <p className="text-base font-bold text-slate-900">
+                    {permitLabel}
+                  </p>
+                  <p className="text-xs text-amber-600 font-medium mt-0.5">
+                    {permitSubLabel}
+                  </p>
+                </div>
+              </div>
+              <span className={cn(
+                "text-sm font-bold px-3 py-1.5 rounded-lg",
+                isDP ? "bg-emerald-50 text-emerald-600" : "bg-purple-50 text-purple-600"
+              )}>
+                {permitCode}
+              </span>
+            </div>
+
+            {/* ── Feature Checklist ── */}
+            <div className="px-6 pb-5 space-y-3">
+              {featureItems.map((feat, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  {/* Icon */}
+                  {feat.isDocCount ? (
+                    <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                  ) : feat.included ? (
+                    <CheckCircle2 className="w-4 h-4 text-indigo-500 shrink-0" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border-2 border-slate-200 shrink-0" />
+                  )}
+                  {/* Label — strikethrough when not included */}
+                  <span
+                    className={cn(
+                      "text-sm",
+                      feat.included
+                        ? "text-slate-700"
+                        : "text-slate-400 line-through"
+                    )}
+                  >
+                    {feat.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Divider ── */}
+            <div className="mx-6 border-t border-slate-100" />
+
+            {/* ── Price Footer ── */}
+            <div className="px-6 py-5 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-slate-900">{t("pay.completeFile")}</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {t("pay.currentBalance")}: {userCredits} {isEn ? "credits" : "crédits"}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-slate-900">
+                  {useCredits && hasEnoughCredits
+                    ? <>{creditCost} <span className="text-sm font-medium text-slate-400">{isEn ? "credits" : "crédits"}</span></>
+                    : <>€ {displayEuroCost.toFixed(2)}</>}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">{t("pay.byFile")}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* ═══ Credit Toggle (if user has enough credits) ═══ */}
+          {hasEnoughCredits && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setUseCredits(!useCredits)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+                  useCredits
+                    ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                    : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                )}
+              >
+                <Coins className="w-4 h-4" />
+                {useCredits
+                  ? (isEn ? `Pay with ${creditCost} credits instead` : `Payer avec ${creditCost} crédits`)
+                  : (isEn ? `Use credits (${userCredits} available)` : `Utiliser des crédits (${userCredits} disponibles)`)}
+                {useCredits && <Check className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          )}
 
           {/* ═══ Relaunch Banner ═══ */}
           {isRelaunch && (
@@ -331,312 +468,6 @@ export default function PaymentPage({
             </div>
           )}
 
-          {/* ═══ Main Payment Card ═══ */}
-          <div className="rounded-2xl bg-white border border-slate-200 shadow-[0_2px_16px_rgba(0,0,0,0.06)] overflow-hidden">
-
-            {/* ── Payment Method Tabs ── */}
-            <div className="flex border-b border-slate-100">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("credits")}
-                className={cn(
-                  "flex-1 px-4 py-4 flex items-center justify-center gap-2.5 text-sm font-semibold transition-all relative",
-                  paymentMethod === "credits"
-                    ? "text-indigo-600"
-                    : "text-slate-400 hover:text-slate-600"
-                )}
-              >
-                <Coins className="w-4 h-4" />
-                {isEn ? "Credits" : "Crédits"}
-                {paymentMethod === "credits" && (
-                  <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-600 rounded-full" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("euro")}
-                className={cn(
-                  "flex-1 px-4 py-4 flex items-center justify-center gap-2.5 text-sm font-semibold transition-all relative",
-                  paymentMethod === "euro"
-                    ? "text-indigo-600"
-                    : "text-slate-400 hover:text-slate-600"
-                )}
-              >
-                <CreditCard className="w-4 h-4" />
-                {isEn ? "Credit Card" : "Carte bancaire"}
-                {paymentMethod === "euro" && (
-                  <div className="absolute bottom-0 left-4 right-4 h-0.5 bg-indigo-600 rounded-full" />
-                )}
-              </button>
-            </div>
-
-            {/* ── Credits Panel ── */}
-            {paymentMethod === "credits" && (
-              <div className="p-6 space-y-5">
-                {/* Balance & Cost */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                      {isEn ? "Cost" : "Coût"}
-                    </p>
-                    <p className="text-3xl font-black text-slate-900 mt-1">
-                      {creditCost} <span className="text-base font-semibold text-slate-400">{isEn ? "credits" : "crédits"}</span>
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                      {isEn ? "Your balance" : "Votre solde"}
-                    </p>
-                    <p className={cn(
-                      "text-3xl font-black mt-1",
-                      hasEnoughCredits ? "text-emerald-600" : "text-amber-500"
-                    )}>
-                      {userCredits}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Progress bar */}
-                <div>
-                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{
-                        width: `${Math.min(100, (userCredits / Math.max(creditCost, 1)) * 100)}%`,
-                        background: hasEnoughCredits
-                          ? "linear-gradient(90deg, #34d399, #10b981)"
-                          : "linear-gradient(90deg, #fbbf24, #f59e0b)",
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1.5">
-                    {hasEnoughCredits
-                      ? (isEn
-                        ? `${userCredits - creditCost} credits remaining after payment`
-                        : `${userCredits - creditCost} crédits restants après paiement`)
-                      : (isEn
-                        ? `You need ${creditCost - userCredits} more credit${creditCost - userCredits > 1 ? "s" : ""}`
-                        : `Il vous manque ${creditCost - userCredits} crédit${creditCost - userCredits > 1 ? "s" : ""}`)}
-                  </p>
-                </div>
-
-                {/* Pay / Buy buttons */}
-                {hasEnoughCredits ? (
-                  <div className="space-y-3">
-                    <button
-                      onClick={handleSpendCredits}
-                      disabled={spending}
-                      className="w-full py-3.5 rounded-xl bg-slate-900 text-white font-semibold disabled:opacity-50 hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 text-sm"
-                    >
-                      {spending ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> {isEn ? "Processing…" : "Traitement…"}</>
-                      ) : (
-                        <>{isEn ? `Pay ${creditCost} credits` : `Payer ${creditCost} crédits`} <ArrowRight className="w-4 h-4" /></>
-                      )}
-                    </button>
-                    <p className="text-xs text-center text-slate-400">
-                      {isEn ? "Deducted instantly from your balance" : "Déduit instantanément de votre solde"}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <button
-                      onClick={() => setShowPackages(!showPackages)}
-                      className="w-full py-3.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm"
-                    >
-                      <Coins className="w-4 h-4" />
-                      {isEn ? "Buy Credits" : "Acheter des crédits"}
-                      {showPackages ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
-
-                    {/* Credit packages */}
-                    {showPackages && packages.length > 0 && (
-                      <div className="space-y-2 pt-1">
-                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                          {isEn ? "Select a package" : "Choisissez un pack"}
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {packages.map((pkg) => {
-                            const isSelected = selectedPackage === pkg.id;
-                            const coversNeed = (pkg.credits + userCredits) >= creditCost;
-                            return (
-                              <button
-                                key={pkg.id}
-                                onClick={() => {
-                                  setSelectedPackage(pkg.id);
-                                  handleBuyCredits(pkg.id);
-                                }}
-                                disabled={buyingCredits}
-                                className={cn(
-                                  "relative rounded-xl border-2 p-3.5 text-left transition-all disabled:opacity-50",
-                                  isSelected
-                                    ? "border-indigo-500 bg-indigo-50"
-                                    : coversNeed
-                                      ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-300"
-                                      : "border-slate-200 bg-white hover:border-slate-300"
-                                )}
-                              >
-                                {pkg.popular && (
-                                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[8px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                                    <Star className="w-2 h-2" /> POPULAR
-                                  </span>
-                                )}
-                                {coversNeed && !pkg.popular && (
-                                  <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center font-bold">✓</span>
-                                )}
-                                <p className="text-lg font-black text-slate-900">{pkg.credits} <span className="text-xs text-slate-400 font-medium">cr.</span></p>
-                                <p className="text-sm font-bold text-indigo-600 mt-0.5">{pkg.priceFormatted}</p>
-                                <p className="text-[10px] text-slate-400">{pkg.pricePerCredit}/{isEn ? "credit" : "crédit"}</p>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {buyingCredits && (
-                          <div className="flex items-center justify-center gap-2 text-xs text-indigo-600 py-1">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            {isEn ? "Redirecting to payment…" : "Redirection vers le paiement…"}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Euro / Card Panel ── */}
-            {paymentMethod === "euro" && (
-              <div className="p-6 space-y-5">
-                {/* Amount */}
-                <div className="text-center">
-                  <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">
-                    {isRelaunch
-                      ? (isEn ? "Relaunch price" : "Prix de relance")
-                      : (isEn ? "One-time price" : "Prix unique")}
-                  </p>
-                  <p className="text-4xl font-black text-slate-900 mt-2">€{euroCost}</p>
-                </div>
-
-                {/* Stripe trust badges */}
-                <div className="flex items-center justify-center gap-4">
-                  <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                    <Lock className="w-3 h-3" /> SSL
-                  </span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                    <CreditCard className="w-3 h-3" /> Visa / MC
-                  </span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                    <Shield className="w-3 h-3" /> PCI
-                  </span>
-                </div>
-
-                {/* Pay button */}
-                <button
-                  onClick={handlePayEuro}
-                  disabled={payingEuro}
-                  className="w-full py-3.5 rounded-xl bg-slate-900 text-white font-semibold disabled:opacity-50 hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 text-sm"
-                >
-                  {payingEuro ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> {isEn ? "Redirecting to Stripe…" : "Redirection vers Stripe…"}</>
-                  ) : (
-                    <><CreditCard className="w-4 h-4" /> {isEn ? `Pay €${euroCost}` : `Payer ${euroCost} €`} <ArrowRight className="w-4 h-4" /></>
-                  )}
-                </button>
-
-                <p className="text-xs text-center text-slate-400">
-                  {isEn
-                    ? "Secure payment via Stripe. You will be redirected."
-                    : "Paiement sécurisé via Stripe. Vous serez redirigé."}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* ═══ Order Summary ═══ */}
-          <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-sm">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <p className="text-sm font-bold text-slate-900">{isEn ? "Order summary" : "Résumé de la commande"}</p>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center",
-                    isDP ? "bg-emerald-50 text-emerald-600" : "bg-purple-50 text-purple-600"
-                  )}>
-                    {isDP ? <FileText className="w-4 h-4" /> : <ClipboardCheck className="w-4 h-4" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">
-                      {isDP ? t("pay.dpLabel") : t("pay.pcLabel")}
-                    </p>
-                    <p className="text-xs text-slate-400">{isDP ? "DP" : "PC"} · {isDP ? "9" : "12"} {isEn ? "documents" : "documents"}</p>
-                  </div>
-                </div>
-                <span className={cn(
-                  "text-xs font-bold px-2.5 py-1 rounded-lg",
-                  isDP ? "bg-emerald-50 text-emerald-600" : "bg-purple-50 text-purple-600"
-                )}>
-                  {isDP ? "DP" : "PC"}
-                </span>
-              </div>
-
-              {/* Included items */}
-              <div className="border-t border-slate-100 pt-3 space-y-2">
-                <SummaryRow icon={<FileText className="w-3.5 h-3.5" />} label={`${isDP ? "9" : "12"} ${t("pay.regDocs")}`} />
-                {wantPluAnalysis && <SummaryRow icon={<Shield className="w-3.5 h-3.5" />} label={t("pay.autoAnalysis")} />}
-                {wantCerfa && <SummaryRow icon={<Sparkles className="w-3.5 h-3.5" />} label={t("pay.autoCerfa")} />}
-                <SummaryRow icon={<Check className="w-3.5 h-3.5" />} label={t("pay.sitePlan")} />
-              </div>
-
-              {/* Total */}
-              <div className="border-t border-slate-100 pt-3 flex justify-between items-center">
-                <p className="text-sm font-bold text-slate-900">{isEn ? "Total" : "Total"}</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {paymentMethod === "credits"
-                    ? `${creditCost} ${isEn ? "credits" : "crédits"}`
-                    : `€${euroCost}`}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* ═══ Pricing Reference ═══ */}
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
-              {isEn ? "Pricing" : "Tarification"}
-            </p>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-600">{isEn ? "First analysis" : "Première analyse"}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 font-medium bg-white px-2 py-0.5 rounded-lg border border-slate-100">{creditCosts.pluFirstAnalysis} cr.</span>
-                  <span className="text-slate-300">·</span>
-                  <span className="text-xs text-slate-400 font-medium bg-white px-2 py-0.5 rounded-lg border border-slate-100">€{euroPrices.first}</span>
-                </div>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-600">{isEn ? "Relaunch" : "Relance"}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 font-medium bg-white px-2 py-0.5 rounded-lg border border-slate-100">{creditCosts.pluRelaunch} cr.</span>
-                  <span className="text-slate-300">·</span>
-                  <span className="text-xs text-slate-400 font-medium bg-white px-2 py-0.5 rounded-lg border border-slate-100">€{euroPrices.relaunch}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ═══ Architect Warning ═══ */}
-          {architectRequired && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-amber-700">{t("pay.architectRequired")}</p>
-                <p className="text-xs text-amber-600 mt-1">{t("pay.architectWarning")}</p>
-              </div>
-            </div>
-          )}
-
           {/* ═══ Error ═══ */}
           {error && (
             <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600 flex items-center gap-2">
@@ -645,25 +476,33 @@ export default function PaymentPage({
             </div>
           )}
 
-          {/* ═══ Security Footer ═══ */}
-          <div className="flex items-center justify-center gap-5 text-[11px] text-slate-400 pb-6">
-            <span className="flex items-center gap-1"><Lock className="w-3 h-3" /> {t("pay.securePayment")}</span>
-            <span>Stripe</span>
-            <span>SSL 256-bit</span>
+          {/* ═══ CTA Button ═══ */}
+          <button
+            onClick={handleConfirm}
+            disabled={isProcessing}
+            className="w-full py-4 rounded-xl bg-indigo-600 text-white font-semibold disabled:opacity-50 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2.5 text-[15px] shadow-lg shadow-indigo-200"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                {isEn ? "Processing…" : "Traitement…"}
+              </>
+            ) : (
+              <>
+                <FileText className="w-5 h-5" />
+                {t("pay.confirmAccess")}
+              </>
+            )}
+          </button>
+
+          {/* ═══ Secure Stripe Footer ═══ */}
+          <div className="flex items-center justify-center gap-2 text-xs text-slate-400 pb-8">
+            <Lock className="w-3.5 h-3.5" />
+            <span>{t("pay.secureStripe")}</span>
           </div>
+
         </div>
       </div>
     </Navigation>
-  );
-}
-
-/* ─── Sub-Components ─────────────────────────────────────────── */
-
-function SummaryRow({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <div className="flex items-center gap-2.5 text-xs text-slate-600">
-      <span className="text-indigo-400">{icon}</span>
-      <span>{label}</span>
-    </div>
   );
 }

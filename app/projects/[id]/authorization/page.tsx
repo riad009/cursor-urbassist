@@ -512,10 +512,24 @@ export default function AuthorizationPage({
             timelineAdjustmentMonths: serverDecision?.timelineAdjustmentMonths ?? 0,
             poolShelterHeight: poolShelterHeight || undefined,
             decisionSource: serverDecision ? "server" : "client",
+            // Save individual work items for project-description page
+            workItems: workItems.map(w => ({
+              id: w.id,
+              label: w.label,
+              projectType: w.projectType,
+              floorAreaCreated: w.floorAreaCreated,
+              footprintCreated: w.footprintCreated,
+              existingFloorArea: w.existingFloorArea,
+              shelterHeight: w.shelterHeight,
+              inUrbanZone: w.inUrbanZone,
+              changeOfUse: w.changeOfUse,
+              facadeModification: w.facadeModification,
+              localDeliberation: w.localDeliberation,
+            })),
           },
         }),
       });
-      router.push(`/projects/${projectId}/payment`);
+      router.push(`/projects/${projectId}/documents`);
     } catch (err) {
       console.error("Save failed:", err);
     }
@@ -573,7 +587,7 @@ export default function AuthorizationPage({
           projectDescription: buildProjectDescription(),
         }),
       });
-      router.push(`/projects/${projectId}/payment`);
+      router.push(`/projects/${projectId}/documents`);
     } catch (err) {
       console.error("Quick action failed:", err);
     }
