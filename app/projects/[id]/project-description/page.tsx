@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import MaterialsStep from "@/components/project-description/MaterialsStep";
+import FeasibilityMatrix, { FeasibilityMatrixSkeleton } from "@/components/feasibility/FeasibilityMatrix";
+import type { FeasibilityReport } from "@/lib/feasibility-matrix";
 import { cn } from "@/lib/utils";
 import {
     calculateDpPc,
@@ -255,6 +257,11 @@ export default function ProjectDescriptionPage({
     // PLU analysis result (from /api/analyze-plu)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [pluAnalysisResult, setPluAnalysisResult] = useState<{ analysis: any; pluRules: any } | null>(null);
+    // Feasibility matrix state
+    const [projectIntent, setProjectIntent] = useState("");
+    const [feasibilityReport, setFeasibilityReport] = useState<FeasibilityReport | null>(null);
+    const [feasibilitySource, setFeasibilitySource] = useState<"gemini" | "fallback" | null>(null);
+    const [feasibilityLoading, setFeasibilityLoading] = useState(false);
 
     // Real project/zone data
     const [projectName, setProjectName] = useState<string>("");
@@ -748,6 +755,41 @@ export default function ProjectDescriptionPage({
                 // Store the full PLU analysis result for step 6 display
                 setPluAnalysisResult({ analysis: data.analysis, pluRules: data.pluRules });
                 setGenerationCount(prev => prev + 1);
+                setAnalysisProgress(95);
+
+                // ── Chain feasibility matrix generation ──────────────────
+                try {
+                    setFeasibilityLoading(true);
+                    // Auto-build project intent from jobs if user left it empty
+                    const intent = projectIntent.trim() || jobs.map(j => {
+                        const label = j.displayLabel || j.nature;
+                        const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
+                        return `${label}${area}`;
+                    }).join(", ") || "Projet de construction";
+
+                    const feasFormData = new FormData();
+                    feasFormData.append("pdfFile", pluFile!);
+                    feasFormData.append("pluZone", projectZoneType || "non spécifiée");
+                    feasFormData.append("projectIntent", intent);
+
+                    const feasRes = await fetch("/api/generate-feasibility", {
+                        method: "POST",
+                        body: feasFormData,
+                    });
+                    const feasData = await feasRes.json();
+
+                    if (feasRes.ok && feasData.success && feasData.report) {
+                        setFeasibilityReport(feasData.report);
+                        setFeasibilitySource(feasData.source || "gemini");
+                    } else {
+                        console.warn("Feasibility analysis failed:", feasData.error);
+                    }
+                } catch (feasErr) {
+                    console.warn("Feasibility analysis error:", feasErr);
+                } finally {
+                    setFeasibilityLoading(false);
+                }
+
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             } else {
@@ -1931,6 +1973,28 @@ export default function ProjectDescriptionPage({
                                             </div>
                                         </div>
 
+                                        {/* Project Intent (for feasibility matrix) */}
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                                                <Pencil className="w-4 h-4 text-emerald-500" />
+                                                {isEn ? "Project Intent (Recommended)" : "Intention du Projet (Recommandé)"}
+                                            </h3>
+                                            <textarea
+                                                value={projectIntent}
+                                                onChange={(e) => setProjectIntent(e.target.value)}
+                                                rows={3}
+                                                placeholder={isEn
+                                                    ? "Describe your project for a detailed compliance analysis. E.g.: Construction of a 15m² garden shed, 2.5m height, on property boundary, 2-pitch tile roof..."
+                                                    : "Décrivez votre projet pour une analyse de conformité détaillée. Ex : Construction d'un abri de jardin de 15m², hauteur 2.5m, en limite séparative, toiture 2 pentes en tuile..."}
+                                                className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-none"
+                                            />
+                                            <p className="text-[10px] text-slate-400 mt-1">
+                                                {isEn
+                                                    ? "The more detailed your description, the more precise the analysis will be. If left empty, job descriptions will be used."
+                                                    : "Plus votre description est détaillée, plus l'analyse sera précise. Si vide, les descriptions des travaux seront utilisées."}
+                                            </p>
+                                        </div>
+
                                         {/* Launch Analysis Button */}
                                         <div className="flex justify-center pt-2">
                                             <button
@@ -2329,6 +2393,42 @@ export default function ProjectDescriptionPage({
                                                 </div>
                                             );
                                         })()}
+                                        {/* ── Feasibility Matrix (ANALYSE DE LA REGLEMENTATION) ── */}
+                                        {feasibilityLoading && (
+                                            <div className="mt-6">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <Sparkles className="w-5 h-5 text-indigo-500" />
+                                                    <h3 className="text-lg font-bold text-slate-900">
+                                                        {isEn ? "Regulatory Analysis" : "Analyse de la Réglementation"}
+                                                    </h3>
+                                                </div>
+                                                <FeasibilityMatrixSkeleton />
+                                            </div>
+                                        )}
+
+                                        {feasibilityReport && !feasibilityLoading && (
+                                            <div className="mt-6">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <Sparkles className="w-5 h-5 text-indigo-500" />
+                                                    <h3 className="text-lg font-bold text-slate-900">
+                                                        {isEn ? "Regulatory Analysis" : "Analyse de la Réglementation"}
+                                                    </h3>
+                                                    {feasibilitySource === "fallback" && (
+                                                        <span className="ml-auto text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                            <AlertTriangle className="w-3 h-3" />
+                                                            {isEn ? "Default analysis" : "Analyse par défaut"}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <FeasibilityMatrix
+                                                    report={feasibilityReport}
+                                                    address={projectAddress}
+                                                    zone={projectZoneType}
+                                                    protectedAreas={projectProtectedAreas}
+                                                    isEn={isEn}
+                                                />
+                                            </div>
+                                        )}
 
                                         {/* Go to 3D */}
                                         <div className="flex justify-end pt-2">
