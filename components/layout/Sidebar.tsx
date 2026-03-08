@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
-  PenTool,
   FileText,
   Image,
   Calculator,
@@ -20,7 +19,6 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/comp
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Projects", href: "/projects", icon: FolderOpen },
-  { name: "Editor", href: "/editor", icon: PenTool },
   { name: "Regulations", href: "/regulations", icon: FileText },
   { name: "Landscape", href: "/landscape", icon: Image },
   { name: "Calculations", href: "/calculations", icon: Calculator },

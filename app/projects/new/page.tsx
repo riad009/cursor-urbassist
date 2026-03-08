@@ -153,7 +153,19 @@ export default function NewProjectPage() {
             try { const raw = sessionStorage.getItem(DOSSIER_STORAGE_KEY); const dossier = raw ? (JSON.parse(raw) as { step2?: { projectTypes?: string[] } }) : {}; const types = dossier?.step2?.projectTypes ?? []; if (types.includes("new_construction")) projectType = "construction"; else if (types.includes("existing_extension")) projectType = "extension"; else if (types.includes("outdoor")) projectType = "outdoor"; } catch { /* ignore */ }
             const parcelIds = selectedParcelIds.length > 0 ? selectedParcelIds : parcels.map((p) => p.id);
             const parcelArea = selectedParcelIds.length > 0 ? parcels.filter((p) => selectedParcelIds.includes(p.id)).reduce((s, p) => s + p.area, 0) : parcels.reduce((s, p) => s + p.area, 0) || parcels[0]?.area;
-            const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: projectName, description: projectName || undefined, address: newAddress.trim() || undefined, municipality: selectedAddress?.city, coordinates: selectedAddress?.coordinates, parcelIds: parcelIds.length ? parcelIds : undefined, parcelArea, northAngle: northAngleDegrees != null ? northAngleDegrees : undefined, zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName, projectType: projectType || undefined, protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined }) });
+            // Build GeoJSON FeatureCollection from selected parcels' geometries
+            const selectedParcels = parcels.filter((p) => parcelIds.includes(p.id));
+            const parcelsWithGeometry = selectedParcels.filter((p) => p.geometry);
+            const parcelsGeoJSON = parcelsWithGeometry.length > 0 ? {
+                type: "FeatureCollection" as const,
+                features: parcelsWithGeometry.map((p) => ({
+                    type: "Feature" as const,
+                    properties: { id: p.id, section: p.section, number: p.number, area: p.area, commune: p.commune },
+                    geometry: p.geometry,
+                })),
+            } : undefined;
+            const parcelGeometry = parcelsGeoJSON ? JSON.stringify(parcelsGeoJSON) : undefined;
+            const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: projectName, description: projectName || undefined, address: newAddress.trim() || undefined, municipality: selectedAddress?.city, coordinates: selectedAddress?.coordinates, parcelIds: parcelIds.length ? parcelIds : undefined, parcelArea, parcelGeometry, parcelsGeoJSON, northAngle: northAngleDegrees != null ? northAngleDegrees : undefined, zoneType: manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName, projectType: projectType || undefined, protectedAreas: protectedAreas.length > 0 ? protectedAreas.map((a) => ({ type: a.type, name: a.name, description: (a as { description?: string }).description, constraints: (a as { constraints?: unknown }).constraints, sourceUrl: (a as { sourceUrl?: string }).sourceUrl })) : undefined }) });
             const data = await res.json();
             if (data.project) { router.push(`/projects/${data.project.id}/authorization`); return; }
         } catch (err) { console.error(err); }

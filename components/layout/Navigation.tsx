@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,7 @@ import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/ui/LanguageToggle";
 import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute, getPhaseSteps, getStepPhase } from "@/lib/step-flow";
 import type { StepPhase } from "@/lib/step-flow";
+import { useProject } from "@/lib/hooks/use-project";
 
 const stepIcons = [
   Plus,
@@ -61,22 +62,11 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const isNewProjectPage = pathname === "/projects/new";
   const showStepBar = !!projectId || isNewProjectPage;
   const currentStepIndex = showStepBar ? getStepIndex(pathname) : -1;
-  const [projectName, setProjectName] = useState<string | null>(null);
-  const [projectPaid, setProjectPaid] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    if (!projectId) {
-      setProjectName(null);
-      return;
-    }
-    fetch(`/api/projects/${projectId}`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((d) => {
-        setProjectName(d.project?.name ?? null);
-        setProjectPaid(!!d.project?.paidAt);
-      })
-      .catch(() => { setProjectName(null); setProjectPaid(false); });
-  }, [projectId]);
+  // Deduplicated project fetch — shares cache with all other useProject() consumers
+  const { project: projectData } = useProject(projectId);
+  const projectName = (projectData?.name as string) ?? null;
+  const projectPaid = projectData ? !!(projectData.paidAt) : null;
 
   return (
     <div className="min-h-screen bg-white">

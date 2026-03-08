@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 
 interface User {
   id: string;
@@ -21,29 +21,95 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+/** Stale-while-revalidate: cache session for 30 seconds */
+const SESSION_CACHE_TTL_MS = 30_000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = async () => {
-    try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
-      if (res.ok) {
-        const { user } = await res.json();
-        setUser(user);
-      } else {
-        setUser(null);
+  // ── Deduplication & caching refs ──────────────────────────────────
+  /** In-flight promise — if a fetch is already running, subsequent callers await the same promise */
+  const pendingRef = useRef<Promise<User | null> | null>(null);
+  /** Timestamp of last successful fetch */
+  const lastFetchRef = useRef<number>(0);
+  /** Cached user from last successful fetch */
+  const cachedUserRef = useRef<User | null>(null);
+  /** AbortController for cancelling stale requests */
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchSession = useCallback(async (force = false): Promise<User | null> => {
+    // ── Stale-while-revalidate: return cached data if fresh ──
+    const now = Date.now();
+    if (!force && lastFetchRef.current > 0 && now - lastFetchRef.current < SESSION_CACHE_TTL_MS) {
+      return cachedUserRef.current;
+    }
+
+    // ── Deduplication: if a request is already in-flight, await it ──
+    if (pendingRef.current) {
+      return pendingRef.current;
+    }
+
+    // Cancel any previous request
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const promise = (async (): Promise<User | null> => {
+      try {
+        const res = await fetch("/api/auth/me", {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          const { user: fetchedUser } = await res.json();
+          cachedUserRef.current = fetchedUser;
+          lastFetchRef.current = Date.now();
+          return fetchedUser;
+        }
+        cachedUserRef.current = null;
+        lastFetchRef.current = Date.now();
+        return null;
+      } catch {
+        // Aborted or network error — don't update cache
+        return cachedUserRef.current;
+      } finally {
+        pendingRef.current = null;
       }
+    })();
+
+    pendingRef.current = promise;
+    return promise;
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const result = await fetchSession(true); // force = true bypasses cache
+      setUser(result);
     } catch {
       setUser(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchSession]);
 
   useEffect(() => {
-    refreshUser();
-  }, []);
+    let cancelled = false;
+    fetchSession()
+      .then((result) => {
+        if (!cancelled) setUser(result);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, [fetchSession]);
 
   const login = async (email: string, password: string) => {
     const res = await fetch("/api/auth/login", {
@@ -62,6 +128,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       throw new Error(message);
     }
+    // Invalidate cache and re-fetch
+    lastFetchRef.current = 0;
+    cachedUserRef.current = null;
+    pendingRef.current = null;
     await refreshUser();
   };
 
@@ -76,12 +146,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       throw new Error(data.error || "Registration failed");
     }
+    // Invalidate cache and re-fetch
+    lastFetchRef.current = 0;
+    cachedUserRef.current = null;
+    pendingRef.current = null;
     await refreshUser();
   };
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
+    cachedUserRef.current = null;
+    lastFetchRef.current = 0;
+    pendingRef.current = null;
   };
 
   return (

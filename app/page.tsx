@@ -7,7 +7,6 @@ import { useLanguage } from "@/lib/language-context";
 import {
   Building2,
   FolderKanban,
-  PenTool,
   FileText,
   FileCheck,
   Calculator,
@@ -75,13 +74,6 @@ export default function Dashboard() {
       href: "/projects/new",
       gradient: "from-blue-600 to-blue-400",
       featured: true,
-    },
-    {
-      titleKey: "qa.designStudio",
-      descKey: "qa.designStudioDesc",
-      icon: PenTool,
-      href: "/editor",
-      gradient: "from-pink-600 to-pink-400",
     },
     {
       titleKey: "qa.aiAnalysis",
@@ -282,7 +274,7 @@ export default function Dashboard() {
               {recentProjects.map((project) => (
                 <Link
                   key={project.id}
-                  href={`/editor?project=${project.id}`}
+                  href={`/site-plan?project=${project.id}`}
                   className="group relative overflow-hidden rounded-xl bg-white border border-slate-200 p-4 hover:border-slate-300 transition-all hover:-translate-y-1 shadow-sm hover:shadow-md"
                 >
                   <div className="flex items-start justify-between mb-3">

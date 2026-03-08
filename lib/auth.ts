@@ -28,17 +28,48 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
 export async function createToken(user: AuthUser): Promise<string> {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, name: user.name, role: user.role, credits: user.credits },
     JWT_SECRET,
     { expiresIn: "7d" }
   );
 }
 
-export async function verifyToken(token: string): Promise<AuthUser | null> {
+/**
+ * Verify a JWT token.
+ *
+ * By default, this decodes the JWT without hitting the database — instant.
+ * When `fetchFreshCredits` is true, it also queries the DB for the latest
+ * credit balance (used only by /api/auth/me).
+ */
+export async function verifyToken(
+  token: string,
+  opts?: { fetchFreshCredits?: boolean }
+): Promise<AuthUser | null> {
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { id: string };
+    const payload = jwt.verify(token, JWT_SECRET) as {
+      id: string;
+      email: string;
+      name?: string | null;
+      role: string;
+      credits?: number;
+    };
+
+    // Fast path: decode JWT only — no DB roundtrip.
+    // The JWT already contains id, email, role, credits from when it was issued.
+    if (!opts?.fetchFreshCredits) {
+      return {
+        id: payload.id,
+        email: payload.email,
+        name: payload.name ?? null,
+        role: payload.role,
+        credits: payload.credits ?? 0,
+      };
+    }
+
+    // Slow path: fetch fresh user data from DB (for /api/auth/me only).
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
+      select: { id: true, email: true, name: true, role: true, credits: true },
     });
     if (!user) return null;
     return {
@@ -58,4 +89,15 @@ export async function getSession(): Promise<AuthUser | null> {
   const token = cookieStore.get("auth-token")?.value;
   if (!token) return null;
   return verifyToken(token);
+}
+
+/**
+ * Get session with fresh credit balance from DB.
+ * Only use when you specifically need the very latest credits.
+ */
+export async function getSessionWithFreshCredits(): Promise<AuthUser | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("auth-token")?.value;
+  if (!token) return null;
+  return verifyToken(token, { fetchFreshCredits: true });
 }

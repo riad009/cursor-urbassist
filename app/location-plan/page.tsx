@@ -283,7 +283,7 @@ function LocationPlanPageContent() {
                   <div className="mt-3 space-y-2">
                     <NextStepButton
                       canProceed={!!selectedCoords}
-                      nextHref={`/editor?project=${selectedProjectId}`}
+                      nextHref={`/site-plan?project=${selectedProjectId}`}
                       nextLabel={getNextStep("/location-plan", selectedProjectId)?.label ?? "Next: Site Plan"}
                       disabledMessage="Select a location (address or map) to continue"
                     />

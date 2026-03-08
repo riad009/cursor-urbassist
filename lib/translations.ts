@@ -66,8 +66,6 @@ export const translations: Record<string, Record<Locale, string>> = {
     // Quick actions
     "qa.newProject": { fr: "Nouveau Projet", en: "New Project" },
     "qa.newProjectDesc": { fr: "Partez de zéro ou d'un modèle", en: "Start from scratch or template" },
-    "qa.designStudio": { fr: "Studio Design", en: "Design Studio" },
-    "qa.designStudioDesc": { fr: "Ouvrir l'éditeur visuel", en: "Open the visual editor" },
     "qa.aiAnalysis": { fr: "Analyse IA", en: "AI Analysis" },
     "qa.aiAnalysisDesc": { fr: "Télécharger des documents PLU", en: "Upload PLU documents" },
     "qa.feasibility": { fr: "Faisabilité", en: "Feasibility" },

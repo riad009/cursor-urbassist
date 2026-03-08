@@ -28,6 +28,12 @@ import {
     Pencil,
     Search,
     Sparkles,
+    Ruler,
+    Building2,
+    Palette,
+    TreePine,
+    Car,
+    Shield,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import MaterialsStep from "@/components/project-description/MaterialsStep";
@@ -246,6 +252,9 @@ export default function ProjectDescriptionPage({
     const [generationCount, setGenerationCount] = useState(0);
     const [generatedStatement, setGeneratedStatement] = useState<{ text: string; sections: Record<string, string> } | null>(null);
     const [generationError, setGenerationError] = useState<string | null>(null);
+    // PLU analysis result (from /api/analyze-plu)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [pluAnalysisResult, setPluAnalysisResult] = useState<{ analysis: any; pluRules: any } | null>(null);
 
     // Real project/zone data
     const [projectName, setProjectName] = useState<string>("");
@@ -700,6 +709,14 @@ export default function ProjectDescriptionPage({
         setAnalysisComplete(false);
         setGenerationError(null);
 
+        // Validate PDF is provided
+        if (!pluFile) {
+            setGenerationError("Veuillez uploader un document PLU en PDF avant de lancer l'analyse.");
+            setAnalysisProgress(100);
+            setAnalysisComplete(true);
+            return;
+        }
+
         // Animate progress while waiting for API
         const interval = setInterval(() => {
             setAnalysisProgress(prev => {
@@ -707,50 +724,41 @@ export default function ProjectDescriptionPage({
                     clearInterval(interval);
                     return 90; // Hold at 90% until API responds
                 }
-                return prev + Math.random() * 6 + 1;
+                return prev + Math.random() * 4 + 0.5;
             });
-        }, 300);
+        }, 500);
 
         try {
-            // Build answers from wizard state
-            const answers: Record<string, string> = {
-                projectType: jobs.length > 0 ? jobs.map(j => j.displayLabel || j.nature).join(", ") : "Construction",
-                authorizationType: dpcResult?.determination || "PC",
-                currentState: terrainInitial || "",
-                topography: accessVerts || "",
-                floorArea: String(jobs.reduce((sum, j) => sum + j.floorAreaEstimated, 0)),
-                footprint: String(jobs.reduce((sum, j) => sum + j.footprint, 0)),
-                facadeMaterials: matExtMaterial ? `${matExtMaterial} (${matExtColor})` : "",
-                roofType: roofType || "",
-                roofMaterials: roofCovering ? `${roofCovering} (${roofColor})` : "",
-                exteriorFinishes: joineryMaterial || "",
-                colorPalette: [matExtColor, roofColor, wallColor, gutterColor].filter(Boolean).join(", "),
-                fencing: fenceMaterial ? `${fenceMaterial} (${fenceColor})` : "",
-            };
+            // ── Build FormData with PDF + context ──────────────────────────
+            const formData = new FormData();
+            formData.append("pdfFile", pluFile);
+            formData.append("pluZone", projectZoneType || "non spécifiée");
+            formData.append("isABFZone", String(projectProtectedAreas.length > 0));
+            formData.append("parcelAddress", projectAddress || "non précisée");
 
-            const res = await fetch("/api/descriptive-statement", {
+            const res = await fetch("/api/analyze-plu", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ projectId, answers }),
+                body: formData, // No Content-Type header — browser sets multipart boundary
             });
 
             clearInterval(interval);
             const data = await res.json();
 
-            if (res.ok && data.statement) {
-                setGeneratedStatement(data.statement);
+            if (res.ok && data.success) {
+                // Store the full PLU analysis result for step 6 display
+                setPluAnalysisResult({ analysis: data.analysis, pluRules: data.pluRules });
                 setGenerationCount(prev => prev + 1);
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             } else {
-                setGenerationError(data.error || "Generation failed");
+                setGenerationError(data.error || "L'analyse du document a échoué.");
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             }
         } catch (err) {
             clearInterval(interval);
-            console.error("Analysis failed:", err);
-            setGenerationError("Connection error. Please try again.");
+            console.error("PLU Analysis failed:", err);
+            setGenerationError("Erreur de connexion. Veuillez réessayer.");
             setAnalysisProgress(100);
             setAnalysisComplete(true);
         }
@@ -1991,103 +1999,336 @@ export default function ProjectDescriptionPage({
                                             </div>
                                         </div>
 
-                                        {/* Conformity Results */}
-                                        <div className="rounded-xl border border-green-200 bg-green-50/50 p-5 space-y-4">
-                                            <div className="flex items-center gap-2">
-                                                <Check className="w-6 h-6 text-green-600" />
-                                                <div>
-                                                    <h3 className="text-lg font-bold text-slate-900">
-                                                        {isEn ? "Project Compliant" : "Projet Conforme"}
-                                                    </h3>
-                                                    <p className="text-sm text-slate-500">
-                                                        {isEn
-                                                            ? "The analysis revealed no major blocking issue."
-                                                            : "L'analyse n'a révélé aucun point bloquant majeur."}
-                                                    </p>
-                                                </div>
-                                            </div>
+                                        {/* ── Extracted PLU Rules Dashboard ── */}
+                                        {(() => {
+                                            const rules = pluAnalysisResult?.pluRules;
+                                            const analysis = pluAnalysisResult?.analysis;
+                                            const notSpecified = isEn ? "Not specified in document" : "Non précisé dans le document";
+                                            const formatVal = (v: number | string | null | undefined, unit?: string) => {
+                                                if (v === null || v === undefined) return notSpecified;
+                                                if (typeof v === "number") return `${v}${unit || ""}`;
+                                                return String(v);
+                                            };
+                                            const formatPercent = (v: number | null | undefined) => {
+                                                if (v === null || v === undefined) return notSpecified;
+                                                return `${Math.round(v * 100)} %`;
+                                            };
+                                            const hasRules = !!rules;
 
-                                            <div className="space-y-3 ml-1">
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Ground Coverage (CES)" : "Emprise au sol (CES)"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "The total footprint remains below the authorized maximum of 40% (Article 9)."
-                                                                : "L'emprise totale reste inférieure au maximum autorisé de 40% (Article 9)."}
-                                                        </p>
+                                            return (
+                                                <div className="space-y-5">
+                                                    {/* Section Header */}
+                                                    <div className="flex items-center gap-2">
+                                                        <Sparkles className="w-5 h-5 text-indigo-500" />
+                                                        <h3 className="text-lg font-bold text-slate-900">
+                                                            {isEn ? "Extracted Urban Planning Rules" : "Règles d'Urbanisme Extraites"}
+                                                        </h3>
+                                                        {rules?.extractionConfidence && (
+                                                            <span className={`ml-auto text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                                                                rules.extractionConfidence === "high" ? "bg-green-100 text-green-700" :
+                                                                rules.extractionConfidence === "medium" ? "bg-amber-100 text-amber-700" :
+                                                                "bg-red-100 text-red-700"
+                                                            }`}>
+                                                                {rules.extractionConfidence === "high" ? (isEn ? "High confidence" : "Confiance élevée") :
+                                                                 rules.extractionConfidence === "medium" ? (isEn ? "Medium confidence" : "Confiance moyenne") :
+                                                                 (isEn ? "Low confidence" : "Confiance faible")}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                </div>
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Building Height" : "Hauteur des constructions"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "Height compliant with respect to boundary setbacks (Article 10)."
-                                                                : "Hauteur respectée par rapport aux limites séparatives (Article 10)."}
-                                                        </p>
+                                                    <p className="text-xs text-slate-500 -mt-3">
+                                                        {isEn
+                                                            ? "These rules were automatically extracted from your PLU document by AI. Compliance cross-check will occur in Phase 2 after the site plan is drawn."
+                                                            : "Ces règles ont été automatiquement extraites de votre document PLU par l'IA. Le croisement de conformité se fera en Phase 2, après le dessin du plan de masse."}
+                                                    </p>
+
+                                                    {/* ── Numeric Rules Cards ── */}
+                                                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                                                        {/* CES */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                                                                    <Box className="w-4 h-4 text-indigo-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Ground Coverage (CES)" : "Emprise au sol (CES)"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-lg font-bold ${rules?.maxCoverageRatio != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
+                                                                {formatPercent(rules?.maxCoverageRatio)}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Max Height */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                                                                    <Building2 className="w-4 h-4 text-amber-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Max Height (Eave)" : "Hauteur Max (Égout)"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-lg font-bold ${rules?.maxHeight != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
+                                                                {formatVal(rules?.maxHeight, " m")}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Max Ridge Height */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
+                                                                    <Building2 className="w-4 h-4 text-orange-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Max Height (Ridge)" : "Hauteur Max (Faîtage)"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-lg font-bold ${rules?.maxRidgeHeight != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
+                                                                {formatVal(rules?.maxRidgeHeight, " m")}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Green Space */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                                                                    <TreePine className="w-4 h-4 text-green-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Green Space Min" : "Espaces Verts Min"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-lg font-bold ${rules?.greenSpaceMinPercent != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
+                                                                {rules?.greenSpaceMinPercent != null ? `${rules.greenSpaceMinPercent} %` : notSpecified}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Parking */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                                                                    <Car className="w-4 h-4 text-blue-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Parking" : "Stationnement"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-sm font-semibold ${rules?.parkingRequirements ? "text-slate-900" : "text-slate-400"}`}>
+                                                                {rules?.parkingRequirements || notSpecified}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Max Fence Height */}
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center">
+                                                                    <Fence className="w-4 h-4 text-slate-600" />
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-500 uppercase">
+                                                                    {isEn ? "Max Fence Height" : "Clôture Max"}
+                                                                </h4>
+                                                            </div>
+                                                            <p className={`text-lg font-bold ${rules?.maxFenceHeight != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
+                                                                {formatVal(rules?.maxFenceHeight, " m")}
+                                                            </p>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Exterior Appearance" : "Aspect extérieur"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "Declared materials are authorized in this zone (Article 11)."
-                                                                : "Les matériaux déclarés sont autorisés dans cette zone (Article 11)."}
-                                                        </p>
+
+                                                    {/* ── Setbacks Card ── */}
+                                                    <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-5">
+                                                        <div className="flex items-center gap-2 mb-3">
+                                                            <Ruler className="w-5 h-5 text-violet-500" />
+                                                            <h4 className="text-sm font-bold text-slate-900">
+                                                                {isEn ? "Required Setbacks" : "Retraits Réglementaires"}
+                                                            </h4>
+                                                        </div>
+                                                        <div className="grid grid-cols-3 gap-3">
+                                                            {(["front", "side", "rear"] as const).map((key) => {
+                                                                const label = key === "front"
+                                                                    ? (isEn ? "Front (Road)" : "Façade (Voie)")
+                                                                    : key === "side"
+                                                                        ? (isEn ? "Side (Boundaries)" : "Latéral (Limites)")
+                                                                        : (isEn ? "Rear" : "Fond de parcelle");
+                                                                const val = rules?.setbacks?.[key];
+                                                                return (
+                                                                    <div key={key} className="text-center rounded-lg border border-slate-200 bg-white p-3">
+                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{label}</p>
+                                                                        <p className={`text-base font-bold ${val != null ? "text-slate-900" : "text-slate-400 text-xs"}`}>
+                                                                            {val != null
+                                                                                ? (typeof val === "number" ? `${val} m` : val)
+                                                                                : notSpecified}
+                                                                        </p>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Boundary Setbacks" : "Reculs par rapport aux limites"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "Minimum boundary setback distances are respected (Article 7)."
-                                                                : "Les distances minimales de recul par rapport aux limites séparatives sont respectées (Article 7)."}
-                                                        </p>
+
+                                                    {/* ── Qualitative Rules ── */}
+                                                    <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-5 space-y-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <Palette className="w-5 h-5 text-rose-500" />
+                                                            <h4 className="text-sm font-bold text-slate-900">
+                                                                {isEn ? "Architectural & Material Rules" : "Règles Architecturales & Matériaux"}
+                                                            </h4>
+                                                        </div>
+
+                                                        {/* Roof Rules */}
+                                                        <div className="space-y-2">
+                                                            <p className="text-xs font-bold text-slate-600 uppercase">
+                                                                {isEn ? "Roof" : "Toiture"}
+                                                            </p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {(rules?.allowedRoofTypes?.length ?? 0) > 0
+                                                                    ? rules!.allowedRoofTypes.map((t: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-green-50 text-green-700 border border-green-200 rounded-full px-2.5 py-0.5">✓ {t}</span>
+                                                                    ))
+                                                                    : <span className="text-xs text-slate-400 italic">{notSpecified}</span>}
+                                                            </div>
+                                                            {rules?.roofSlopeRange && (
+                                                                <p className="text-xs text-slate-600">
+                                                                    <span className="font-semibold">{isEn ? "Slope:" : "Pente :"}</span> {rules.roofSlopeRange}
+                                                                </p>
+                                                            )}
+                                                            {(rules?.allowedRoofMaterials?.length ?? 0) > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {rules!.allowedRoofMaterials.map((m: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5">{m}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {(rules?.forbiddenRoofMaterials?.length ?? 0) > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {rules!.forbiddenRoofMaterials.map((m: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-red-50 text-red-700 border border-red-200 rounded-full px-2.5 py-0.5">✕ {m}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <hr className="border-slate-200" />
+
+                                                        {/* Facade Rules */}
+                                                        <div className="space-y-2">
+                                                            <p className="text-xs font-bold text-slate-600 uppercase">
+                                                                {isEn ? "Facade" : "Façades"}
+                                                            </p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {(rules?.allowedFacadeMaterials?.length ?? 0) > 0
+                                                                    ? rules!.allowedFacadeMaterials.map((m: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-green-50 text-green-700 border border-green-200 rounded-full px-2.5 py-0.5">✓ {m}</span>
+                                                                    ))
+                                                                    : <span className="text-xs text-slate-400 italic">{isEn ? "No restrictions specified" : "Aucune restriction précisée"}</span>}
+                                                            </div>
+                                                            {(rules?.forbiddenFacadeMaterials?.length ?? 0) > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {rules!.forbiddenFacadeMaterials.map((m: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-red-50 text-red-700 border border-red-200 rounded-full px-2.5 py-0.5">✕ {m}</span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {(rules?.allowedFacadeColors?.length ?? 0) > 0 && (
+                                                                <div className="mt-1">
+                                                                    <p className="text-[10px] font-semibold text-slate-500 mb-1">{isEn ? "Colors" : "Couleurs"}</p>
+                                                                    <div className="flex flex-wrap gap-1.5">
+                                                                        {rules!.allowedFacadeColors.map((c: string, i: number) => (
+                                                                            <span key={i} className="inline-flex items-center text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-2.5 py-0.5">{c}</span>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <hr className="border-slate-200" />
+
+                                                        {/* Joinery */}
+                                                        <div className="space-y-2">
+                                                            <p className="text-xs font-bold text-slate-600 uppercase">
+                                                                {isEn ? "Joinery / Windows" : "Menuiseries"}
+                                                            </p>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {(rules?.allowedJoineryMaterials?.length ?? 0) > 0
+                                                                    ? rules!.allowedJoineryMaterials.map((m: string, i: number) => (
+                                                                        <span key={i} className="inline-flex items-center text-xs bg-green-50 text-green-700 border border-green-200 rounded-full px-2.5 py-0.5">✓ {m}</span>
+                                                                    ))
+                                                                    : <span className="text-xs text-slate-400 italic">{notSpecified}</span>}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Annexes */}
+                                                        {rules?.annexRules && (
+                                                            <>
+                                                                <hr className="border-slate-200" />
+                                                                <div className="space-y-1">
+                                                                    <p className="text-xs font-bold text-slate-600 uppercase">
+                                                                        {isEn ? "Annexes (Garage, Pool, Garden Shed)" : "Annexes (Garage, Piscine, Abri)"}
+                                                                    </p>
+                                                                    <p className="text-xs text-slate-700">{rules.annexRules}</p>
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </div>
-                                                </div>
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Parking Requirements" : "Stationnement"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "Required number of parking spaces is provided (Article 12)."
-                                                                : "Le nombre de places de stationnement requis est respecté (Article 12)."}
-                                                        </p>
+
+                                                    {/* ── Heritage / ABF Section ── */}
+                                                    {(rules?.architectRequired || rules?.abfSpecificConstraints || rules?.heritageNotes) && (
+                                                        <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-5 space-y-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <Shield className="w-5 h-5 text-amber-600" />
+                                                                <h4 className="text-sm font-bold text-slate-900">
+                                                                    {isEn ? "Heritage / ABF Constraints" : "Contraintes Patrimoniales / ABF"}
+                                                                </h4>
+                                                            </div>
+                                                            {rules?.architectRequired && (
+                                                                <p className="text-xs text-amber-800 font-semibold flex items-center gap-1">
+                                                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                                                    {isEn ? "ABF architect approval required" : "Avis de l'Architecte des Bâtiments de France requis"}
+                                                                </p>
+                                                            )}
+                                                            {rules?.abfSpecificConstraints && (
+                                                                <p className="text-xs text-slate-700">{rules.abfSpecificConstraints}</p>
+                                                            )}
+                                                            {rules?.heritageNotes && (
+                                                                <p className="text-xs text-slate-600 italic">{rules.heritageNotes}</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* ── AI Notes ── */}
+                                                    {rules?.notes && rules.notes.trim().length > 0 && (
+                                                        <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                                                            <div className="flex items-start gap-2">
+                                                                <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                                                                <p className="text-xs text-blue-800">{rules.notes}</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* ── Phase 2 Notice ── */}
+                                                    <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-3">
+                                                        <div className="flex items-start gap-2">
+                                                            <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                                            <p className="text-xs text-indigo-700">
+                                                                {isEn
+                                                                    ? "Compliance verification will be performed automatically in Phase 2 once the site plan is drawn and building dimensions are defined."
+                                                                    : "La vérification de conformité sera effectuée automatiquement en Phase 2, une fois le plan de masse dessiné et les dimensions du bâtiment définies."}
+                                                            </p>
+                                                        </div>
                                                     </div>
+
+                                                    {/* ── No rules fallback ── */}
+                                                    {!hasRules && (
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center">
+                                                            <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                                            <p className="text-sm text-slate-500">
+                                                                {isEn
+                                                                    ? "No PLU rules extracted yet. Upload the PLU document and run the analysis."
+                                                                    : "Aucune règle PLU extraite pour l'instant. Uploadez le document PLU et lancez l'analyse."}
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <div className="flex items-start gap-2.5">
-                                                    <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                                                    <div>
-                                                        <p className="text-sm font-bold text-slate-900">
-                                                            {isEn ? "Green Space" : "Espaces verts"}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {isEn
-                                                                ? "Minimum green area and landscaping ratio is met (Article 13)."
-                                                                : "Le coefficient minimum d'espaces verts et de pleine terre est respecté (Article 13)."}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            );
+                                        })()}
 
                                         {/* Go to 3D */}
                                         <div className="flex justify-end pt-2">

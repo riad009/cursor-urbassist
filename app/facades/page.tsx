@@ -859,7 +859,7 @@ export default function FacadesPage() {
       {/* Header */}
       <header className="h-14 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-50">
         <div className="flex items-center gap-4">
-          <Link href="/editor" className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
+          <Link href="/site-plan" className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors">
             <ArrowLeft className="w-4 h-4" />
             <span>Back to Plan</span>
           </Link>

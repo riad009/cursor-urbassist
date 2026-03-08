@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
-    const { name, description, address, municipality, parcelIds, parcelArea, parcelGeometry, coordinates, citycode, zoneType, protectedAreas, northAngle, projectType } = body;
+    const { name, description, address, municipality, parcelIds, parcelArea, parcelGeometry, parcelsGeoJSON, coordinates, citycode, zoneType, protectedAreas, northAngle, projectType } = body;
     const project = await prisma.project.create({
       data: {
         userId: user.id,
@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
         parcelIds: Array.isArray(parcelIds) ? parcelIds.join(",") : typeof parcelIds === "string" ? parcelIds : "",
         parcelArea: parcelArea ? Number(parcelArea) : null,
         parcelGeometry: typeof parcelGeometry === "string" ? parcelGeometry : (parcelGeometry != null ? JSON.stringify(parcelGeometry) : null),
+        parcelsGeoJSON: parcelsGeoJSON ?? null,
         coordinates: coordinates ? JSON.stringify(coordinates) : null,
         citycode: citycode || null,
         northAngle: northAngle != null ? Number(northAngle) : null,

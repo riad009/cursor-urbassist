@@ -6,7 +6,7 @@ import Navigation from "@/components/layout/Navigation";
 import {
     MapPin, Loader2, ArrowRight, FileText, Download, Box,
     ClipboardList, Sparkles, CheckCircle2, Clock, ChevronRight,
-    PenTool, FolderKanban, Layers, Check, CreditCard, Map,
+    FolderKanban, Layers, Check, CreditCard, Map,
     Eye, X, Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
@@ -531,7 +531,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {[
                             { icon: Layers, label: isEn ? "Location Plan" : "Plan de situation", href: `/location-plan?project=${projectId}`, color: "text-purple-600", bg: "bg-purple-50" },
-                            { icon: PenTool, label: isEn ? "Intelligent Editor" : "Éditeur intelligent", href: `/editor?project=${projectId}`, color: "text-blue-600", bg: "bg-blue-50" },
+                            { icon: Layers, label: isEn ? "Site Plan" : "Plan de masse", href: `/site-plan?project=${projectId}`, color: "text-blue-600", bg: "bg-blue-50" },
                             { icon: FileText, label: isEn ? "Descriptive Statement" : "Notice descriptive", href: `/statement?project=${projectId}`, color: "text-emerald-600", bg: "bg-emerald-50" },
                         ].map((item) => {
                             const Icon = item.icon;

@@ -30,7 +30,7 @@ export const PLANNING_STEPS: readonly PlanningStep[] = [
   { step: 6, phase: 2, label: "Overview", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+$/.test(p) && p !== "/projects/new", href: (id) => `/projects/${id}` },
   { step: 7, phase: 2, label: "Description", path: "/projects/", pathMatch: (p) => /^\/projects\/[^/]+\/description$/.test(p), href: (id) => `/projects/${id}/description` },
   { step: 8, phase: 2, label: "Location Plan", path: "/location-plan", pathMatch: (p) => p === "/location-plan" || p.startsWith("/location-plan/"), href: (id) => `/location-plan?project=${id}` },
-  { step: 9, phase: 2, label: "Site Plan", path: "/site-plan", pathMatch: (p) => p === "/site-plan" || p.startsWith("/site-plan/") || p === "/editor" || p.startsWith("/editor/"), href: (id) => `/site-plan?project=${id}` },
+  { step: 9, phase: 2, label: "Site Plan", path: "/site-plan", pathMatch: (p) => p === "/site-plan" || p.startsWith("/site-plan/"), href: (id) => `/site-plan?project=${id}` },
   { step: 10, phase: 2, label: "Statement", path: "/statement", pathMatch: (p) => p === "/statement" || p.startsWith("/statement/"), href: (id) => `/statement?project=${id}` },
   { step: 11, phase: 2, label: "Export", path: "/export", pathMatch: (p) => p === "/export" || p.startsWith("/export/"), href: (id) => `/export?project=${id}` },
 ] as const;
@@ -41,7 +41,7 @@ export function getPhaseSteps(phase: StepPhase): PlanningStep[] {
 }
 
 /** Paths that accept ?project= for step context (without being under /projects/[id]) */
-const PROJECT_QUERY_PATHS = ["/plu-analysis", "/site-plan", "/editor", "/location-plan", "/terrain", "/building-3d", "/landscape", "/statement", "/export"];
+const PROJECT_QUERY_PATHS = ["/plu-analysis", "/site-plan", "/location-plan", "/terrain", "/building-3d", "/landscape", "/statement", "/export"];
 
 export function getProjectIdFromRoute(pathname: string, projectParam: string | null): string | null {
   // /projects/new is step 1 — no project ID yet

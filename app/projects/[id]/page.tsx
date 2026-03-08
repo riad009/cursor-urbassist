@@ -1,6 +1,6 @@
 "use client";
 
-import React, { use, useEffect, useState } from "react";
+import React, { use, useState } from "react";
 import Link from "next/link";
 import Navigation from "@/components/layout/Navigation";
 import {
@@ -21,7 +21,6 @@ import {
   FileBarChart,
   Pencil,
   Box,
-  PenTool,
   Shield,
   AlertTriangle,
   ChevronDown,
@@ -33,8 +32,20 @@ import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { cn } from "@/lib/utils";
 import { processProtections } from "@/lib/sup-classification";
+import { useProject } from "@/lib/hooks/use-project";
 
 type DocStatus = "not_started" | "in_progress" | "completed";
+
+interface ProjectData {
+  id: string;
+  name: string;
+  address: string | null;
+  coordinates?: string | null;
+  paidAt?: string | null;
+  documents?: { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }[];
+  regulatoryAnalysis?: { id: string } | null;
+  protectedAreas?: { type: string; name: string; description?: string; severity?: string; sourceUrl?: string | null; constraints?: string[] | unknown; categorie?: string }[];
+}
 
 /** Inline sub-component: Tiered Protected Areas display for project detail */
 function ProjectProtectedAreas({ classified, t }: { classified: ReturnType<typeof processProtections>; t: (key: string) => string }) {
@@ -151,7 +162,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     href: (id: string) => string;
     isMain?: boolean;
   }[] = [
-      { type: "SITE_PLAN", label: "Site plan (Main section)", labelFr: "Plan de masse (Section principale)", icon: Layers, href: (id) => `/editor?project=${id}`, isMain: true },
+      { type: "SITE_PLAN", label: "Site plan (Main section)", labelFr: "Plan de masse (Section principale)", icon: Layers, href: (id) => `/site-plan?project=${id}`, isMain: true },
       { type: "LOCATION_PLAN", label: "Location plan", labelFr: "Plan de situation", icon: Map, href: (id) => `/location-plan?project=${id}` },
       { type: "SECTION", label: "Section", labelFr: "Coupe", icon: Scissors, href: (id) => `/terrain?project=${id}` },
       { type: "ELEVATION", label: "Elevations", labelFr: "Élévations", icon: Building2, href: (id) => `/terrain?project=${id}` },
@@ -159,39 +170,9 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
       { type: "DESCRIPTIVE_STATEMENT", label: "Descriptive notice", labelFr: "Notice descriptive", icon: FileText, href: (id) => `/statement?project=${id}` },
     ];
 
-  const [project, setProject] = useState<{
-    id: string;
-    name: string;
-    address: string | null;
-    coordinates?: string | null;
-    paidAt?: string | null;
-    documents?: { id: string; type: string; name: string; fileUrl: string | null; fileData: string | null }[];
-    regulatoryAnalysis?: { id: string } | null;
-    protectedAreas?: { type: string; name: string; description?: string; severity?: string; sourceUrl?: string | null; constraints?: string[] | unknown; categorie?: string }[];
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { project: rawProject, loading } = useProject(projectId);
+  const project = rawProject as unknown as ProjectData | null;
   const { user, loading: authLoading } = useAuth();
-
-  useEffect(() => {
-    if (!projectId || !user) {
-      if (!authLoading) setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    fetch(`/api/projects/${projectId}`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled && data.project) setProject(data.project);
-      })
-      .catch(() => { })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, user, authLoading]);
 
   function getDocStatus(doc: { fileUrl?: string | null; fileData?: string | null } | undefined): DocStatus {
     if (!doc) return "not_started";
@@ -377,11 +358,11 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
 
                   <div className="flex flex-wrap gap-2">
                     <Link
-                      href={`/editor?project=${project.id}`}
+                      href={`/site-plan?project=${project.id}`}
                       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
                     >
-                      <PenTool className="w-4 h-4" />
-                      {isEn ? "Intelligent Editor" : "Éditeur intelligent"}
+                      <Layers className="w-4 h-4" />
+                      {isEn ? "Site Plan Editor" : "Éditeur plan de masse"}
                       <ArrowRight className="w-4 h-4" />
                     </Link>
                     <Link

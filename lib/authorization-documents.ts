@@ -136,3 +136,110 @@ export function getDocumentsForProject(
 
     return docs;
 }
+
+// ─── PCMI 14 — Volet paysager for PC in ABF Heritage zones ──────────────
+
+export const PCMI14_DOCUMENT: AuthorizationDocument = {
+    code: "PCMI 14",
+    label: "Volet paysager — Complément en zone ABF",
+    description:
+        "Document complémentaire requis pour les projets en périmètre de monument historique ou site patrimonial remarquable",
+    tag: "ABF",
+};
+
+// ─── calculateRequiredDocuments ─────────────────────────────────────────
+//
+// Single entry-point for computing the full set of mandatory planning
+// documents for a given project context.  This function is consumed by
+// both the client-side store (via regulatoryDocumentStore) and the
+// server-side PDF generation pipeline.
+//
+// French regulatory sources:
+//  • Code de l'urbanisme Art. R.431-8 à R.431-12 (PC pièces jointes)
+//  • Code de l'urbanisme Art. R.431-35 à R.431-37 (DP pièces jointes)
+//  • Art. R.425-1  → consultation ABF obligatoire
+//  • Circulaire du 2 mars 2017 → PCMI 14 volet paysager complémentaire
+
+export interface RequiredDocumentsResult {
+    /** The resolved project type */
+    projectType: "DP" | "PC";
+    /** Whether the project is located in an ABF / heritage zone */
+    isABFZone: boolean;
+    /** Complete ordered list of required documents */
+    documents: AuthorizationDocument[];
+    /** Document codes that were added specifically because of ABF zone */
+    abfSpecificCodes: string[];
+    /** Human-readable summary of ABF impact on documents */
+    abfImpactSummary: string | null;
+}
+
+/**
+ * Compute the full, ordered list of required French planning documents
+ * for a project, taking into account authorization type and ABF zone status.
+ *
+ * This is the **canonical** function for document list computation.
+ * Phase 2 (document generation / CERFA pre-fill) MUST use this function
+ * or the Zustand store that wraps it.
+ *
+ * @param projectType  - "DP" (Déclaration Préalable) or "PC" (Permis de Construire)
+ * @param isABFZone    - true if the parcel is inside an ABF / heritage protection perimeter
+ * @param options      - additional context
+ * @returns Typed result with documents, ABF-specific codes, and impact summary
+ */
+export function calculateRequiredDocuments(
+    projectType: "DP" | "PC",
+    isABFZone: boolean,
+    options?: {
+        /** True if the project involves modifications to an existing structure */
+        isExistingStructure?: boolean;
+    }
+): RequiredDocumentsResult {
+    // Resolve the authType string expected by getDocumentsForProject
+    const authType = projectType === "PC" ? "PC" : "DP";
+
+    // Get the base document list (handles PC5 split for existing structures)
+    const documents = getDocumentsForProject(authType, {
+        hasABF: isABFZone,
+        isExistingStructure: options?.isExistingStructure,
+    });
+
+    // Track which codes were added/modified due to ABF
+    const abfSpecificCodes: string[] = [];
+
+    if (isABFZone) {
+        if (projectType === "DP") {
+            // DPC 11 is appended by getDocumentsForProject when hasABF = true
+            abfSpecificCodes.push("DPC 11");
+        } else {
+            // PC 4 is tagged with ABF by getDocumentsForProject
+            abfSpecificCodes.push("PC 4");
+
+            // Add PCMI 14 — volet paysager complémentaire (ABF-specific for PC)
+            // Only add if not already present (defensive)
+            if (!documents.some((d) => d.code === "PCMI 14")) {
+                documents.push(PCMI14_DOCUMENT);
+                abfSpecificCodes.push("PCMI 14");
+            }
+        }
+    }
+
+    // Build human-readable impact summary
+    let abfImpactSummary: string | null = null;
+    if (isABFZone) {
+        const codeList = abfSpecificCodes.join(", ");
+        abfImpactSummary =
+            projectType === "DP"
+                ? `Zone ABF détectée — la pièce ${codeList} (notice relative aux modalités d'exécution des travaux) est obligatoire. ` +
+                  `Le délai d'instruction est majoré d'un mois (consultation ABF).`
+                : `Zone ABF détectée — les pièces ${codeList} sont requises ou complétées pour l'avis de l'Architecte des Bâtiments de France. ` +
+                  `Le délai d'instruction est majoré d'un mois.`;
+    }
+
+    return {
+        projectType,
+        isABFZone,
+        documents,
+        abfSpecificCodes,
+        abfImpactSummary,
+    };
+}

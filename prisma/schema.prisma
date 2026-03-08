@@ -101,6 +101,7 @@ model Project {
   parcelIds                String                @default("") @map("parcel_ids")
   parcelArea               Float?                @map("parcel_area")
   parcelGeometry           String?               @map("parcel_geometry")
+  parcelsGeoJSON           Json?                 @map("parcels_geojson")
   existingBuildingsData    Json?                 @map("existing_buildings_data")
   northAngle               Float?                @map("north_angle")
   status                   ProjectStatus         @default(DRAFT)
@@ -129,6 +130,8 @@ model Project {
   sectionData              SectionData[]
   sitePlanData             SitePlanData?
   terrainData              TerrainData?
+
+  @@index([userId])
 }
 
 model RegulatoryAnalysis {

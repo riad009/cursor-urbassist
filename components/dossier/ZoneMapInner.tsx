@@ -177,6 +177,12 @@ function ViewportParcelsLoader({
   const abortRef = useRef<AbortController | null>(null);
   const lastBboxRef = useRef<string>("");
 
+  // ── Stable refs: prevent useCallback recreation on every parent re-render ──
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+  const existingIdsRef = useRef(existingIds);
+  existingIdsRef.current = existingIds;
+
   const fetchForBounds = useCallback(() => {
     try {
       const zoom = map.getZoom();
@@ -205,22 +211,22 @@ function ViewportParcelsLoader({
         .then((r) => r.json())
         .then((data) => {
           const raw: ParcelWithGeometry[] = data?.parcels ?? [];
-          const newParcels = raw.filter((p) => !existingIds.has(p.id));
-          if (newParcels.length > 0) onLoaded(newParcels);
+          const currentIds = existingIdsRef.current;
+          const newParcels = raw.filter((p) => !currentIds.has(p.id));
+          if (newParcels.length > 0) onLoadedRef.current(newParcels);
         })
         .catch(() => { });
     } catch { /* map container not ready yet — retry on next event */ }
-  }, [map, onLoaded, existingIds]);
+  }, [map]); // Only depends on map — stable across renders
+
+  const debouncedFetch = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(fetchForBounds, VIEWPORT_DEBOUNCE_MS);
+  }, [fetchForBounds]);
 
   useMapEvents({
-    moveend: () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(fetchForBounds, VIEWPORT_DEBOUNCE_MS);
-    },
-    zoomend: () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(fetchForBounds, VIEWPORT_DEBOUNCE_MS);
-    },
+    moveend: debouncedFetch,
+    zoomend: debouncedFetch,
   });
 
   useEffect(() => {

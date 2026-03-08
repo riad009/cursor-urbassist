@@ -12,3 +12,19 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
+// Graceful shutdown: disconnect Prisma when the process exits
+// Prevents connection leak on hot-reload in development
+if (typeof process !== "undefined") {
+  const shutdown = async () => {
+    await prisma.$disconnect();
+  };
+  process.on("beforeExit", shutdown);
+  process.on("SIGINT", async () => {
+    await shutdown();
+    process.exit(0);
+  });
+  process.on("SIGTERM", async () => {
+    await shutdown();
+    process.exit(0);
+  });
+}

@@ -181,7 +181,7 @@ export default function ProjectsPage() {
                     </button>
                   </div>
                   <Link
-                    href={`/editor?project=${project.id}`}
+                    href={`/site-plan?project=${project.id}`}
                     className="text-center text-sm text-slate-400 hover:text-slate-600 py-1"
                   >
                     {t("auth.next") === "Next" ? "Open site plan →" : "Ouvrir le plan de masse →"}

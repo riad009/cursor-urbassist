@@ -145,6 +145,7 @@ interface ProjectData {
   includeOverhangInFootprint: boolean;
   coordinates: { lat: number; lng: number } | null;
   parcelGeometry: unknown;
+  parcelsGeoJSON: unknown; // GeoJSON FeatureCollection with individual parcel features
   existingBuildingsGeoJSON: unknown; // GeoJSON FeatureCollection from IGN BDTOPO
   pluSetbacks?: Record<string, number>;
 }
@@ -863,6 +864,7 @@ function SitePlanContent() {
           includeOverhangInFootprint: ai?.includeOverhangInFootprint === true,
           coordinates: coords,
           parcelGeometry: p.parcelGeometry,
+          parcelsGeoJSON: p.parcelsGeoJSON ?? null,
           existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
         });
       })
@@ -973,41 +975,137 @@ function SitePlanContent() {
     }
   }, [projectData?.existingBuildingsGeoJSON, canvasReady, existingBuildingsLoaded, drawExistingBuildingsFromGeoJSON]);
 
-  // Auto-draw parcel boundaries from project parcelGeometry (spec 2.2)
+  // Auto-draw parcel boundaries from project parcelsGeoJSON (individual parcels) or parcelGeometry (merged)
   const drawParcelsFromProjectData = useCallback(() => {
     const canvas = fabricRef.current;
-    if (!canvas || !projectData?.parcelGeometry || !currentProjectId) return;
+    if (!canvas || !currentProjectId) return;
+    if (!projectData?.parcelsGeoJSON && !projectData?.parcelGeometry) return;
     if (parcelsDrawnFromGeometryRef.current === currentProjectId) return;
     const hasParcel = canvas.getObjects().some((o: any) => o.isParcel);
     if (hasParcel) return;
-    const shapes = parcelGeometryToShapes(projectData.parcelGeometry, {
+
+    // Prefer parcelsGeoJSON (individual parcel features with metadata) over merged parcelGeometry
+    const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+    const shapes = parcelGeometryToShapes(geoSource, {
       canvasWidth: canvasSize.width,
       canvasHeight: canvasSize.height,
       pixelsPerMeter: currentScale.pixelsPerMeter,
     });
     if (shapes.length === 0) return;
+
+    // Extract feature-level properties for labels if we're using parcelsGeoJSON
+    let featureProps: Array<{ section?: string; number?: string; area?: number; id?: string }> = [];
+    if (projectData.parcelsGeoJSON) {
+      try {
+        const fc = typeof projectData.parcelsGeoJSON === "string"
+          ? JSON.parse(projectData.parcelsGeoJSON)
+          : projectData.parcelsGeoJSON;
+        if (fc?.type === "FeatureCollection" && Array.isArray(fc.features)) {
+          featureProps = fc.features.map((f: any) => f.properties || {});
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Distinct fill colors for each parcel for visual clarity
+    const parcelColors = [
+      { fill: "rgba(34, 197, 94, 0.15)", stroke: "#16a34a", labelFill: "#15803d" },
+      { fill: "rgba(59, 130, 246, 0.12)", stroke: "#2563eb", labelFill: "#1d4ed8" },
+      { fill: "rgba(168, 85, 247, 0.12)", stroke: "#7c3aed", labelFill: "#6d28d9" },
+      { fill: "rgba(245, 158, 11, 0.12)", stroke: "#d97706", labelFill: "#b45309" },
+      { fill: "rgba(236, 72, 153, 0.12)", stroke: "#db2777", labelFill: "#be185d" },
+      { fill: "rgba(6, 182, 212, 0.12)", stroke: "#0891b2", labelFill: "#0e7490" },
+    ];
+
     shapes.forEach((shape, idx) => {
+      const props = featureProps[idx];
+      const color = parcelColors[idx % parcelColors.length];
+      const labelParts: string[] = [];
+      if (props?.section) labelParts.push(props.section);
+      if (props?.number) labelParts.push(`N°${props.number}`);
+      if (props?.area) labelParts.push(`${props.area.toLocaleString()} m²`);
+      const label = labelParts.length > 0 ? labelParts.join(" · ") : `Parcel ${idx + 1}`;
+
       const poly = new fabric.Polygon(shape.points, {
         left: shape.left,
         top: shape.top,
-        fill: "rgba(34, 197, 94, 0.08)",
-        stroke: "#22c55e",
-        strokeWidth: 2,
-        strokeDashArray: [4, 2],
+        fill: color.fill,
+        stroke: color.stroke,
+        strokeWidth: 2.5,
+        strokeLineJoin: "round",
       });
       const pid = `parcel-geo-${currentProjectId}-${idx}`;
       (poly as any).id = pid;
-      (poly as any).elementName = `Land Parcel ${idx + 1}`;
+      (poly as any).elementName = label;
       (poly as any).isParcel = true;
       (poly as any).excludeFromExport = false;
       canvas.add(poly);
-      addPolygonMeasurements(poly, pid);
+      // Skip dimension-line measurements for parcels — they create visual clutter
+      // Only add a clean centroid label
+      const center = poly.getCenterPoint();
+      const labelText = new fabric.Text(label, {
+        left: center.x,
+        top: center.y,
+        fontSize: 12,
+        fontFamily: "Inter, sans-serif",
+        fontWeight: "bold",
+        fill: color.labelFill,
+        backgroundColor: "rgba(255,255,255,0.85)",
+        padding: 4,
+        originX: "center",
+        originY: "center",
+        selectable: false,
+        evented: false,
+      });
+      (labelText as any).isMeasurement = true;
+      (labelText as any).parentId = pid;
+      (labelText as any).excludeFromExport = true;
+      canvas.add(labelText);
+      measurementLabelsRef.current.set(pid, [labelText]);
+
       canvas.sendObjectToBack(poly);
     });
+
+    // Auto-zoom-to-fit all parcels on the canvas
+    if (shapes.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      shapes.forEach((s) => {
+        s.points.forEach((p) => {
+          const px = s.left + p.x;
+          const py = s.top + p.y;
+          minX = Math.min(minX, px);
+          minY = Math.min(minY, py);
+          maxX = Math.max(maxX, px);
+          maxY = Math.max(maxY, py);
+        });
+      });
+      if (minX !== Infinity) {
+        const parcelsW = maxX - minX;
+        const parcelsH = maxY - minY;
+        const cw = canvasSize.width;
+        const ch = canvasSize.height;
+        const padding = 80; // px margin
+        const zoomX = (cw - padding * 2) / parcelsW;
+        const zoomY = (ch - padding * 2) / parcelsH;
+        const targetZoom = Math.min(zoomX, zoomY, 3); // cap at 3x
+        if (targetZoom > 0 && isFinite(targetZoom)) {
+          const centerPX = (minX + maxX) / 2;
+          const centerPY = (minY + maxY) / 2;
+          canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // reset first
+          const vpt: [number, number, number, number, number, number] = [
+            targetZoom, 0, 0, targetZoom,
+            cw / 2 - centerPX * targetZoom,
+            ch / 2 - centerPY * targetZoom,
+          ];
+          canvas.setViewportTransform(vpt);
+          setZoom(Math.round(targetZoom * 100));
+        }
+      }
+    }
+
     parcelsDrawnFromGeometryRef.current = currentProjectId;
     canvas.renderAll();
     updateLayers(canvas);
-  }, [currentProjectId, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, addPolygonMeasurements, updateLayers]);
+  }, [currentProjectId, projectData?.parcelsGeoJSON, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
   // Load 3D terrain from IGN RGE ALTI® and add as elevation points
   const loadTerrainFromIgn = useCallback(async () => {
@@ -1227,10 +1325,7 @@ function SitePlanContent() {
       };
     });
 
-    const unnamed = elements
-      .map((e: any, i: number) => (e.name === "Unnamed" || !e.name ? { index: i + 1, type: e.type || "object" } : null))
-      .filter(Boolean) as { index: number; type: string }[];
-    if (unnamed.length > 0) { setUnnamedElementsWarning(unnamed); return false; }
+
 
     setSaving(true);
     try {
@@ -2999,14 +3094,6 @@ function SitePlanContent() {
         </div>
       </div>
 
-      {/* Unnamed warning */}
-      {unnamedElementsWarning && unnamedElementsWarning.length > 0 && (
-        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-3 text-sm text-amber-700">
-          <AlertTriangle className="w-5 h-5 shrink-0" />
-          <span>Name all elements before saving. Unnamed: {unnamedElementsWarning.map((u) => `#${u.index} (${u.type})`).join(", ")}.</span>
-          <button onClick={() => setUnnamedElementsWarning(null)} className="ml-auto text-amber-600 hover:text-amber-700">x</button>
-        </div>
-      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
@@ -3109,10 +3196,6 @@ function SitePlanContent() {
                   <span className="text-[11px] font-medium">Full 3D Editor</span>
                 </Link>
               )}
-              <Link href={`/editor${currentProjectId ? `?project=${currentProjectId}` : ""}`} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-cyan-500 hover:bg-cyan-50 transition-all" title="Technical Drawing Editor">
-                <Ruler className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">Tech Drawing</span>
-              </Link>
             </div>
 
             {/* Spacer + Delete at bottom */}
@@ -3153,17 +3236,7 @@ function SitePlanContent() {
                   Click on the plan to place your {selectedPreset.shortLabel}
                 </div>
               )}
-              {creationMode === "guided" && !hideFreeDesignHint && (
-                <div className="absolute top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-20 flex items-start gap-2 px-4 py-3 rounded-xl bg-slate-100/95 border border-amber-200 text-sm text-slate-700 shadow-xl">
-                  <p className="flex-1">
-                    To <strong className="text-amber-600">draw walls or shapes</strong> (lines, rectangles, polygons), switch to <strong className="text-slate-900">Free design</strong> and use the tools in the left toolbar.
-                  </p>
-                  <button onClick={() => setHideFreeDesignHint(true)} className="p-1 rounded text-slate-400 hover:text-slate-900 shrink-0" aria-label="Dismiss">×</button>
-                  <button onClick={() => { setCreationMode("free"); setHideFreeDesignHint(true); }} className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-900 font-medium text-xs hover:bg-amber-400">
-                    Use Free design
-                  </button>
-                </div>
-              )}
+
               <div className="absolute bottom-4 right-4 z-20">
                 <div className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-mono">
                   X: {formatMeasurement(pixelsToMeters(mousePos.x))} | Y: {formatMeasurement(pixelsToMeters(mousePos.y))}
@@ -3183,42 +3256,7 @@ function SitePlanContent() {
                 <canvas ref={canvasRef} className="shadow-2xl" />
               </div>
               <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
-              {/* Floating Real-Time Summary Panel */}
-              {(() => {
-                const fd = computeFootprintData();
-                const totalFp = fd.existingFootprint + (fd.includeOverhangInFootprint ? fd.projectedFootprint + fd.roofOverhang : fd.projectedFootprint);
-                const cesVal = fd.totalSiteArea > 0 ? (totalFp / fd.totalSiteArea * 100) : 0;
-                const greenVal = fd.totalSiteArea > 0 ? (fd.greenSpaceArea / fd.totalSiteArea * 100) : 0;
-                const cesOk = cesVal <= fd.maxCoverageRatio * 100;
-                const greenOk = greenVal >= fd.requiredGreenPct;
-                // 3-tier totals
-                let perm = 0, semi = 0, imp = 0;
-                Object.entries(fd.surfacesByType).forEach(([k, v]) => {
-                  const cl = SURFACE_CLASSIFICATION[k];
-                  if (cl === "permeable") perm += v;
-                  else if (cl === "semi-permeable") semi += v;
-                  else imp += v;
-                });
-                return (
-                  <div className="absolute top-4 right-4 z-20 w-52 bg-white/95 backdrop-blur-sm rounded-xl border border-slate-200 shadow-lg p-3 space-y-2">
-                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Real-Time Summary</h4>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-600">CES</span>
-                      <span className={cn("font-mono font-semibold", cesOk ? "text-emerald-600" : "text-red-500")}>{cesVal.toFixed(1)}%</span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-slate-600">Green space</span>
-                      <span className={cn("font-mono font-semibold", greenOk ? "text-emerald-600" : "text-amber-500")}>{greenVal.toFixed(1)}%</span>
-                    </div>
-                    <div className="h-px bg-slate-200" />
-                    <div className="space-y-1 text-[11px]">
-                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Permeable</span><span className="font-mono">{perm.toFixed(1)} m²</span></div>
-                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" />Semi-Perm.</span><span className="font-mono">{semi.toFixed(1)} m²</span></div>
-                      <div className="flex justify-between"><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />Imperméable</span><span className="font-mono">{imp.toFixed(1)} m²</span></div>
-                    </div>
-                  </div>
-                );
-              })()}
+
           </div>
 
           {/* === 3D Viewer Layer (conditionally rendered — rebuilds scene from data each mount) === */}
@@ -3270,11 +3308,14 @@ function SitePlanContent() {
                 }).filter((b: any) => b.canvasX !== undefined && b.canvasY !== undefined)}
                 elevationPoints={elevationPoints}
                 pixelsPerMeter={currentScale.pixelsPerMeter}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
                 selectedBuildingId={selectedBuildingId3d}
                 onBuildingSelect={(id) => {
                   setSelectedBuildingId3d(id ?? null);
                   if (id) setRightTab("buildings");
                 }}
+                parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
               />
               <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
                 <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
@@ -3670,13 +3711,19 @@ function Inline3DViewer({
   elevationPoints = [],
   selectedBuildingId = null,
   pixelsPerMeter = 20,
+  canvasWidth = 2000,
+  canvasHeight = 1500,
   onBuildingSelect,
+  parcelGeoJSON = null,
 }: {
   buildings: BuildingDetail[];
   elevationPoints?: { id: string; x: number; y: number; value: number }[];
   selectedBuildingId?: string | null;
   pixelsPerMeter?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
   onBuildingSelect?: (buildingId: string | null) => void;
+  parcelGeoJSON?: unknown;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
@@ -3693,17 +3740,61 @@ function Inline3DViewer({
       try {
         const THREE = await import("three");
         const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
+        const { parcelGeometryToShapes } = await import("@/lib/parcelGeometryToCanvas");
+
+        // Compute parcel shapes from raw GeoJSON
+        const parcelShapes = parcelGeoJSON
+          ? parcelGeometryToShapes(parcelGeoJSON, { canvasWidth, canvasHeight, pixelsPerMeter })
+          : [];
 
         const width = container.clientWidth || 800;
         const height = container.clientHeight || 600;
 
-        const scene = new THREE.Scene();
-        // Gradient sky background for realism
-        scene.background = new THREE.Color(0xc9daea);
-        scene.fog = new THREE.FogExp2(0xc9daea, 0.008);
+        // ── Pre-compute scene extent from all objects ──
+        // We need this FIRST to dynamically scale scene parameters
+        let boundsMinX = Infinity, boundsMinY = Infinity, boundsMaxX = -Infinity, boundsMaxY = -Infinity;
+        const buildingsToRender = buildings.length > 0 ? buildings : [];
+        buildingsToRender.forEach((b: any) => {
+          if (b.canvasX !== undefined) {
+            boundsMinX = Math.min(boundsMinX, b.canvasX);
+            boundsMaxX = Math.max(boundsMaxX, b.canvasX);
+            boundsMinY = Math.min(boundsMinY, b.canvasY);
+            boundsMaxY = Math.max(boundsMaxY, b.canvasY);
+          }
+        });
+        elevationPoints.forEach((pt) => {
+          boundsMinX = Math.min(boundsMinX, pt.x);
+          boundsMaxX = Math.max(boundsMaxX, pt.x);
+          boundsMinY = Math.min(boundsMinY, pt.y);
+          boundsMaxY = Math.max(boundsMaxY, pt.y);
+        });
+        parcelShapes.forEach((ps) => {
+          ps.points.forEach((p) => {
+            const absX = ps.left + p.x;
+            const absY = ps.top + p.y;
+            boundsMinX = Math.min(boundsMinX, absX);
+            boundsMaxX = Math.max(boundsMaxX, absX);
+            boundsMinY = Math.min(boundsMinY, absY);
+            boundsMaxY = Math.max(boundsMaxY, absY);
+          });
+        });
 
-        const camera = new THREE.PerspectiveCamera(40, width / height, 0.5, 500);
-        camera.position.set(35, 25, 35);
+        const centerX = boundsMinX !== Infinity ? (boundsMinX + boundsMaxX) / 2 : 400;
+        const centerY = boundsMinY !== Infinity ? (boundsMinY + boundsMaxY) / 2 : 300;
+        const extentX = boundsMinX !== Infinity ? (boundsMaxX - boundsMinX) / pixelsPerMeter : 30;
+        const extentZ = boundsMinY !== Infinity ? (boundsMaxY - boundsMinY) / pixelsPerMeter : 30;
+        const sceneExtent = Math.max(extentX, extentZ, 15);
+        const camDist = sceneExtent * 1.2;
+
+        // ── Scene setup — dynamically scaled ──
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xc9daea);
+        // Fog scales with scene size — density inversely proportional to extent
+        scene.fog = new THREE.FogExp2(0xc9daea, Math.min(0.005, 0.4 / sceneExtent));
+
+        const farPlane = Math.max(500, sceneExtent * 8);
+        const camera = new THREE.PerspectiveCamera(40, width / height, 0.5, farPlane);
+        camera.position.set(camDist * 0.7, camDist * 0.6, camDist * 0.7);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -3727,42 +3818,40 @@ function Inline3DViewer({
         controls.enableDamping = true;
         controls.dampingFactor = 0.06;
         controls.maxPolarAngle = Math.PI / 2 - 0.05;
-        controls.minDistance = 5;
-        controls.maxDistance = 150;
-        controls.target.set(0, 2, 0);
+        controls.minDistance = Math.max(2, sceneExtent * 0.1);
+        controls.maxDistance = sceneExtent * 4;
+        controls.target.set(0, 0, 0);
         controls.enablePan = true;
 
-        // === Lighting: architectural studio quality ===
-        // Main sun light — warm afternoon tone
+        // === Lighting — scales with scene extent ===
+        const sunDist = Math.max(40, sceneExtent * 0.8);
         const sunLight = new THREE.DirectionalLight(0xfff4e6, 1.8);
-        sunLight.position.set(25, 40, 20);
+        sunLight.position.set(sunDist * 0.6, sunDist, sunDist * 0.5);
         sunLight.castShadow = true;
         sunLight.shadow.mapSize.set(4096, 4096);
         sunLight.shadow.camera.near = 0.5;
-        sunLight.shadow.camera.far = 120;
-        sunLight.shadow.camera.left = -60;
-        sunLight.shadow.camera.right = 60;
-        sunLight.shadow.camera.top = 60;
-        sunLight.shadow.camera.bottom = -60;
+        const shadowSize = Math.max(60, sceneExtent * 1.2);
+        sunLight.shadow.camera.far = shadowSize * 3;
+        sunLight.shadow.camera.left = -shadowSize;
+        sunLight.shadow.camera.right = shadowSize;
+        sunLight.shadow.camera.top = shadowSize;
+        sunLight.shadow.camera.bottom = -shadowSize;
         sunLight.shadow.bias = -0.0005;
         sunLight.shadow.normalBias = 0.04;
         sunLight.shadow.radius = 3;
         scene.add(sunLight);
 
-        // Fill light — cool blue from opposite side
         const fillLight = new THREE.DirectionalLight(0xb0c4de, 0.6);
-        fillLight.position.set(-15, 20, -10);
+        fillLight.position.set(-sunDist * 0.4, sunDist * 0.5, -sunDist * 0.3);
         scene.add(fillLight);
 
-        // Sky/ground hemisphere light for natural ambient
         const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x4a7c4e, 0.5);
         scene.add(hemiLight);
-
-        // Subtle ambient for shadow fill
         scene.add(new THREE.AmbientLight(0xd4d4d8, 0.35));
 
-        // === Ground: realistic grass plane ===
-        const groundGeom = new THREE.PlaneGeometry(250, 250, 32, 32);
+        // === Ground & grid — scales with scene ===
+        const groundSize = Math.max(250, sceneExtent * 3);
+        const groundGeom = new THREE.PlaneGeometry(groundSize, groundSize, 32, 32);
         const groundMat = new THREE.MeshStandardMaterial({
           color: 0x5a9c4e,
           roughness: 0.92,
@@ -3774,43 +3863,21 @@ function Inline3DViewer({
         ground.receiveShadow = true;
         scene.add(ground);
 
-        // Subtle ground grid for scale reference
-        const gridHelper = new THREE.GridHelper(200, 40, 0x4a8c3e, 0x4a8c3e);
+        const gridSize = Math.max(200, sceneExtent * 2.5);
+        const gridHelper = new THREE.GridHelper(gridSize, Math.min(80, Math.round(gridSize / 5)), 0x4a8c3e, 0x4a8c3e);
         const gridMat = gridHelper.material;
         (gridMat as any).opacity = 0.15;
         (gridMat as any).transparent = true;
         gridHelper.position.y = 0.01;
         scene.add(gridHelper);
 
-        // Center calculation
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        const buildingsToRender = buildings.length > 0 ? buildings : [];
-
-        buildingsToRender.forEach((b: any) => {
-          if (b.canvasX !== undefined) {
-             minX = Math.min(minX, b.canvasX);
-             maxX = Math.max(maxX, b.canvasX);
-             minY = Math.min(minY, b.canvasY);
-             maxY = Math.max(maxY, b.canvasY);
-          }
-        });
-        elevationPoints.forEach((pt) => {
-          minX = Math.min(minX, pt.x);
-          maxX = Math.max(maxX, pt.x);
-          minY = Math.min(minY, pt.y);
-          maxY = Math.max(maxY, pt.y);
-        });
-
-        const centerX = minX !== Infinity ? (minX + maxX) / 2 : 400;
-        const centerY = minY !== Infinity ? (minY + maxY) / 2 : 300;
-
         // === Buildings ===
-        // Material helpers
+        // Material helpers — French villa style
         const createWallMaterial = (isExisting: boolean, isSelected: boolean) => {
           return new THREE.MeshStandardMaterial({
-            color: isExisting ? 0xc8c0b8 : 0xf0ece4,
-            roughness: 0.82,
-            metalness: 0.02,
+            color: isExisting ? 0xc8bfb0 : 0xf5ead0,  // Warm cream stucco
+            roughness: 0.78,
+            metalness: 0.01,
             emissive: isSelected ? 0x2255bb : 0,
             emissiveIntensity: isSelected ? 0.2 : 0,
           });
@@ -3818,9 +3885,9 @@ function Inline3DViewer({
 
         const roofColors: Record<string, number> = {
           flat: 0x6b6b6b,
-          gable: 0x8b5a3c,
-          hip: 0x8b5a3c,
-          shed: 0x7a6a5a,
+          gable: 0xc45a2c,   // Terra cotta
+          hip: 0xc45a2c,     // Terra cotta
+          shed: 0x9a6038,    // Darker clay
           mansard: 0x5a5a5a,
         };
 
@@ -3840,10 +3907,292 @@ function Inline3DViewer({
              rotY = b.canvasAngle ? -b.canvasAngle * (Math.PI / 180) : 0;
           }
 
+          const buildingType = String(b.name || "").toLowerCase().trim();
+
+          // ═══════════════ POOL (Photo-realistic) ═══════════════
+          if (buildingType.includes("pool") || buildingType.includes("piscine")) {
+            const poolDepth = 1.8;
+            const deckWidth = 1.5; // Wide sandstone surround like reference
+            const copH = 0.12;
+
+            // 1. Surrounding deck / patio (wide sandstone like reference image)
+            const deckGeom = new THREE.BoxGeometry(w + deckWidth * 2, copH, d + deckWidth * 2);
+            const deckMat = new THREE.MeshStandardMaterial({ color: 0xddd0b8, roughness: 0.75, metalness: 0.02 });
+            const deckMesh = new THREE.Mesh(deckGeom, deckMat);
+            deckMesh.position.set(posX, baseY + copH / 2, posZ);
+            deckMesh.rotation.y = rotY;
+            deckMesh.receiveShadow = true;
+            deckMesh.castShadow = true;
+            scene.add(deckMesh);
+
+            // 2. Pool basin walls (grey-blue tile interior)
+            const innerW = w - 0.15, innerD = d - 0.15;
+            // Basin floor
+            const floorGeom = new THREE.BoxGeometry(innerW, 0.1, innerD);
+            const tileMat = new THREE.MeshStandardMaterial({ color: 0x5ba8c8, roughness: 0.3, metalness: 0.05 });
+            const floorMesh = new THREE.Mesh(floorGeom, tileMat);
+            floorMesh.position.set(posX, baseY - poolDepth + 0.05, posZ);
+            floorMesh.rotation.y = rotY;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+            // Basin side walls
+            const wallThick = 0.12;
+            const basinWallMat = new THREE.MeshStandardMaterial({ color: 0x6db8d8, roughness: 0.25, metalness: 0.08 });
+            [
+              { s: [innerW, poolDepth, wallThick], p: [0, -poolDepth / 2, innerD / 2] },
+              { s: [innerW, poolDepth, wallThick], p: [0, -poolDepth / 2, -innerD / 2] },
+              { s: [wallThick, poolDepth, innerD], p: [innerW / 2, -poolDepth / 2, 0] },
+              { s: [wallThick, poolDepth, innerD], p: [-innerW / 2, -poolDepth / 2, 0] },
+            ].forEach(bw => {
+              const g = new THREE.BoxGeometry(bw.s[0], bw.s[1], bw.s[2]);
+              const m = new THREE.Mesh(g, basinWallMat);
+              m.position.set(posX + bw.p[0], baseY + bw.p[1] + copH, posZ + bw.p[2]);
+              m.rotation.y = rotY;
+              m.receiveShadow = true;
+              scene.add(m);
+            });
+
+            // 3. Shallow step shelf (like reference — lighter area at one end)
+            const stepW = innerW * 0.3, stepDepth = 0.5;
+            const stepGeom = new THREE.BoxGeometry(stepW, stepDepth, innerD - 0.3);
+            const stepMat = new THREE.MeshStandardMaterial({ color: 0x88d4ef, roughness: 0.2, metalness: 0.05 });
+            const step = new THREE.Mesh(stepGeom, stepMat);
+            step.position.set(posX - innerW / 2 + stepW / 2 + 0.1, baseY - stepDepth / 2 + copH - 0.05, posZ);
+            step.rotation.y = rotY;
+            scene.add(step);
+
+            // 4. Water surface (turquoise, translucent, reflective)
+            const waterGeom = new THREE.PlaneGeometry(innerW, innerD, 16, 16);
+            const waterMat = new THREE.MeshPhysicalMaterial({
+              color: 0x3ec8e8,
+              roughness: 0.02,
+              metalness: 0.1,
+              transparent: true,
+              opacity: 0.78,
+              transmission: 0.3,
+              thickness: 1.5,
+              clearcoat: 1.0,
+              clearcoatRoughness: 0.05,
+            });
+            const water = new THREE.Mesh(waterGeom, waterMat);
+            water.rotation.x = -Math.PI / 2;
+            water.position.set(posX, baseY + copH - 0.04, posZ);
+            water.receiveShadow = true;
+            (water as any).userData = { buildingId: b.id };
+            scene.add(water);
+
+            // 5. Pool edge coping (raised stone border flush with deck)
+            const copMat = new THREE.MeshStandardMaterial({ color: 0xc8bdac, roughness: 0.55, metalness: 0.03 });
+            const copWidth = 0.25;
+            [
+              { s: [w + 0.1, copH + 0.06, copWidth], p: [0, copH / 2 + 0.03, d / 2 + copWidth / 2 - 0.05] },
+              { s: [w + 0.1, copH + 0.06, copWidth], p: [0, copH / 2 + 0.03, -d / 2 - copWidth / 2 + 0.05] },
+              { s: [copWidth, copH + 0.06, d + copWidth * 2 - 0.1], p: [w / 2 + copWidth / 2 - 0.05, copH / 2 + 0.03, 0] },
+              { s: [copWidth, copH + 0.06, d + copWidth * 2 - 0.1], p: [-w / 2 - copWidth / 2 + 0.05, copH / 2 + 0.03, 0] },
+            ].forEach(c => {
+              const g = new THREE.BoxGeometry(c.s[0], c.s[1], c.s[2]);
+              const m = new THREE.Mesh(g, copMat);
+              m.position.set(posX + c.p[0], baseY + c.p[1], posZ + c.p[2]);
+              m.rotation.y = rotY;
+              m.castShadow = true;
+              scene.add(m);
+            });
+
+            // 6. Glass fence panels (2 sides)
+            const glassMat = new THREE.MeshPhysicalMaterial({
+              color: 0xaaddee, roughness: 0.05, metalness: 0.0,
+              transparent: true, opacity: 0.2, transmission: 0.8,
+            });
+            [d / 2 + deckWidth - 0.2, -d / 2 - deckWidth + 0.2].forEach(gz => {
+              const g = new THREE.BoxGeometry(w + deckWidth * 2, 1.1, 0.03);
+              const m = new THREE.Mesh(g, glassMat);
+              m.position.set(posX, baseY + 0.65, posZ + gz);
+              m.rotation.y = rotY;
+              scene.add(m);
+              // Rail top
+              const railG = new THREE.BoxGeometry(w + deckWidth * 2, 0.04, 0.06);
+              const railM = new THREE.Mesh(railG, new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.3, metalness: 0.6 }));
+              railM.position.set(posX, baseY + 1.22, posZ + gz);
+              railM.rotation.y = rotY;
+              scene.add(railM);
+            });
+
+            return;
+          }
+
+          // ═══════════════ GARDEN / GREEN SPACE ═══════════════
+          if (buildingType.includes("garden") || buildingType.includes("jardin") || buildingType.includes("green")) {
+            // Lawn surface
+            const lawnGeom = new THREE.BoxGeometry(w, 0.15, d);
+            const lawnMat = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.95, metalness: 0.0 });
+            const lawn = new THREE.Mesh(lawnGeom, lawnMat);
+            lawn.position.set(posX, baseY + 0.075, posZ);
+            lawn.rotation.y = rotY;
+            lawn.receiveShadow = true;
+            (lawn as any).userData = { buildingId: b.id };
+            scene.add(lawn);
+            // Decorative hedges along edges
+            const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9, metalness: 0.0 });
+            const hedgeH = 0.8, hedgeW = 0.3;
+            [{ p: [0, hedgeH / 2 + 0.15, d / 2 - hedgeW / 2], s: [w * 0.9, hedgeH, hedgeW] },
+             { p: [0, hedgeH / 2 + 0.15, -d / 2 + hedgeW / 2], s: [w * 0.9, hedgeH, hedgeW] },
+             { p: [w / 2 - hedgeW / 2, hedgeH / 2 + 0.15, 0], s: [hedgeW, hedgeH, d * 0.7] },
+            ].forEach(h => {
+              const g = new THREE.BoxGeometry(h.s[0], h.s[1], h.s[2]);
+              const m = new THREE.Mesh(g, hedgeMat);
+              m.position.set(posX + h.p[0], baseY + h.p[1], posZ + h.p[2]);
+              m.rotation.y = rotY;
+              m.castShadow = true;
+              scene.add(m);
+            });
+            // Decorative trees (sphere on cylinder)
+            const treeMat = new THREE.MeshStandardMaterial({ color: 0x388e3c, roughness: 0.85 });
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x795548, roughness: 0.9 });
+            [[w * 0.25, d * 0.25], [-w * 0.2, -d * 0.15]].forEach(([tx, tz]) => {
+              const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 8), trunkMat);
+              trunk.position.set(posX + tx, baseY + 0.75, posZ + tz);
+              trunk.castShadow = true;
+              scene.add(trunk);
+              const crown = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 12), treeMat);
+              crown.position.set(posX + tx, baseY + 1.7, posZ + tz);
+              crown.castShadow = true;
+              scene.add(crown);
+            });
+            return;
+          }
+
+          // ═══════════════ TERRACE / DECK ═══════════════
+          if (buildingType.includes("terrace") || buildingType.includes("terrasse") || buildingType.includes("deck")) {
+            const deckH = 0.2;
+            const deckGeom = new THREE.BoxGeometry(w, deckH, d);
+            const deckMat = new THREE.MeshStandardMaterial({ color: 0xa1887f, roughness: 0.85, metalness: 0.0 });
+            const deck = new THREE.Mesh(deckGeom, deckMat);
+            deck.position.set(posX, baseY + deckH / 2, posZ);
+            deck.rotation.y = rotY;
+            deck.receiveShadow = true;
+            deck.castShadow = true;
+            (deck as any).userData = { buildingId: b.id };
+            scene.add(deck);
+            // Plank lines for wood texture
+            const plankMat = new THREE.LineBasicMaterial({ color: 0x8d6e63, transparent: true, opacity: 0.4 });
+            const numPlanks = Math.max(3, Math.round(d / 0.3));
+            for (let pi = 1; pi < numPlanks; pi++) {
+              const pz = -d / 2 + (d / numPlanks) * pi;
+              const pts = [new THREE.Vector3(-w / 2, deckH + 0.01, pz), new THREE.Vector3(w / 2, deckH + 0.01, pz)];
+              const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+              const line = new THREE.Line(lineGeo, plankMat);
+              line.position.set(posX, baseY, posZ);
+              line.rotation.y = rotY;
+              scene.add(line);
+            }
+            // Low railing on 3 sides
+            const railMat = new THREE.MeshStandardMaterial({ color: 0x6d4c41, roughness: 0.7, metalness: 0.1 });
+            const railH = 0.9, railW = 0.05;
+            [{ s: [w, railH, railW], p: [0, railH / 2 + deckH, d / 2] },
+             { s: [railW, railH, d], p: [w / 2, railH / 2 + deckH, 0] },
+             { s: [railW, railH, d], p: [-w / 2, railH / 2 + deckH, 0] },
+            ].forEach(r => {
+              const g = new THREE.BoxGeometry(r.s[0], r.s[1], r.s[2]);
+              const m = new THREE.Mesh(g, railMat);
+              m.position.set(posX + r.p[0], baseY + r.p[1], posZ + r.p[2]);
+              m.rotation.y = rotY;
+              m.castShadow = true;
+              scene.add(m);
+            });
+            return;
+          }
+
+          // ═══════════════ PARKING ═══════════════
+          if (buildingType.includes("parking") || buildingType.includes("stationnement")) {
+            const surfH = 0.08;
+            const surfGeom = new THREE.BoxGeometry(w, surfH, d);
+            const surfMat = new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.95, metalness: 0.0 });
+            const surf = new THREE.Mesh(surfGeom, surfMat);
+            surf.position.set(posX, baseY + surfH / 2, posZ);
+            surf.rotation.y = rotY;
+            surf.receiveShadow = true;
+            (surf as any).userData = { buildingId: b.id };
+            scene.add(surf);
+            // Parking stripes
+            const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0.0 });
+            const numSlots = Math.max(1, Math.round(w / 2.5));
+            for (let si = 0; si <= numSlots; si++) {
+              const sx = -w / 2 + (w / numSlots) * si;
+              const stripeGeom = new THREE.BoxGeometry(0.08, 0.02, d * 0.8);
+              const stripe = new THREE.Mesh(stripeGeom, stripeMat);
+              stripe.position.set(posX + sx, baseY + surfH + 0.01, posZ);
+              stripe.rotation.y = rotY;
+              scene.add(stripe);
+            }
+            return;
+          }
+
+          // ═══════════════ ACCESS / DRIVEWAY ═══════════════
+          if (buildingType.includes("access") || buildingType.includes("accès") || buildingType.includes("driveway")) {
+            const pathH = 0.06;
+            const pathGeom = new THREE.BoxGeometry(w, pathH, d);
+            const pathMat = new THREE.MeshStandardMaterial({ color: 0x9e9e9e, roughness: 0.92, metalness: 0.0 });
+            const path = new THREE.Mesh(pathGeom, pathMat);
+            path.position.set(posX, baseY + pathH / 2, posZ);
+            path.rotation.y = rotY;
+            path.receiveShadow = true;
+            (path as any).userData = { buildingId: b.id };
+            scene.add(path);
+            // Edge curbs
+            const curbMat = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, roughness: 0.8 });
+            [d / 2, -d / 2].forEach(cz => {
+              const curbGeom = new THREE.BoxGeometry(w, 0.15, 0.1);
+              const curb = new THREE.Mesh(curbGeom, curbMat);
+              curb.position.set(posX, baseY + 0.075, posZ + cz);
+              curb.rotation.y = rotY;
+              curb.castShadow = true;
+              scene.add(curb);
+            });
+            return;
+          }
+
+          // ═══════════════ CARPORT ═══════════════
+          if (buildingType.includes("carport")) {
+            const carportH = 2.5;
+            const postMat = new THREE.MeshStandardMaterial({ color: 0x757575, roughness: 0.5, metalness: 0.3 });
+            // 4 corner posts
+            [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([sx, sz]) => {
+              const postGeom = new THREE.CylinderGeometry(0.06, 0.06, carportH, 8);
+              const post = new THREE.Mesh(postGeom, postMat);
+              post.position.set(posX + sx * (w / 2 - 0.15), baseY + carportH / 2, posZ + sz * (d / 2 - 0.15));
+              post.castShadow = true;
+              scene.add(post);
+            });
+            // Flat roof/canopy
+            const canopyGeom = new THREE.BoxGeometry(w + 0.3, 0.08, d + 0.3);
+            const canopyMat = new THREE.MeshStandardMaterial({ color: 0x78909c, roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.85 });
+            const canopy = new THREE.Mesh(canopyGeom, canopyMat);
+            canopy.position.set(posX, baseY + carportH, posZ);
+            canopy.rotation.y = rotY;
+            canopy.castShadow = true;
+            canopy.receiveShadow = true;
+            (canopy as any).userData = { buildingId: b.id };
+            scene.add(canopy);
+            // Asphalt floor
+            const floorGeom = new THREE.BoxGeometry(w, 0.05, d);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x546e7a, roughness: 0.95 });
+            const floor = new THREE.Mesh(floorGeom, floorMat);
+            floor.position.set(posX, baseY + 0.025, posZ);
+            floor.rotation.y = rotY;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            return;
+          }
+
+          // ═══════════════ GARAGE (enhanced — with door opening) ═══════════════
+          const isGarage = buildingType.includes("garage");
+          const isShed = buildingType.includes("shed") || buildingType.includes("abri");
+          const garageH = isGarage ? Math.min(totalH, 2.8) : totalH;
+
           // Foundation/plinth
-          const plinthH = 0.15;
-          const plinthGeom = new THREE.BoxGeometry(w + 0.1, plinthH, d + 0.1);
-          const plinthMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.95 });
+          const plinthH = 0.18;
+          const plinthGeom = new THREE.BoxGeometry(w + 0.15, plinthH, d + 0.15);
+          const plinthMat = new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 0.95 });
           const plinth = new THREE.Mesh(plinthGeom, plinthMat);
           plinth.position.set(posX, baseY + plinthH / 2, posZ);
           plinth.rotation.y = rotY;
@@ -3851,11 +4200,11 @@ function Inline3DViewer({
           plinth.castShadow = true;
           scene.add(plinth);
 
-          // Walls
+          // Walls (cream stucco)
           const wallMat = createWallMaterial(b.isExisting, isSelected);
-          const boxGeom = new THREE.BoxGeometry(w, totalH, d);
+          const boxGeom = new THREE.BoxGeometry(w, garageH, d);
           const box = new THREE.Mesh(boxGeom, wallMat);
-          box.position.set(posX, baseY + plinthH + totalH / 2, posZ);
+          box.position.set(posX, baseY + plinthH + garageH / 2, posZ);
           box.rotation.y = rotY;
           box.castShadow = true;
           box.receiveShadow = true;
@@ -3870,9 +4219,9 @@ function Inline3DViewer({
           scene.add(edgeLine);
 
           const roofOverhang = b.roof.overhang || 0;
-          const roofColor = roofColors[b.roof.type] || 0x8b5a3c;
-          const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.85, metalness: 0.05 });
-          const roofBaseY = baseY + plinthH + totalH;
+          const roofColor = roofColors[b.roof.type] || 0xc45a2c;
+          const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.82, metalness: 0.03 });
+          const roofBaseY = baseY + plinthH + garageH;
           if (b.roof.type === "flat") {
             const flatGeom = new THREE.BoxGeometry(w + roofOverhang * 2, 0.25, d + roofOverhang * 2);
             const roof = new THREE.Mesh(flatGeom, new THREE.MeshStandardMaterial({ color: 0x6b6b6b, roughness: 0.88, metalness: 0.1 }));
@@ -3994,7 +4343,42 @@ function Inline3DViewer({
             scene.add(roof);
           }
 
-          // Windows & doors with realistic glass/frame materials
+          // ── Chimney (houses only, not garages/sheds) ──
+          if (!isGarage && !isShed && !buildingType.includes("annex") && !buildingType.includes("extension") && garageH > 2.5) {
+            const chimneyW = 0.6, chimneyD = 0.4, chimneyH = 2.0;
+            const chimneyMat = new THREE.MeshStandardMaterial({ color: 0x8b6b5a, roughness: 0.9, metalness: 0.0 });
+            const chimney = new THREE.Mesh(new THREE.BoxGeometry(chimneyW, chimneyH, chimneyD), chimneyMat);
+            chimney.position.set(posX + w * 0.3, roofBaseY + chimneyH / 2 + 0.5, posZ + d * 0.15);
+            chimney.rotation.y = rotY;
+            chimney.castShadow = true;
+            scene.add(chimney);
+            // Chimney cap
+            const capMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.8 });
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(chimneyW + 0.15, 0.1, chimneyD + 0.15), capMat);
+            cap.position.set(posX + w * 0.3, roofBaseY + chimneyH + 0.55, posZ + d * 0.15);
+            cap.rotation.y = rotY;
+            scene.add(cap);
+          }
+
+          // ── Garage door (on front facade) ──
+          if (isGarage) {
+            const doorW = Math.min(w * 0.8, 3.5), doorH = garageH * 0.75;
+            const garageDoorMat = new THREE.MeshStandardMaterial({ color: 0x9e9e9e, roughness: 0.65, metalness: 0.35 });
+            const gDoor = new THREE.Mesh(new THREE.BoxGeometry(doorW, doorH, 0.06), garageDoorMat);
+            gDoor.position.set(posX, baseY + plinthH + doorH / 2, posZ + d / 2 + 0.03);
+            gDoor.rotation.y = rotY;
+            gDoor.castShadow = true;
+            scene.add(gDoor);
+            // Horizontal panel lines
+            const lineMat = new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.5, metalness: 0.3 });
+            for (let li = 1; li < 5; li++) {
+              const lineY = (doorH / 5) * li - doorH / 2;
+              const lineM = new THREE.Mesh(new THREE.BoxGeometry(doorW - 0.1, 0.02, 0.07), lineMat);
+              lineM.position.set(posX, baseY + plinthH + doorH / 2 + lineY, posZ + d / 2 + 0.035);
+              lineM.rotation.y = rotY;
+              scene.add(lineM);
+            }
+          }
           const winGlassMat = new THREE.MeshStandardMaterial({
             color: 0x8ab4d8, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.7,
           });
@@ -4110,6 +4494,200 @@ function Inline3DViewer({
           }
         });
 
+        // ── Enterprise-Grade 3D Parcel Terrain ──────────────────────────────
+        // Extract feature properties for labels from parcelGeoJSON
+        let featureLabels: Array<{ section?: string; number?: string; area?: number }> = [];
+        if (parcelGeoJSON) {
+          try {
+            const fc = typeof parcelGeoJSON === "string" ? JSON.parse(parcelGeoJSON as string) : parcelGeoJSON;
+            if (fc?.type === "FeatureCollection" && Array.isArray(fc.features)) {
+              featureLabels = fc.features.map((f: any) => f.properties || {});
+            }
+          } catch { /* ignore */ }
+        }
+
+        const parcelPalette = [
+          { top: 0x7ec87e, side: 0x5a8f4e, edge: 0x3d6b33, accent: 0x4caf50 },
+          { top: 0x6bb5a0, side: 0x4a8f7a, edge: 0x336b55, accent: 0x26a69a },
+          { top: 0x9cc97f, side: 0x7aad5f, edge: 0x5a8f40, accent: 0x8bc34a },
+          { top: 0x80b8d0, side: 0x5a90a8, edge: 0x3a6880, accent: 0x42a5f5 },
+          { top: 0xc9a86c, side: 0xa88a50, edge: 0x886b38, accent: 0xffa726 },
+          { top: 0xb09cc0, side: 0x8e7aa0, edge: 0x6e5a80, accent: 0xab47bc },
+        ];
+
+        // Helper: inset polygon to prevent overlap with adjacent parcels
+        const insetPolygon = (pts: { x: number; z: number }[], amount: number) => {
+          if (pts.length < 3) return pts;
+          // Compute centroid
+          let cx = 0, cz = 0;
+          pts.forEach(p => { cx += p.x; cz += p.z; });
+          cx /= pts.length; cz /= pts.length;
+          // Shrink towards centroid
+          return pts.map(p => ({
+            x: p.x + (cx - p.x) * amount,
+            z: p.z + (cz - p.z) * amount,
+          }));
+        };
+
+        // Helper: create floating label sprite
+        const createLabelSprite = (text: string, subtext: string, accentColor: string) => {
+          const canvas2d = document.createElement("canvas");
+          const ctx2d = canvas2d.getContext("2d")!;
+          canvas2d.width = 512;
+          canvas2d.height = 180;
+
+          // Background card
+          ctx2d.fillStyle = "rgba(255, 255, 255, 0.92)";
+          ctx2d.fillRect(8, 8, 496, 164);
+
+          // Accent left bar
+          ctx2d.fillStyle = accentColor;
+          ctx2d.fillRect(8, 8, 8, 164);
+
+          // Shadow
+          ctx2d.shadowColor = "rgba(0,0,0,0.15)";
+          ctx2d.shadowBlur = 8;
+          ctx2d.shadowOffsetY = 2;
+
+          // Main text
+          ctx2d.shadowColor = "transparent";
+          ctx2d.font = "bold 36px Inter, system-ui, sans-serif";
+          ctx2d.fillStyle = "#1a1a2e";
+          ctx2d.fillText(text, 32, 65);
+
+          // Sub text
+          ctx2d.font = "28px Inter, system-ui, sans-serif";
+          ctx2d.fillStyle = "#64748b";
+          ctx2d.fillText(subtext, 32, 110);
+
+          // Area badge
+          if (subtext) {
+            ctx2d.font = "bold 26px Inter, system-ui, sans-serif";
+            ctx2d.fillStyle = accentColor;
+            ctx2d.fillText("📐 " + subtext, 32, 152);
+          }
+
+          const tex = new THREE.CanvasTexture(canvas2d);
+          tex.needsUpdate = true;
+          const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+          const sprite = new THREE.Sprite(spriteMat);
+          sprite.scale.set(5, 1.8, 1);
+          return sprite;
+        };
+
+        parcelShapes.forEach((ps, psIdx) => {
+          if (ps.points.length < 3) return;
+          const pal = parcelPalette[psIdx % parcelPalette.length];
+          const baseY = 0.03 + psIdx * 0.08; // Stagger height to prevent z-fighting
+          const slabHeight = 0.35;
+
+          // Convert to 3D coordinates — use ABSOLUTE canvas coords (ps.left + p.x)
+          const rawPts = ps.points.map((p) => ({
+            x: ((ps.left + p.x) - centerX) / pixelsPerMeter,
+            z: ((ps.top + p.y) - centerY) / pixelsPerMeter,
+          }));
+
+          // Inset polygon by 5% to create clear visual gaps between adjacent parcels
+          const parcelPts = insetPolygon(rawPts, 0.04);
+
+          // Compute centroid for label placement
+          let centX = 0, centZ = 0;
+          parcelPts.forEach(p => { centX += p.x; centZ += p.z; });
+          centX /= parcelPts.length; centZ /= parcelPts.length;
+
+          // ── Terrain slab with beveled edges ──
+          const shape2d = new THREE.Shape();
+          shape2d.moveTo(parcelPts[0].x, -parcelPts[0].z);
+          for (let i = 1; i < parcelPts.length; i++) {
+            shape2d.lineTo(parcelPts[i].x, -parcelPts[i].z);
+          }
+          shape2d.closePath();
+
+          const extrudeSettings = {
+            depth: slabHeight,
+            bevelEnabled: true,
+            bevelThickness: 0.08,
+            bevelSize: 0.08,
+            bevelSegments: 3,
+          };
+          const parcelGeomExtruded = new THREE.ExtrudeGeometry(shape2d, extrudeSettings);
+          const topMat = new THREE.MeshStandardMaterial({
+            color: pal.top,
+            roughness: 0.85,
+            metalness: 0.0,
+            envMapIntensity: 0.2,
+          });
+          const sideMat = new THREE.MeshStandardMaterial({
+            color: pal.side,
+            roughness: 0.92,
+            metalness: 0.05,
+          });
+          const parcelMesh = new THREE.Mesh(parcelGeomExtruded, [topMat, sideMat]);
+          parcelMesh.rotation.x = -Math.PI / 2;
+          parcelMesh.position.y = baseY;
+          parcelMesh.receiveShadow = true;
+          parcelMesh.castShadow = true;
+          scene.add(parcelMesh);
+
+          // ── Boundary edge lines (clean white) ──
+          const topEdgeY = baseY + slabHeight + 0.06;
+          const edgePtsArr: InstanceType<typeof THREE.Vector3>[] = [];
+          parcelPts.forEach(p => edgePtsArr.push(new THREE.Vector3(p.x, topEdgeY, p.z)));
+          if (parcelPts.length > 0) edgePtsArr.push(new THREE.Vector3(parcelPts[0].x, topEdgeY, parcelPts[0].z));
+          const edgeGeom = new THREE.BufferGeometry().setFromPoints(edgePtsArr);
+          const edgeLine = new THREE.Line(edgeGeom, new THREE.LineBasicMaterial({
+            color: 0xffffff, linewidth: 2, transparent: true, opacity: 0.7,
+          }));
+          scene.add(edgeLine);
+
+          // ── Glowing accent edge at top ──
+          const accentEdge = new THREE.Line(edgeGeom.clone(), new THREE.LineBasicMaterial({
+            color: pal.accent, linewidth: 3, transparent: true, opacity: 0.5,
+          }));
+          accentEdge.position.y += 0.02;
+          scene.add(accentEdge);
+
+          // ── Corner boundary markers (surveyor-style posts) ──
+          const cornerCount = Math.min(parcelPts.length, 20); // cap for perf
+          for (let ci = 0; ci < cornerCount; ci++) {
+            const p = parcelPts[ci];
+            // Post
+            const postGeom = new THREE.CylinderGeometry(0.05, 0.07, 0.7, 8);
+            const postMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.4, metalness: 0.5 });
+            const post = new THREE.Mesh(postGeom, postMat);
+            post.position.set(p.x, baseY + slabHeight + 0.35, p.z);
+            post.castShadow = true;
+            scene.add(post);
+            // Red cap
+            const capGeom = new THREE.SphereGeometry(0.09, 8, 8);
+            const capMat = new THREE.MeshStandardMaterial({ color: pal.accent, roughness: 0.3, metalness: 0.2, emissive: pal.accent, emissiveIntensity: 0.15 });
+            const cap = new THREE.Mesh(capGeom, capMat);
+            cap.position.set(p.x, baseY + slabHeight + 0.72, p.z);
+            scene.add(cap);
+          }
+
+          // ── Floating label sprite ──
+          const props = featureLabels[psIdx];
+          const mainText = props?.section
+            ? `Section ${props.section}${props.number ? ` · N°${props.number}` : ""}`
+            : `Parcel ${psIdx + 1}`;
+          const subText = props?.area ? `${props.area.toLocaleString()} m²` : "";
+          const accentHex = `#${pal.accent.toString(16).padStart(6, "0")}`;
+          const label = createLabelSprite(mainText, subText, accentHex);
+          label.position.set(centX, baseY + slabHeight + 2.5, centZ);
+          scene.add(label);
+
+          // ── Thin connecting line from label to terrain ──
+          const lineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(centX, baseY + slabHeight + 0.1, centZ),
+            new THREE.Vector3(centX, baseY + slabHeight + 1.8, centZ),
+          ]);
+          const connLine = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({
+            color: 0x94a3b8, transparent: true, opacity: 0.4,
+          }));
+          scene.add(connLine);
+        });
+
         // North arrow
         const northGeom = new THREE.ConeGeometry(0.3, 0.8, 8);
         const northArrow = new THREE.Mesh(northGeom, new THREE.MeshStandardMaterial({ color: 0xc62828 }));
@@ -4174,12 +4752,12 @@ function Inline3DViewer({
           resizeObs.disconnect();
           renderer.dispose();
         };
-      } catch (e) { setError(e instanceof Error ? e.message : "3D failed to load"); }
+      } catch (e) { console.error("[3D Viewer Error]", e); setError(e instanceof Error ? e.message : "3D failed to load"); }
     };
 
     init();
     return () => cleanup?.();
-  }, [buildings, elevationPoints, selectedBuildingId, onBuildingSelect]);
+  }, [buildings, elevationPoints, selectedBuildingId, onBuildingSelect, parcelGeoJSON, pixelsPerMeter, canvasWidth, canvasHeight]);
 
   return (
     <div className="relative w-full h-full min-h-[280px]">
@@ -4190,7 +4768,14 @@ function Inline3DViewer({
           <span className="flex items-center gap-2"><span className="text-amber-600 font-medium shrink-0">Edit:</span> Click a building to select it, then edit in the <strong>Buildings</strong> panel on the right.</span>
         </div>
       )}
-      {isReady && buildings.length === 0 && (
+      {isReady && buildings.length === 0 && !!parcelGeoJSON && (
+        <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:max-w-md flex flex-col gap-2 px-4 py-3 rounded-xl bg-white/95 border border-slate-300 text-sm text-slate-700 shadow-lg">
+          <span className="flex items-center gap-2"><span className="text-emerald-600 font-medium shrink-0">🗺️ Parcels:</span> Land plots from cadastral data</span>
+          <span className="flex items-center gap-2"><span className="text-blue-600 font-medium shrink-0">3D:</span> Drag to rotate · Scroll to zoom · Right-drag to pan</span>
+          <span className="text-slate-500 text-xs">Add buildings in 2D view to see them here.</span>
+        </div>
+      )}
+      {isReady && buildings.length === 0 && !parcelGeoJSON && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center px-6 py-8 rounded-2xl bg-white/90 backdrop-blur-sm border border-slate-200 shadow-xl pointer-events-auto max-w-sm">
             <p className="text-slate-900 font-semibold text-lg mb-2">No buildings to display</p>

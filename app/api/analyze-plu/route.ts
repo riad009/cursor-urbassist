@@ -1,287 +1,380 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server";
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  type GenerationConfig,
+} from "@google/generative-ai";
+import {
+  type PluRules,
+  type DeepPluAnalysis,
+  createFallbackPluRules,
+} from "@/lib/plu-rules";
 
-// Deep PLU analysis using Gemini — structured compliance analysis per project
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+// ─── Config ──────────────────────────────────────────────────────────────────
 
-// ─── Structured machine-readable rule schema (Phase 4) ──────────────────────
-export interface PluRules {
-  /** CES: max coverage ratio as decimal (e.g. 0.4 for 40%) */
-  maxCoverageRatio: number | null
-  /** Max height at eave / facade in metres */
-  maxHeight: number | null
-  /** Max height at ridge in metres */
-  maxRidgeHeight: number | null
-  /** Required setbacks in metres */
-  setbacks: {
-    front: number | null
-    side: number | null
-    rear: number | null
-  }
-  /** Minimum green/permeable surface e.g. "20%" */
-  greenSpaceRequirements: string | null
-  /** Parking requirement description e.g. "1 place per 60m²" */
-  parkingRequirements: string | null
-  /** Roof slope range e.g. "30 à 45 degrés" */
-  roofSlopes: string | null
-  /** Explicitly allowed roof materials */
-  allowedRoofMaterials: string[]
-  /** Explicitly forbidden facade materials */
-  forbiddenFacadeMaterials: string[]
-  /** Max fence height in metres */
-  maxFenceHeight: number | null
-  /** ABF / architect-des-Batiments sign-off required */
-  architectRequired: boolean
-  /** Any important qualitative note */
-  notes: string
-}
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const MODEL_NAME = "gemini-2.5-flash";
+const MAX_PDF_SIZE_BYTES = 30 * 1024 * 1024; // 30 MB hard limit
+const API_TIMEOUT_MS = 120_000; // 2 min — large PDFs can take time
 
-interface AnalysisRequest {
-  documentContent: string
-  parcelAddress?: string
-  zoneType?: string
-  description?: string
-}
+// ─── Gemini responseSchema for PluRules ──────────────────────────────────────
+// This guarantees the output JSON matches our TypeScript interface exactly.
 
-/** Expected item in each section */
-export interface AnalysisItem {
-  item: string
-  reglementation: string
-  conformite: "OUI" | "NON" | "A VERIFIER" | "Non concerné"
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PLU_RULES_SCHEMA: any = {
+  type: SchemaType.OBJECT,
+  properties: {
+    maxCoverageRatio: { type: SchemaType.NUMBER, nullable: true },
+    maxHeight: { type: SchemaType.NUMBER, nullable: true },
+    maxRidgeHeight: { type: SchemaType.NUMBER, nullable: true },
+    setbacks: {
+      type: SchemaType.OBJECT,
+      properties: {
+        front: { type: SchemaType.STRING, nullable: true, description: "Number in metres or formula string like 'H/2 avec minimum 3m'. Use null if not found." },
+        side: { type: SchemaType.STRING, nullable: true, description: "Number in metres or formula string. Use null if not found." },
+        rear: { type: SchemaType.STRING, nullable: true, description: "Number in metres or formula string. Use null if not found." },
+      },
+      required: ["front", "side", "rear"],
+    },
+    minPlotArea: { type: SchemaType.NUMBER, nullable: true },
+    maxFloorAreaRatio: { type: SchemaType.NUMBER, nullable: true },
+    greenSpaceMinPercent: { type: SchemaType.NUMBER, nullable: true },
+    maxFenceHeight: { type: SchemaType.NUMBER, nullable: true },
+    allowedRoofTypes: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    roofSlopeRange: { type: SchemaType.STRING, nullable: true },
+    allowedRoofMaterials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    forbiddenRoofMaterials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    allowedFacadeMaterials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    forbiddenFacadeMaterials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    allowedFacadeColors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    forbiddenFacadeColors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    allowedJoineryMaterials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    forbiddenJoineryColors: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+    parkingRequirements: { type: SchemaType.STRING, nullable: true },
+    annexRules: { type: SchemaType.STRING, nullable: true },
+    architectRequired: { type: SchemaType.BOOLEAN },
+    abfSpecificConstraints: { type: SchemaType.STRING, nullable: true },
+    heritageNotes: { type: SchemaType.STRING, nullable: true },
+    notes: { type: SchemaType.STRING },
+    extractionConfidence: {
+      type: SchemaType.STRING,
+      enum: ["high", "medium", "low"],
+    },
+  },
+  required: [
+    "maxCoverageRatio", "maxHeight", "maxRidgeHeight", "setbacks",
+    "allowedRoofTypes", "allowedRoofMaterials", "forbiddenRoofMaterials",
+    "allowedFacadeMaterials", "forbiddenFacadeMaterials",
+    "allowedFacadeColors", "forbiddenFacadeColors",
+    "allowedJoineryMaterials", "forbiddenJoineryColors",
+    "architectRequired", "notes", "extractionConfidence",
+  ],
+};
 
-/** Section with items */
-export interface AnalysisSection {
-  sectionTitle: string
-  items: AnalysisItem[]
-}
-
-/** In-depth analysis output (user-provided schema) */
-export interface DeepPluAnalysis {
-  situationProjet?: {
-    lotissement?: boolean
-    abf?: boolean
-    ppr?: boolean
-    details?: string
-  }
-  usageDesSols?: AnalysisSection
-  conditionsOccupation?: AnalysisSection
-  implantationVolumetrie?: AnalysisSection
-  aspectExterieur?: AnalysisSection
-  stationnement?: AnalysisSection
-  espacesLibres?: AnalysisSection
-  reseauxVrd?: AnalysisSection
-  autresReglementations?: AnalysisSection
-  conclusion?: { resume: string; typeDossier: string }
-  /** Legacy article-based format (optional, for backward compatibility) */
-  zoneClassification?: string
-  zoneDescription?: string
-  summary?: Record<string, unknown>
-  [key: string]: unknown
-}
+// ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
-    const body: AnalysisRequest = await request.json()
+    // ── 1. Parse multipart/form-data ───────────────────────────────────────
+    const formData = await request.formData();
+    const pdfFile = formData.get("pdfFile") as File | null;
+    const pluZone = (formData.get("pluZone") as string) || "non spécifiée";
+    const isABFZone = (formData.get("isABFZone") as string) === "true";
+    const parcelAddress = (formData.get("parcelAddress") as string) || "non précisée";
 
-    if (!body.documentContent) {
+    // ── 2. Validate inputs ─────────────────────────────────────────────────
+    if (!pdfFile || pdfFile.size === 0) {
       return NextResponse.json(
-        { error: "Document content is required" },
+        { error: "Un fichier PDF du règlement PLU est requis." },
         { status: 400 }
-      )
+      );
+    }
+
+    if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.` },
+        { status: 400 }
+      );
+    }
+
+    if (!pdfFile.type.includes("pdf") && !pdfFile.name.endsWith(".pdf")) {
+      return NextResponse.json(
+        { error: "Seuls les fichiers PDF sont acceptés." },
+        { status: 400 }
+      );
     }
 
     if (!GEMINI_API_KEY) {
-      return NextResponse.json({
-        success: true,
-        analysis: generateFallbackAnalysis(body),
-        pluRules: generateFallbackPluRules(),
-        source: "fallback",
-      })
-    }
-
-    const qualitativePrompt = buildInDepthAnalysisPrompt(body)
-    const extractionPrompt = buildRuleExtractionPrompt(body)
-
-    // Run both Gemini calls in parallel for performance
-    const [qualResponse, extractResponse] = await Promise.allSettled([
-      fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      console.error("GEMINI_API_KEY is not configured in environment variables");
+      return NextResponse.json(
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(30000),
-          body: JSON.stringify({
-            systemInstruction: {
-              parts: [{ text: "You are a strict French urban planning regulation parser. You ONLY extract factual information from the provided documents. You NEVER invent, hallucinate, or assume values not explicitly stated in the source text. When a value is not found, you use null or \"Non réglementé\"." }],
-            },
-            contents: [{ parts: [{ text: qualitativePrompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 16384,
-              responseMimeType: "application/json",
-            },
-          }),
-        }
-      ),
-      fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(30000),
-          body: JSON.stringify({
-            systemInstruction: {
-              parts: [{ text: "You are a machine-readable data extractor. You extract ONLY numeric and categorical values explicitly stated in the provided urban planning document. You NEVER guess, infer, or hallucinate values. If a value is not found in the document text, you MUST use null. Output valid JSON only, with zero commentary." }],
-            },
-            contents: [{ parts: [{ text: extractionPrompt }] }],
-            generationConfig: {
-              temperature: 0.0,
-              maxOutputTokens: 2048,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: "OBJECT",
-                properties: {
-                  maxCoverageRatio: { type: "NUMBER", nullable: true },
-                  maxHeight: { type: "NUMBER", nullable: true },
-                  maxRidgeHeight: { type: "NUMBER", nullable: true },
-                  setbacks: {
-                    type: "OBJECT",
-                    properties: {
-                      front: { type: "NUMBER", nullable: true },
-                      side: { type: "NUMBER", nullable: true },
-                      rear: { type: "NUMBER", nullable: true },
-                    },
-                  },
-                  greenSpaceRequirements: { type: "STRING", nullable: true },
-                  parkingRequirements: { type: "STRING", nullable: true },
-                  roofSlopes: { type: "STRING", nullable: true },
-                  allowedRoofMaterials: { type: "ARRAY", items: { type: "STRING" } },
-                  forbiddenFacadeMaterials: { type: "ARRAY", items: { type: "STRING" } },
-                  maxFenceHeight: { type: "NUMBER", nullable: true },
-                  architectRequired: { type: "BOOLEAN" },
-                  notes: { type: "STRING" },
-                },
-                required: ["maxCoverageRatio", "maxHeight", "maxRidgeHeight", "setbacks", "architectRequired", "notes"],
-              },
-            },
-          }),
-        }
-      ),
-    ])
-
-    // Parse qualitative analysis
-    let analysis: DeepPluAnalysis & Record<string, unknown> = generateFallbackAnalysis(body)
-    if (qualResponse.status === "fulfilled" && qualResponse.value.ok) {
-      const data = await qualResponse.value.json()
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-      if (rawText) analysis = parseGeminiResponse(rawText)
+          success: true,
+          analysis: generateFallbackAnalysis(pluZone),
+          pluRules: createFallbackPluRules(),
+          source: "fallback" as const,
+        },
+        { status: 200 }
+      );
     }
 
-    // Parse structured rule extraction
-    let pluRules: PluRules = generateFallbackPluRules()
-    if (extractResponse.status === "fulfilled" && extractResponse.value.ok) {
-      const data = await extractResponse.value.json()
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-      if (rawText) pluRules = parsePluRules(rawText)
+    // ── 3. Read PDF as buffer → base64 ─────────────────────────────────────
+    const pdfArrayBuffer = await pdfFile.arrayBuffer();
+    const pdfBase64 = Buffer.from(pdfArrayBuffer).toString("base64");
+
+    // ── 4. Initialize Gemini ───────────────────────────────────────────────
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+
+    // ── 5. Build prompts ───────────────────────────────────────────────────
+    const qualitativeSystemPrompt = buildQualitativeSystemPrompt(pluZone, isABFZone);
+    const qualitativeUserPrompt = buildQualitativeUserPrompt(pluZone, isABFZone, parcelAddress);
+    const extractionSystemPrompt = buildExtractionSystemPrompt(pluZone, isABFZone);
+    const extractionUserPrompt = buildExtractionUserPrompt(pluZone, isABFZone, parcelAddress);
+
+    // ── 6. Run both Gemini calls in parallel ───────────────────────────────
+    const pdfPart = {
+      inlineData: { data: pdfBase64, mimeType: "application/pdf" },
+    };
+
+    const qualitativeConfig: GenerationConfig = {
+      temperature: 0.1,
+      maxOutputTokens: 16384,
+      responseMimeType: "application/json",
+    };
+
+    const extractionConfig: GenerationConfig = {
+      temperature: 0,
+      maxOutputTokens: 4096,
+      responseMimeType: "application/json",
+      responseSchema: PLU_RULES_SCHEMA,
+    };
+
+    const [qualResult, extractResult] = await Promise.allSettled([
+      // Call 1: Deep qualitative compliance analysis
+      callGeminiWithPdf(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, pdfPart, qualitativeConfig),
+      // Call 2: Structured PluRules extraction
+      callGeminiWithPdf(genAI, extractionSystemPrompt, extractionUserPrompt, pdfPart, extractionConfig),
+    ]);
+
+    // ── 7. Parse responses ─────────────────────────────────────────────────
+    let analysis: DeepPluAnalysis = generateFallbackAnalysis(pluZone);
+    if (qualResult.status === "fulfilled" && qualResult.value) {
+      try {
+        analysis = JSON.parse(qualResult.value) as DeepPluAnalysis;
+      } catch {
+        // Try to salvage partial JSON
+        analysis = parseLooseJson<DeepPluAnalysis>(qualResult.value) ?? generateFallbackAnalysis(pluZone);
+      }
+    } else if (qualResult.status === "rejected") {
+      console.error("Qualitative Gemini call failed:", qualResult.reason);
     }
 
+    let pluRules: PluRules = createFallbackPluRules();
+    if (extractResult.status === "fulfilled" && extractResult.value) {
+      try {
+        const raw = JSON.parse(extractResult.value);
+        pluRules = sanitizePluRules(raw);
+      } catch {
+        const parsed = parseLooseJson<Partial<PluRules>>(extractResult.value);
+        if (parsed) pluRules = sanitizePluRules(parsed);
+      }
+    } else if (extractResult.status === "rejected") {
+      console.error("Extraction Gemini call failed:", extractResult.reason);
+    }
+
+    // ── 8. Return combined result ──────────────────────────────────────────
     return NextResponse.json({
       success: true,
       analysis,
       pluRules,
       source: "gemini",
-    })
+    });
   } catch (error) {
-    console.error("PLU Analysis error:", error)
-    return NextResponse.json(
-      { error: "Failed to analyze PLU document" },
-      { status: 500 }
-    )
+    console.error("PLU Analysis error:", error);
+    const message = error instanceof Error ? error.message : "Erreur interne lors de l'analyse du document PLU.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-function buildInDepthAnalysisPrompt(body: AnalysisRequest): string {
-  const address = body.parcelAddress || "non précisée"
-  const zone = body.zoneType || "non spécifiée"
-  const description = body.description || "non fournie"
-  const docContent = truncateAtParagraph(body.documentContent, 80000)
+// ─── Gemini call helper ──────────────────────────────────────────────────────
 
-  return `Analyze the provided urban planning regulation document (PLU) for a specific construction project and produce a structured analysis in JSON format.
+async function callGeminiWithPdf(
+  genAI: GoogleGenerativeAI,
+  systemPrompt: string,
+  userPrompt: string,
+  pdfPart: { inlineData: { data: string; mimeType: string } },
+  generationConfig: GenerationConfig,
+): Promise<string | null> {
+  const model = genAI.getGenerativeModel({
+    model: MODEL_NAME,
+    systemInstruction: systemPrompt,
+    generationConfig,
+  });
 
-**Project Details:**
-- Address: ${address}
-- PLU Zone: ${zone}
-- Project Description: ${description}
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), API_TIMEOUT_MS);
+
+  try {
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            pdfPart,
+            { text: userPrompt },
+          ],
+        },
+      ],
+    });
+
+    const response = result.response;
+    return response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MASTER SYSTEM PROMPTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function buildExtractionSystemPrompt(pluZone: string, isABFZone: boolean): string {
+  return `You are an expert-level French urban planning regulation parser (urbaniste confirmé).
+Your SOLE mission is to extract PRECISE, machine-readable regulatory values from a PLU (Plan Local d'Urbanisme) document.
+
+═══ ABSOLUTE RULES ═══
+
+1. ZONE FOCUS: Extract rules ONLY for the zone "${pluZone}". If the document contains multiple zones, IGNORE all zones except "${pluZone}". If you cannot find the exact zone name, look for the closest match (e.g., "UA" matches "Zone UA", "UA1", "UA-a").
+
+2. NO HALLUCINATION: If a specific rule is NOT explicitly mentioned in the text for zone "${pluZone}", you MUST return null for that field. Do NOT guess, infer, estimate, or use standard/typical French urban planning defaults. Extract ONLY what is WRITTEN in the document.
+
+3. NUMERIC PRECISION:
+   - Heights in METRES (not centimetres).
+   - Coverage ratios (CES, COS) as DECIMALS (e.g., 0.4 for 40%, 0.6 for 60%).
+   - Green space as a PERCENTAGE NUMBER (e.g., 30 for 30%).
+   - Distances/setbacks in METRES.
+
+4. FORMULA HANDLING: If a setback is expressed as a formula (e.g., "H/2", "L = H/2 avec un minimum de 3 mètres", "la moitié de la hauteur"), extract the FORMULA STRING as-is. Do NOT attempt to compute it. Include the formula in the corresponding setback field AND note it in the "notes" field.
+
+5. QUALITATIVE EXTRACTION: For materials, colors, roof types — extract the EXACT French terms used in the document. Do not translate or paraphrase. Separate items into allowed vs. forbidden as the regulation specifies.
+
+${isABFZone ? `6. ABF / HERITAGE ZONE: This parcel is in a PROTECTED HERITAGE ZONE (périmètre de protection des Monuments Historiques / site patrimonial remarquable). You MUST:
+   - Set "architectRequired" to true if the ABF (Architecte des Bâtiments de France) must review the project.
+   - Extract ANY specific heritage-related constraints into "abfSpecificConstraints" (e.g., specific material requirements, color harmony with historic buildings, prohibition of modern materials).
+   - Extract heritage notes into "heritageNotes".
+   - Pay EXTREME attention to Article 11 (aspect extérieur) constraints that are typically more restrictive in heritage zones.` : `6. This parcel is NOT in a heritage zone. Set "architectRequired" to true ONLY if the regulation explicitly requires ABF approval for this specific zone.`}
+
+7. CONFIDENCE: Assess your extraction confidence:
+   - "high": You found the zone and extracted most values with certainty.
+   - "medium": You found the zone but some values were ambiguous or the document structure was unusual.
+   - "low": You could not clearly identify the zone or the document was poorly structured.
+
+8. OUTPUT: Respond with a SINGLE valid JSON object matching the required schema. No markdown, no comments, no text outside the JSON.`;
+}
+
+function buildExtractionUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string): string {
+  return `Analyze the attached PLU regulation PDF document.
+
+Context:
+- Parcel address: ${parcelAddress}
+- PLU Zone to extract: ${pluZone}
+- Heritage protection (ABF): ${isABFZone ? "OUI — parcelle en zone protégée" : "NON"}
+
+Instructions:
+1. Locate the section(s) of the document that apply to zone "${pluZone}".
+2. Extract ALL numeric and qualitative regulatory values for this zone.
+3. For each field, if the value is not explicitly stated in the document for this zone, use null.
+4. For setback formulas like "H/2", keep the formula as a string.
+5. Return the structured JSON as specified.
+
+CRITICAL REMINDER: Do NOT invent values. Only extract what is WRITTEN in the document.`;
+}
+
+function buildQualitativeSystemPrompt(pluZone: string, isABFZone: boolean): string {
+  return `You are a strict French urban planning regulation parser (urbaniste confirmé).
+You ONLY extract factual information from provided PLU documents.
+You NEVER invent, hallucinate, or assume values not explicitly stated in the source text.
+When a value is not found, you use "Non réglementé" in the reglementation field and "Non concerné" in the conformite field.
+
+ZONE FOCUS: Only extract rules for zone "${pluZone}". Ignore all other zones.
+${isABFZone ? "ABF ZONE: This project is in a heritage protection zone. Pay special attention to Articles 6, 7, 10, 11 and any ABF-specific requirements." : ""}
+
+Output a SINGLE valid JSON object matching the required structure. No text outside JSON.`;
+}
+
+function buildQualitativeUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string): string {
+  return `Analyze the attached PLU regulation document for a construction project and produce a structured compliance analysis in JSON format.
+
+**Project Context:**
+- Address: ${parcelAddress}
+- PLU Zone: ${pluZone}
+- Heritage Zone (ABF): ${isABFZone ? "OUI" : "NON"}
 
 **Your Task:**
-1. Thoroughly review the attached regulation (document content below).
-2. For the 'situationProjet' object, fill in the details based on the project information and what you can find in the document. Specifically, determine if the project is in a subdivision ("lotissement"), an ABF zone (Architecte des Bâtiments de France), or a PPR zone (Plan de Prévention des Risques).
-3. For each regulatory point listed in the "Analysis Structure and Required Points" section below, find the relevant rule in the document for the project's PLU zone.
-4. Compare the project description against each rule.
-5. For each point, determine the compliance status: "OUI" (compliant), "NON" (non-compliant), or "A VERIFIER" (more information needed).
-6. If a rule for a specific point is not mentioned in the PLU document, you MUST still include the item in your response. For such cases, write "Non réglementé" in the 'reglementation' field and "Non concerné" in the 'conformite' field.
-7. The term 'hauteur à l'égout de toiture' might be referred to as 'hauteur en façade' or 'hauteur à l'égout'. Intelligently link these concepts.
-8. Structure your entire output as a single JSON object matching the provided schema. Do not include any text or markdown formatting outside of the JSON object.
-9. **Crucially**: In addition to the required points listed below, if you identify any other significant regulations in the document that are relevant to the project (e.g., rules about renewable energy, specific local heritage requirements, etc.), you MUST add them as new items within the most appropriate section of your analysis, or in "autresReglementations" if they do not fit elsewhere.
+1. Thoroughly review the attached regulation PDF.
+2. For the 'situationProjet' object, determine if the project is in a subdivision ("lotissement"), an ABF zone, or a PPR zone.
+3. For each regulatory point listed below, find the relevant rule in the document for zone "${pluZone}".
+4. For each point, write what the regulation says in 'reglementation', then set conformite to "A VERIFIER" (since we don't have the project details yet).
+5. If a rule for a specific point is not mentioned in the PLU document, write "Non réglementé" in 'reglementation' and "Non concerné" in 'conformite'.
+6. The term 'hauteur à l'égout de toiture' may be referred to as 'hauteur en façade' or 'hauteur à l'égout'. Link these concepts intelligently.
+7. If you spot other important regulations not listed below, add them in "autresReglementations".
 
-**Analysis Structure and Required Points:**
-You must create sections as titled below and include all the specified items within them.
+**Required Sections & Points:**
 
-**Section: USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS** (output key: usageDesSols)
-- Item: "Destinations et sous-destinations interdites"
-- Item: "Interdictions ou limitations d'usages spécifiques"
-- Item: "Règles de Mixité sociale"
-- Item: "Règles de Mixité fonctionnelle"
+Section: USAGE DES SOLS (key: usageDesSols)
+- "Destinations et sous-destinations interdites"
+- "Interdictions ou limitations d'usages spécifiques"
+- "Règles de Mixité sociale"
+- "Règles de Mixité fonctionnelle"
 
-**Section: CONDITIONS D'OCCUPATION DU SOL** (output key: conditionsOccupation)
-- Item: "Surface de plancher maximale (COS si applicable)"
-- Item: "Emprise au sol maximale (CES)"
-- Item: "Coefficient de Biotope par surface (CBS)"
-- Item: "Surface minimale d'espace vert en pleine terre"
+Section: CONDITIONS D'OCCUPATION DU SOL (key: conditionsOccupation)
+- "Surface de plancher maximale (COS si applicable)"
+- "Emprise au sol maximale (CES)"
+- "Coefficient de Biotope par surface (CBS)"
+- "Surface minimale d'espace vert en pleine terre"
 
-**Section: IMPLANTATION ET VOLUMETRIE** (output key: implantationVolumetrie)
-- Item: "Implantation par rapport aux voies et emprises publiques"
-- Item: "Implantation par rapport aux limites séparatives"
-- Item: "Implantation des constructions les unes par rapport aux autres"
-- Item: "Hauteurs maximales à l'égout / en façade"
-- Item: "Hauteurs maximales au faîtage"
-- Item: "Définition de la hauteur de référence (TN, NGF, etc.)"
-- Item: "Volumétrie, gabarit et forme de la construction"
+Section: IMPLANTATION ET VOLUMETRIE (key: implantationVolumetrie)
+- "Implantation par rapport aux voies et emprises publiques"
+- "Implantation par rapport aux limites séparatives"
+- "Implantation des constructions les unes par rapport aux autres"
+- "Hauteurs maximales à l'égout / en façade"
+- "Hauteurs maximales au faîtage"
+- "Définition de la hauteur de référence (TN, NGF, etc.)"
+- "Volumétrie, gabarit et forme de la construction"
 
-**Section: ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE** (output key: aspectExterieur)
-- Item: "Toitures (pentes, matériaux, couleurs, éléments techniques)"
-- Item: "Façades (matériaux, couleurs, modénatures)"
-- Item: "Menuiseries (matériaux, couleurs, proportions)"
-- Item: "Clôtures sur rue (hauteur, type, matériaux)"
-- Item: "Clôtures sur limites séparatives (hauteur, type, matériaux)"
-- Item: "Portails et portillons"
-- Item: "Annexes (abris de jardin, garages, piscines, etc.)"
+Section: ASPECT EXTÉRIEUR (key: aspectExterieur)
+- "Toitures (pentes, matériaux, couleurs, éléments techniques)"
+- "Façades (matériaux, couleurs, modénatures)"
+- "Menuiseries (matériaux, couleurs, proportions)"
+- "Clôtures sur rue (hauteur, type, matériaux)"
+- "Clôtures sur limites séparatives (hauteur, type, matériaux)"
+- "Portails et portillons"
+- "Annexes (abris de jardin, garages, piscines, etc.)"
 
-**Section: STATIONNEMENT** (output key: stationnement)
-- Item: "Nombre de places pour véhicules motorisés"
-- Item: "Caractéristiques des aires de stationnement (dimensions, revêtement)"
-- Item: "Nombre de places pour vélos"
+Section: STATIONNEMENT (key: stationnement)
+- "Nombre de places pour véhicules motorisés"
+- "Caractéristiques des aires de stationnement"
+- "Nombre de places pour vélos"
 
-**Section: ESPACES LIBRES ET PLANTATIONS** (output key: espacesLibres)
-- Item: "Traitement des espaces non bâtis"
-- Item: "Obligations de plantations et essences végétales"
-- Item: "Gestion des eaux pluviales à la parcelle"
+Section: ESPACES LIBRES (key: espacesLibres)
+- "Traitement des espaces non bâtis"
+- "Obligations de plantations et essences végétales"
+- "Gestion des eaux pluviales à la parcelle"
 
-**Section: RESEAUX ET DESSERTE (VRD)** (output key: reseauxVrd)
-- Item: "Conditions de desserte par les voies (accès)"
-- Item: "Alimentation en eau potable"
-- Item: "Assainissement des eaux usées (EU)"
-- Item: "Gestion des eaux pluviales (EP)"
-- Item: "Desserte Électricité et Télécommunications"
+Section: RESEAUX ET DESSERTE (key: reseauxVrd)
+- "Conditions de desserte par les voies (accès)"
+- "Alimentation en eau potable"
+- "Assainissement des eaux usées (EU)"
+- "Gestion des eaux pluviales (EP)"
+- "Desserte Électricité et Télécommunications"
 
 **Conclusion:**
-- In the 'conclusion.resume' field, provide a general summary of the project's feasibility.
-- In the 'conclusion.typeDossier' field, suggest the type of permit required (e.g., "Déclaration Préalable", "Permis de Construire").
+- 'conclusion.resume': General summary of what the regulation allows and constrains.
+- 'conclusion.typeDossier': Suggest the permit type ("Déclaration Préalable" or "Permis de Construire").
 
-**Required JSON schema (output exactly this structure):**
+**Required JSON structure:**
 {
   "situationProjet": { "lotissement": false, "abf": false, "ppr": false, "details": "" },
-  "usageDesSols": { "sectionTitle": "USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS", "items": [{"item": "...", "reglementation": "...", "conformite": "OUI"|"NON"|"A VERIFIER"|"Non concerné"}] },
+  "usageDesSols": { "sectionTitle": "USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS", "items": [{"item": "...", "reglementation": "...", "conformite": "..."}] },
   "conditionsOccupation": { "sectionTitle": "CONDITIONS D'OCCUPATION DU SOL", "items": [...] },
   "implantationVolumetrie": { "sectionTitle": "IMPLANTATION ET VOLUMETRIE", "items": [...] },
   "aspectExterieur": { "sectionTitle": "ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE", "items": [...] },
@@ -290,249 +383,180 @@ You must create sections as titled below and include all the specified items wit
   "reseauxVrd": { "sectionTitle": "RESEAUX ET DESSERTE (VRD)", "items": [...] },
   "autresReglementations": { "sectionTitle": "AUTRES RÉGLEMENTATIONS", "items": [] },
   "conclusion": { "resume": "...", "typeDossier": "..." }
+}`;
 }
 
-**Document content (PLU regulation):**
-${docContent}`
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// PARSING & SANITIZATION UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
 
-function parseGeminiResponse(text: string): DeepPluAnalysis & Record<string, unknown> {
-  try {
-    return JSON.parse(text) as DeepPluAnalysis & Record<string, unknown>
-  } catch {
-    // empty
-  }
+/**
+ * Sanitize raw parsed PluRules — ensure every field has the correct type.
+ * Gemini with responseSchema should guarantee this, but we belt-and-suspenders it.
+ */
+function sanitizePluRules(raw: Partial<PluRules>): PluRules {
+  const fallback = createFallbackPluRules();
 
-  const cleaned = text.replace(/```(?:json)?\s*/gi, "").replace(/```\s*/g, "").trim()
-  try {
-    return JSON.parse(cleaned) as DeepPluAnalysis & Record<string, unknown>
-  } catch {
-    // empty
-  }
-
-  const start = cleaned.indexOf("{")
-  if (start >= 0) {
-    let depth = 0
-    let end = start
-    for (let i = start; i < cleaned.length; i++) {
-      if (cleaned[i] === "{") depth++
-      else if (cleaned[i] === "}") {
-        depth--
-        if (depth === 0) {
-          end = i
-          break
-        }
-      }
+  const parseNumOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "number" && !isNaN(v)) return v;
+    if (typeof v === "string") {
+      const n = parseFloat(v);
+      if (!isNaN(n)) return n;
     }
-    if (end > start) {
-      try {
-        const block = cleaned.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1")
-        return JSON.parse(block) as DeepPluAnalysis & Record<string, unknown>
-      } catch {
-        // empty
-      }
+    return null;
+  };
+
+  const parseSetbackValue = (v: unknown): number | string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "number" && !isNaN(v)) return v;
+    if (typeof v === "string") {
+      // Try to parse as plain number first
+      const n = parseFloat(v);
+      if (!isNaN(n) && v.trim() === String(n)) return n;
+      // It's a formula string like "H/2 avec minimum 3m" — keep as is
+      if (v.trim().length > 0) return v.trim();
     }
-  }
+    return null;
+  };
+
+  const ensureStringArray = (v: unknown): string[] => {
+    if (!Array.isArray(v)) return [];
+    return v.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  };
 
   return {
-    conclusion: { resume: text.slice(0, 500), typeDossier: "À déterminer" },
-    parseError: true,
-  }
+    maxCoverageRatio: parseNumOrNull(raw.maxCoverageRatio),
+    maxHeight: parseNumOrNull(raw.maxHeight),
+    maxRidgeHeight: parseNumOrNull(raw.maxRidgeHeight),
+    setbacks: {
+      front: parseSetbackValue(raw.setbacks?.front),
+      side: parseSetbackValue(raw.setbacks?.side),
+      rear: parseSetbackValue(raw.setbacks?.rear),
+    },
+    minPlotArea: parseNumOrNull(raw.minPlotArea),
+    maxFloorAreaRatio: parseNumOrNull(raw.maxFloorAreaRatio),
+    greenSpaceMinPercent: parseNumOrNull(raw.greenSpaceMinPercent),
+    maxFenceHeight: parseNumOrNull(raw.maxFenceHeight),
+    allowedRoofTypes: ensureStringArray(raw.allowedRoofTypes),
+    roofSlopeRange: typeof raw.roofSlopeRange === "string" ? raw.roofSlopeRange : null,
+    allowedRoofMaterials: ensureStringArray(raw.allowedRoofMaterials),
+    forbiddenRoofMaterials: ensureStringArray(raw.forbiddenRoofMaterials),
+    allowedFacadeMaterials: ensureStringArray(raw.allowedFacadeMaterials),
+    forbiddenFacadeMaterials: ensureStringArray(raw.forbiddenFacadeMaterials),
+    allowedFacadeColors: ensureStringArray(raw.allowedFacadeColors),
+    forbiddenFacadeColors: ensureStringArray(raw.forbiddenFacadeColors),
+    allowedJoineryMaterials: ensureStringArray(raw.allowedJoineryMaterials),
+    forbiddenJoineryColors: ensureStringArray(raw.forbiddenJoineryColors),
+    parkingRequirements: typeof raw.parkingRequirements === "string" ? raw.parkingRequirements : null,
+    annexRules: typeof raw.annexRules === "string" ? raw.annexRules : null,
+    architectRequired: raw.architectRequired === true,
+    abfSpecificConstraints: typeof raw.abfSpecificConstraints === "string" ? raw.abfSpecificConstraints : null,
+    heritageNotes: typeof raw.heritageNotes === "string" ? raw.heritageNotes : null,
+    notes: typeof raw.notes === "string" ? raw.notes : "",
+    extractionConfidence: (["high", "medium", "low"] as const).includes(raw.extractionConfidence as "high" | "medium" | "low")
+      ? (raw.extractionConfidence as "high" | "medium" | "low")
+      : "low",
+  };
 }
 
-function generateFallbackAnalysis(body: AnalysisRequest): DeepPluAnalysis {
-  const zone = body.zoneType || "Zone non spécifiée"
+/**
+ * Attempt to parse a potentially malformed JSON string.
+ * Handles markdown code fences and trailing commas.
+ */
+function parseLooseJson<T>(text: string): T | null {
+  if (!text) return null;
+
+  // Strip markdown code fences
+  let cleaned = text.replace(/```(?:json)?[\s\n]*/gi, "").replace(/```\s*/g, "").trim();
+
+  // Try direct parse
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch { /* continue */ }
+
+  // Try extracting the first JSON object
+  const start = cleaned.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let end = start;
+  for (let i = start; i < cleaned.length; i++) {
+    if (cleaned[i] === "{") depth++;
+    else if (cleaned[i] === "}") {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+
+  if (end > start) {
+    try {
+      const block = cleaned.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1");
+      return JSON.parse(block) as T;
+    } catch { /* give up */ }
+  }
+
+  return null;
+}
+
+// ─── Fallback analysis (when Gemini is unavailable) ──────────────────────────
+
+function generateFallbackAnalysis(pluZone: string): DeepPluAnalysis {
+  const makeItem = (item: string): { item: string; reglementation: string; conformite: "Non concerné" } => ({
+    item,
+    reglementation: "Non réglementé",
+    conformite: "Non concerné",
+  });
+
   return {
-    situationProjet: { lotissement: false, abf: false, ppr: false, details: "Non déterminé (analyse non disponible)." },
+    situationProjet: {
+      lotissement: false,
+      abf: false,
+      ppr: false,
+      details: "Non déterminé (analyse IA non disponible).",
+    },
     usageDesSols: {
       sectionTitle: "USAGE DES SOLS ET DESTINATION DES CONSTRUCTIONS",
       items: [
-        { item: "Destinations et sous-destinations interdites", reglementation: "Non réglementé", conformite: "Non concerné" },
-        { item: "Interdictions ou limitations d'usages spécifiques", reglementation: "Non réglementé", conformite: "Non concerné" },
+        makeItem("Destinations et sous-destinations interdites"),
+        makeItem("Interdictions ou limitations d'usages spécifiques"),
       ],
     },
     conditionsOccupation: {
       sectionTitle: "CONDITIONS D'OCCUPATION DU SOL",
       items: [
-        { item: "Emprise au sol maximale (CES)", reglementation: "Non réglementé", conformite: "Non concerné" },
-        { item: "Surface minimale d'espace vert en pleine terre", reglementation: "Non réglementé", conformite: "Non concerné" },
+        makeItem("Emprise au sol maximale (CES)"),
+        makeItem("Surface minimale d'espace vert en pleine terre"),
       ],
     },
     implantationVolumetrie: {
       sectionTitle: "IMPLANTATION ET VOLUMETRIE",
       items: [
-        { item: "Hauteurs maximales à l'égout / en façade", reglementation: "Non réglementé", conformite: "Non concerné" },
-        { item: "Hauteurs maximales au faîtage", reglementation: "Non réglementé", conformite: "Non concerné" },
+        makeItem("Hauteurs maximales à l'égout / en façade"),
+        makeItem("Hauteurs maximales au faîtage"),
       ],
     },
     aspectExterieur: {
       sectionTitle: "ASPECT EXTÉRIEUR ET QUALITÉ ARCHITECTURALE",
-      items: [{ item: "Toitures (pentes, matériaux, couleurs)", reglementation: "Non réglementé", conformite: "Non concerné" }],
+      items: [makeItem("Toitures (pentes, matériaux, couleurs)")],
     },
     stationnement: {
       sectionTitle: "STATIONNEMENT",
-      items: [{ item: "Nombre de places pour véhicules motorisés", reglementation: "Non réglementé", conformite: "Non concerné" }],
+      items: [makeItem("Nombre de places pour véhicules motorisés")],
     },
     espacesLibres: {
       sectionTitle: "ESPACES LIBRES ET PLANTATIONS",
-      items: [{ item: "Obligations de plantations", reglementation: "Non réglementé", conformite: "Non concerné" }],
+      items: [makeItem("Obligations de plantations")],
     },
     reseauxVrd: {
       sectionTitle: "RESEAUX ET DESSERTE (VRD)",
-      items: [{ item: "Conditions de desserte par les voies", reglementation: "Non réglementé", conformite: "Non concerné" }],
+      items: [makeItem("Conditions de desserte par les voies")],
     },
     conclusion: {
-      resume: `Analyse automatique non disponible (clé API manquante). Zone indiquée : ${zone}. Uploadez le document PLU pour une analyse complète.`,
+      resume: `Analyse automatique non disponible. Zone indiquée : ${pluZone}. Veuillez uploader le document PLU pour une analyse complète.`,
       typeDossier: "À déterminer (Déclaration Préalable ou Permis de Construire selon le projet).",
     },
-    zoneClassification: zone,
+    zoneClassification: pluZone,
     zoneDescription: "Résultats par défaut — document PLU requis pour une analyse complète.",
-  }
-}
-
-// ─── Phase 4: Structured Rule Extraction ─────────────────────────────────────
-
-/**
- * Builds a strictly numerical extraction prompt.
- * Temperature 0.0 + responseMimeType application/json → deterministic output.
- */
-function buildRuleExtractionPrompt(body: AnalysisRequest): string {
-  const address = body.parcelAddress || "non précisée"
-  const zone = body.zoneType || "non spécifiée"
-  const docContent = truncateAtParagraph(body.documentContent, 80000)
-
-  return `You are an expert French urban planning rule parser. Extract ONLY precise, machine-readable numerical and categorical values from the PLU regulation document below.
-
-Project context:
-- Address: ${address}
-- PLU zone: ${zone}
-
-Output a SINGLE JSON object with EXACTLY this structure. Use null for any value not found in the document. All distances in metres, ratios as decimals (e.g. 0.4 for 40%).
-
-{
-  "maxCoverageRatio": <number|null>,
-  "maxHeight": <number|null>,
-  "maxRidgeHeight": <number|null>,
-  "setbacks": {
-    "front": <number|null>,
-    "side": <number|null>,
-    "rear": <number|null>
-  },
-  "greenSpaceRequirements": <"X%" string|null>,
-  "parkingRequirements": <"N place par Xm²" string|null>,
-  "roofSlopes": <"X à Y degrés" string|null>,
-  "allowedRoofMaterials": [<string>, ...],
-  "forbiddenFacadeMaterials": [<string>, ...],
-  "maxFenceHeight": <number|null>,
-  "architectRequired": <boolean>,
-  "notes": "<any critical qualitative constraint in one sentence>"
-}
-
-Rules:
-- maxCoverageRatio: CES (coefficient d'emprise au sol) as decimal. E.g. if PLU says "40%" → 0.4
-- maxHeight: height at eave/façade/égout in metres. NOT ridge height.
-- maxRidgeHeight: height at faîtage/ridge in metres.
-- setbacks.front: recul voie publique in metres (minimum)
-- setbacks.side: recul limites séparatives latérales in metres
-- setbacks.rear: recul limite fond de parcelle in metres
-- greenSpaceRequirements: minimum permeable/green surface as percentage string e.g. "20%"
-- parkingRequirements: parking rule as string e.g. "1 place par logement" or "1 place par 60m² SHON"
-- architectRequired: true ONLY if the zone explicitly requires ABF (Architecte des Bâtiments de France) approval
-- Do NOT include commentary, markdown, or any text outside the JSON object.
-- CRITICAL: If a numeric value is not explicitly stated in the document, you MUST use null. Do NOT guess, infer from context, or use typical/standard values. Only extract what is WRITTEN.
-- If a setback is expressed as a formula (e.g. "H/2", "H/2 avec minimum 3m"), put the formula string in the corresponding field instead of null, and note it in the "notes" field.
-
-PLU document:
-${docContent}`
-}
-
-/**
- * Truncate text at the last paragraph boundary before the max length.
- * Avoids cutting mid-article which could confuse the LLM.
- */
-function truncateAtParagraph(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  // Find the last double-newline (paragraph break) before maxLength
-  const truncated = text.slice(0, maxLength);
-  const lastParagraph = truncated.lastIndexOf("\n\n");
-  if (lastParagraph > maxLength * 0.8) {
-    return truncated.slice(0, lastParagraph);
-  }
-  // Fallback: cut at last newline
-  const lastNewline = truncated.lastIndexOf("\n");
-  if (lastNewline > maxLength * 0.9) {
-    return truncated.slice(0, lastNewline);
-  }
-  return truncated;
-}
-
-/**
- * Parse a setback value that may be a number, a formula string (e.g. "H/2"), or null.
- * PLU documents sometimes express setbacks as formulas rather than fixed values.
- */
-function parseSetbackValue(val: unknown): number | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === "number" && !isNaN(val)) return val;
-  if (typeof val === "string") {
-    // Try to parse as a plain number first
-    const num = parseFloat(val);
-    if (!isNaN(num)) return num;
-    // If it's a formula like "H/2" or "H/2 avec minimum 3m", extract the minimum
-    const minMatch = val.match(/minimum\s+(\d+(?:[.,]\d+)?)/i);
-    if (minMatch) return parseFloat(minMatch[1].replace(",", "."));
-    // Can't extract a numeric value — return null (formula noted in 'notes' field)
-  }
-  return null;
-}
-
-/**
- * Parse the structured extraction response — strict JSON only.
- */
-function parsePluRules(text: string): PluRules {
-  const fallback = generateFallbackPluRules()
-  try {
-    const cleaned = text.replace(/```(?:json)?\s*/gi, "").replace(/```\s*/g, "").trim()
-    const start = cleaned.indexOf("{")
-    const end = cleaned.lastIndexOf("}")
-    if (start < 0 || end < 0) return fallback
-    const parsed = JSON.parse(cleaned.slice(start, end + 1)) as Partial<PluRules>
-
-    return {
-      maxCoverageRatio: typeof parsed.maxCoverageRatio === "number" ? parsed.maxCoverageRatio : null,
-      maxHeight: typeof parsed.maxHeight === "number" ? parsed.maxHeight : null,
-      maxRidgeHeight: typeof parsed.maxRidgeHeight === "number" ? parsed.maxRidgeHeight : null,
-      setbacks: {
-        front: parseSetbackValue(parsed.setbacks?.front),
-        side: parseSetbackValue(parsed.setbacks?.side),
-        rear: parseSetbackValue(parsed.setbacks?.rear),
-      },
-      greenSpaceRequirements: parsed.greenSpaceRequirements ?? null,
-      parkingRequirements: parsed.parkingRequirements ?? null,
-      roofSlopes: parsed.roofSlopes ?? null,
-      allowedRoofMaterials: Array.isArray(parsed.allowedRoofMaterials) ? parsed.allowedRoofMaterials : [],
-      forbiddenFacadeMaterials: Array.isArray(parsed.forbiddenFacadeMaterials) ? parsed.forbiddenFacadeMaterials : [],
-      maxFenceHeight: typeof parsed.maxFenceHeight === "number" ? parsed.maxFenceHeight : null,
-      architectRequired: parsed.architectRequired === true,
-      notes: typeof parsed.notes === "string" ? parsed.notes : "",
-    }
-  } catch {
-    return fallback
-  }
-}
-
-function generateFallbackPluRules(): PluRules {
-  return {
-    maxCoverageRatio: null,
-    maxHeight: null,
-    maxRidgeHeight: null,
-    setbacks: { front: null, side: null, rear: null },
-    greenSpaceRequirements: null,
-    parkingRequirements: null,
-    roofSlopes: null,
-    allowedRoofMaterials: [],
-    forbiddenFacadeMaterials: [],
-    maxFenceHeight: null,
-    architectRequired: false,
-    notes: "",
-  }
+  };
 }

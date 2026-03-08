@@ -517,7 +517,7 @@ function PluAnalysisPageContent() {
                   </ul>
                 </div>
                 <Link
-                  href={`/editor?project=${project.id}`}
+                  href={`/site-plan?project=${project.id}`}
                   className="inline-flex items-center gap-2 mt-3 text-sm text-sky-400 hover:text-sky-300"
                 >
                   Edit Site Plan to update compliance <ArrowRight className="w-4 h-4" />
