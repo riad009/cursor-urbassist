@@ -7,6 +7,13 @@
  *
  * All thresholds (dpThreshold) are derived from the API response objects and are
  * NEVER hardcoded here.
+ *
+ * Production-hardened:
+ *  - submitterType for Individual/Company popup logic
+ *  - popupStage for deterministic popup flow tracking
+ *  - Error states parallel to loading states
+ *  - Multi-parcel support (selectedParcels[])
+ *  - mergedParcelGeometry for unified polygon
  */
 
 import { create } from "zustand";
@@ -14,6 +21,21 @@ import { create } from "zustand";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+export type SubmitterType = "individual" | "company";
+
+/**
+ * Popup flow stage — tracks the harmonized popup state machine.
+ *
+ * Flow: idle → detecting → company_warning | individual_payment → redirecting → complete
+ */
+export type PopupStage =
+  | "idle"                   // No popup active
+  | "detecting"              // Detecting authorization type (DP/PC)
+  | "company_warning"        // Showing architect mandatory warning (Company + PC)
+  | "individual_payment"     // Showing Stripe redirect for individual
+  | "redirecting"            // Redirect in progress (Stripe or architect page)
+  | "complete";              // Flow completed
 
 export interface ParcelSelection {
   id: string;
@@ -71,6 +93,14 @@ export interface LoadingStates {
   decision: boolean;
 }
 
+export interface ErrorStates {
+  address: string | null;
+  parcel: string | null;
+  regulatory: string | null;
+  heritage: string | null;
+  decision: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Store interface
 // ---------------------------------------------------------------------------
@@ -84,7 +114,18 @@ interface DossierState {
   departement: string | null;
 
   // Parcel ──────────────────────────────────────────────────────────────────
+  /** @deprecated Use selectedParcels[] for multi-parcel support */
   selectedParcel: ParcelSelection | null;
+  /** Multi-parcel selection (replaces selectedParcel for new code) */
+  selectedParcels: ParcelSelection[];
+  /** Merged polygon geometry from all selected parcels (set by merge operation) */
+  mergedParcelGeometry: unknown | null;
+
+  // Submitter type ─────────────────────────────────────────────────────────
+  submitterType: SubmitterType | null;
+
+  // Popup flow ─────────────────────────────────────────────────────────────
+  popupStage: PopupStage;
 
   // Regulatory (from GPU API) ──────────────────────────────────────────────
   regulatory: RegulatoryInfo | null;
@@ -98,6 +139,9 @@ interface DossierState {
   // Loading states ─────────────────────────────────────────────────────────
   loading: LoadingStates;
 
+  // Error states ───────────────────────────────────────────────────────────
+  errors: ErrorStates;
+
   // ── Actions ──
   setAddress: (
     address: string,
@@ -110,11 +154,27 @@ interface DossierState {
   /** Select a new parcel. RESETS regulatory, heritage, and decision. */
   selectParcel: (parcel: ParcelSelection) => void;
 
+  /** Add a parcel to the selection (multi-parcel). RESETS downstream. */
+  addParcel: (parcel: ParcelSelection) => void;
+
+  /** Remove a parcel from the selection. RESETS downstream. */
+  removeParcel: (parcelId: string) => void;
+
+  /** Set the merged parcel geometry (from mergeParcelGeometries result). */
+  setMergedParcelGeometry: (geometry: unknown | null) => void;
+
+  /** Set the submitter type (Individual or Company). */
+  setSubmitterType: (type: SubmitterType) => void;
+
+  /** Set the popup flow stage. */
+  setPopupStage: (stage: PopupStage) => void;
+
   setRegulatory: (regulatory: RegulatoryInfo) => void;
   setHeritage: (heritage: HeritageInfo) => void;
   setDecision: (decision: DecisionResult) => void;
 
   setLoading: (key: keyof LoadingStates, value: boolean) => void;
+  setError: (key: keyof ErrorStates, error: string | null) => void;
 
   /** Reset everything — e.g. user starts a completely new dossier. */
   resetAll: () => void;
@@ -132,6 +192,14 @@ const INITIAL_LOADING: LoadingStates = {
   decision: false,
 };
 
+const INITIAL_ERRORS: ErrorStates = {
+  address: null,
+  parcel: null,
+  regulatory: null,
+  heritage: null,
+  decision: null,
+};
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -144,10 +212,15 @@ export const useDossierStore = create<DossierState>((set) => ({
   citycode: null,
   departement: null,
   selectedParcel: null,
+  selectedParcels: [],
+  mergedParcelGeometry: null,
+  submitterType: null,
+  popupStage: "idle",
   regulatory: null,
   heritage: null,
   decision: null,
   loading: { ...INITIAL_LOADING },
+  errors: { ...INITIAL_ERRORS },
 
   // ── Address ──────────────────────────────────────────────────────────────
   setAddress: (address, coordinates, municipality, citycode, departement) =>
@@ -159,20 +232,69 @@ export const useDossierStore = create<DossierState>((set) => ({
       departement: departement ?? null,
       // Changing address resets downstream state
       selectedParcel: null,
+      selectedParcels: [],
+      mergedParcelGeometry: null,
       regulatory: null,
       heritage: null,
       decision: null,
+      popupStage: "idle",
+      errors: { ...INITIAL_ERRORS },
     }),
 
-  // ── Parcel (cascade-reset) ──────────────────────────────────────────────
+  // ── Single Parcel (backward compat — cascade-reset) ─────────────────────
   selectParcel: (parcel) =>
     set({
       selectedParcel: parcel,
+      selectedParcels: [parcel],
+      mergedParcelGeometry: null,
       // Reset all downstream data to prevent Data Ghosting
       regulatory: null,
       heritage: null,
       decision: null,
+      popupStage: "idle",
+      errors: { ...INITIAL_ERRORS },
     }),
+
+  // ── Multi-parcel ────────────────────────────────────────────────────────
+  addParcel: (parcel) =>
+    set((state) => {
+      // Don't add duplicates
+      if (state.selectedParcels.some((p) => p.id === parcel.id)) return state;
+      const newParcels = [...state.selectedParcels, parcel];
+      return {
+        selectedParcels: newParcels,
+        selectedParcel: newParcels[0] ?? null, // backward compat: point to first
+        mergedParcelGeometry: null,
+        regulatory: null,
+        heritage: null,
+        decision: null,
+        popupStage: "idle",
+        errors: { ...INITIAL_ERRORS },
+      };
+    }),
+
+  removeParcel: (parcelId) =>
+    set((state) => {
+      const newParcels = state.selectedParcels.filter((p) => p.id !== parcelId);
+      return {
+        selectedParcels: newParcels,
+        selectedParcel: newParcels[0] ?? null,
+        mergedParcelGeometry: null,
+        regulatory: null,
+        heritage: null,
+        decision: null,
+        popupStage: "idle",
+        errors: { ...INITIAL_ERRORS },
+      };
+    }),
+
+  setMergedParcelGeometry: (geometry) => set({ mergedParcelGeometry: geometry }),
+
+  // ── Submitter type ──────────────────────────────────────────────────────
+  setSubmitterType: (type) => set({ submitterType: type }),
+
+  // ── Popup flow ──────────────────────────────────────────────────────────
+  setPopupStage: (stage) => set({ popupStage: stage }),
 
   // ── Regulatory ──────────────────────────────────────────────────────────
   setRegulatory: (regulatory) => set({ regulatory }),
@@ -189,6 +311,12 @@ export const useDossierStore = create<DossierState>((set) => ({
       loading: { ...state.loading, [key]: value },
     })),
 
+  // ── Errors ──────────────────────────────────────────────────────────────
+  setError: (key, error) =>
+    set((state) => ({
+      errors: { ...state.errors, [key]: error },
+    })),
+
   // ── Full reset ──────────────────────────────────────────────────────────
   resetAll: () =>
     set({
@@ -198,9 +326,15 @@ export const useDossierStore = create<DossierState>((set) => ({
       citycode: null,
       departement: null,
       selectedParcel: null,
+      selectedParcels: [],
+      mergedParcelGeometry: null,
+      submitterType: null,
+      popupStage: "idle",
       regulatory: null,
       heritage: null,
       decision: null,
       loading: { ...INITIAL_LOADING },
+      errors: { ...INITIAL_ERRORS },
     }),
 }));
+

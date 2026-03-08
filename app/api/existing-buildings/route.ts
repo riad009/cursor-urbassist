@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as turf from "@turf/turf";
 import type { Feature, Polygon, MultiPolygon, FeatureCollection, GeoJsonProperties } from "geojson";
+import { ignFetchWithRetry } from "@/lib/ign-fetch";
 
 /**
  * POST /api/existing-buildings
@@ -31,8 +32,13 @@ function normaliseToFeature(geom: ParcelGeoJSON): Feature<Polygon | MultiPolygon
     if (features.length === 1) return features[0];
     let merged: Feature<Polygon | MultiPolygon> = features[0];
     for (let i = 1; i < features.length; i++) {
-      const result = turf.union(turf.featureCollection([merged, features[i]]));
-      if (result) merged = result as Feature<Polygon | MultiPolygon>;
+      try {
+        const result = turf.union(turf.featureCollection([merged, features[i]]));
+        if (result) merged = result as Feature<Polygon | MultiPolygon>;
+      } catch (e) {
+        console.warn("normaliseToFeature: union failed for feature", i, e);
+        // Skip this feature but continue with others
+      }
     }
     return merged;
   }
@@ -83,13 +89,15 @@ export async function POST(req: NextRequest) {
   wfsUrl.searchParams.set("COUNT", "500"); // max 500 buildings per query
 
   try {
-    const wfsRes = await fetch(wfsUrl.toString(), {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(12000),
+    // Use resilient fetch with 1 retry and WFS XML error detection
+    const wfsResult = await ignFetchWithRetry<FeatureCollection>(wfsUrl.toString(), {
+      maxRetries: 1,
+      timeoutMs: 15000,
+      backoffBaseMs: 500,
     });
 
-    if (!wfsRes.ok) {
-      console.error("IGN BDTOPO WFS error:", wfsRes.status, await wfsRes.text().catch(() => ""));
+    if (!wfsResult.ok || !wfsResult.data) {
+      console.error("IGN BDTOPO WFS error:", wfsResult.error, `(${wfsResult.attempts} attempts)`);
       return NextResponse.json({
         buildings: { type: "FeatureCollection", features: [] } as FeatureCollection,
         count: 0,
@@ -98,7 +106,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const wfsData: FeatureCollection = await wfsRes.json();
+    const wfsData = wfsResult.data;
 
     if (!wfsData.features || wfsData.features.length === 0) {
       return NextResponse.json({

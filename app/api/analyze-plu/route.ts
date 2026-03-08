@@ -109,7 +109,11 @@ export async function POST(request: NextRequest) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(30000),
           body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: "You are a strict French urban planning regulation parser. You ONLY extract factual information from the provided documents. You NEVER invent, hallucinate, or assume values not explicitly stated in the source text. When a value is not found, you use null or \"Non réglementé\"." }],
+            },
             contents: [{ parts: [{ text: qualitativePrompt }] }],
             generationConfig: {
               temperature: 0.2,
@@ -124,12 +128,41 @@ export async function POST(request: NextRequest) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(30000),
           body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: "You are a machine-readable data extractor. You extract ONLY numeric and categorical values explicitly stated in the provided urban planning document. You NEVER guess, infer, or hallucinate values. If a value is not found in the document text, you MUST use null. Output valid JSON only, with zero commentary." }],
+            },
             contents: [{ parts: [{ text: extractionPrompt }] }],
             generationConfig: {
               temperature: 0.0,
               maxOutputTokens: 2048,
               responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  maxCoverageRatio: { type: "NUMBER", nullable: true },
+                  maxHeight: { type: "NUMBER", nullable: true },
+                  maxRidgeHeight: { type: "NUMBER", nullable: true },
+                  setbacks: {
+                    type: "OBJECT",
+                    properties: {
+                      front: { type: "NUMBER", nullable: true },
+                      side: { type: "NUMBER", nullable: true },
+                      rear: { type: "NUMBER", nullable: true },
+                    },
+                  },
+                  greenSpaceRequirements: { type: "STRING", nullable: true },
+                  parkingRequirements: { type: "STRING", nullable: true },
+                  roofSlopes: { type: "STRING", nullable: true },
+                  allowedRoofMaterials: { type: "ARRAY", items: { type: "STRING" } },
+                  forbiddenFacadeMaterials: { type: "ARRAY", items: { type: "STRING" } },
+                  maxFenceHeight: { type: "NUMBER", nullable: true },
+                  architectRequired: { type: "BOOLEAN" },
+                  notes: { type: "STRING" },
+                },
+                required: ["maxCoverageRatio", "maxHeight", "maxRidgeHeight", "setbacks", "architectRequired", "notes"],
+              },
             },
           }),
         }
@@ -171,7 +204,7 @@ function buildInDepthAnalysisPrompt(body: AnalysisRequest): string {
   const address = body.parcelAddress || "non précisée"
   const zone = body.zoneType || "non spécifiée"
   const description = body.description || "non fournie"
-  const docContent = body.documentContent.slice(0, 80000)
+  const docContent = truncateAtParagraph(body.documentContent, 80000)
 
   return `Analyze the provided urban planning regulation document (PLU) for a specific construction project and produce a structured analysis in JSON format.
 
@@ -366,7 +399,7 @@ function generateFallbackAnalysis(body: AnalysisRequest): DeepPluAnalysis {
 function buildRuleExtractionPrompt(body: AnalysisRequest): string {
   const address = body.parcelAddress || "non précisée"
   const zone = body.zoneType || "non spécifiée"
-  const docContent = body.documentContent.slice(0, 80000)
+  const docContent = truncateAtParagraph(body.documentContent, 80000)
 
   return `You are an expert French urban planning rule parser. Extract ONLY precise, machine-readable numerical and categorical values from the PLU regulation document below.
 
@@ -406,9 +439,50 @@ Rules:
 - parkingRequirements: parking rule as string e.g. "1 place par logement" or "1 place par 60m² SHON"
 - architectRequired: true ONLY if the zone explicitly requires ABF (Architecte des Bâtiments de France) approval
 - Do NOT include commentary, markdown, or any text outside the JSON object.
+- CRITICAL: If a numeric value is not explicitly stated in the document, you MUST use null. Do NOT guess, infer from context, or use typical/standard values. Only extract what is WRITTEN.
+- If a setback is expressed as a formula (e.g. "H/2", "H/2 avec minimum 3m"), put the formula string in the corresponding field instead of null, and note it in the "notes" field.
 
 PLU document:
 ${docContent}`
+}
+
+/**
+ * Truncate text at the last paragraph boundary before the max length.
+ * Avoids cutting mid-article which could confuse the LLM.
+ */
+function truncateAtParagraph(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  // Find the last double-newline (paragraph break) before maxLength
+  const truncated = text.slice(0, maxLength);
+  const lastParagraph = truncated.lastIndexOf("\n\n");
+  if (lastParagraph > maxLength * 0.8) {
+    return truncated.slice(0, lastParagraph);
+  }
+  // Fallback: cut at last newline
+  const lastNewline = truncated.lastIndexOf("\n");
+  if (lastNewline > maxLength * 0.9) {
+    return truncated.slice(0, lastNewline);
+  }
+  return truncated;
+}
+
+/**
+ * Parse a setback value that may be a number, a formula string (e.g. "H/2"), or null.
+ * PLU documents sometimes express setbacks as formulas rather than fixed values.
+ */
+function parseSetbackValue(val: unknown): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "number" && !isNaN(val)) return val;
+  if (typeof val === "string") {
+    // Try to parse as a plain number first
+    const num = parseFloat(val);
+    if (!isNaN(num)) return num;
+    // If it's a formula like "H/2" or "H/2 avec minimum 3m", extract the minimum
+    const minMatch = val.match(/minimum\s+(\d+(?:[.,]\d+)?)/i);
+    if (minMatch) return parseFloat(minMatch[1].replace(",", "."));
+    // Can't extract a numeric value — return null (formula noted in 'notes' field)
+  }
+  return null;
 }
 
 /**
@@ -428,9 +502,9 @@ function parsePluRules(text: string): PluRules {
       maxHeight: typeof parsed.maxHeight === "number" ? parsed.maxHeight : null,
       maxRidgeHeight: typeof parsed.maxRidgeHeight === "number" ? parsed.maxRidgeHeight : null,
       setbacks: {
-        front: parsed.setbacks?.front ?? null,
-        side: parsed.setbacks?.side ?? null,
-        rear: parsed.setbacks?.rear ?? null,
+        front: parseSetbackValue(parsed.setbacks?.front),
+        side: parseSetbackValue(parsed.setbacks?.side),
+        rear: parseSetbackValue(parsed.setbacks?.rear),
       },
       greenSpaceRequirements: parsed.greenSpaceRequirements ?? null,
       parkingRequirements: parsed.parkingRequirements ?? null,

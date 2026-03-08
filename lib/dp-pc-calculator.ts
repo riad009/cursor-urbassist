@@ -12,6 +12,9 @@ export type ProjectTypeChoice =
   | "facade_change"
   | "outdoor_fence"
   | "outdoor_other";
+  // TODO Phase 2: Add "terrace" (Art. R.421-9 f: elevated terrace >0.60m → DP, >20m² → PC)
+  // TODO Phase 2: Add "demolition" (Art. R421-27-1: requires DP or Permis de démolir in ABF zones)
+  // TODO Phase 2: Add "solar_panel" (Ground-mounted: <1m height, ≤20m² → NONE, else DP/PC)
 
 export type SubmitterType = "individual" | "company";
 
@@ -88,6 +91,11 @@ export interface DpPcInput {
   /** Urban zone (PLU U, UD, AUD…) for extension rules */
   inUrbanZone?: boolean;
   /**
+   * Whether the commune uses RNU (Règlement National d'Urbanisme) instead of PLU.
+   * Under RNU there is NO 40m² DP threshold — it's always 20m².
+   */
+  isRnu?: boolean;
+  /**
    * API-derived DP threshold in m² (overrides inUrbanZone logic).
    * When provided by the GPU API / PLU detection, this takes priority
    * over the default `inUrbanZone ? 40 : 20` calculation.
@@ -95,7 +103,7 @@ export interface DpPcInput {
   dpThreshold?: number;
   /** Submitter type — company always requires architect for PC */
   submitterType?: SubmitterType;
-  /** Swimming pool: height of shelter/cover in meters (> 1.80m triggers PC) */
+  /** Swimming pool: height of shelter/cover in meters (>1.80m triggers PC) */
   shelterHeight?: number;
   /** Is the construction a garage (excluded from taxable floor area) */
   isGarage?: boolean;
@@ -218,16 +226,21 @@ function calculateExistingExtension(input: DpPcInput): DpPcResult {
     changeOfUse,
     facadeModification,
     inUrbanZone = true,
+    isRnu = false,
+    isGarage = false,
     submitterType,
   } = input;
 
   const footprint = footprintCreated ?? floorArea;
-  // Use the stricter (larger) of footprint and floor area for threshold comparison
-  const stricterArea = Math.max(footprint, floorArea);
+  // For garages: surface de plancher is 0 (excluded), so only emprise au sol matters
+  const effectiveFloorArea = isGarage ? 0 : floorArea;
+  // Use the stricter (larger) of footprint and effective floor area for threshold comparison
+  const stricterArea = Math.max(footprint, effectiveFloorArea);
   // 150 m² architect threshold uses ONLY total floor area (not footprint)
-  const totalFloorAfterWork = existingFloorArea + floorArea;
-  // DP threshold: 40 m² in urban zone (PLU), 20 m² outside
-  const dpThreshold = input.dpThreshold ?? (inUrbanZone ? 40 : 20);
+  const totalFloorAfterWork = existingFloorArea + effectiveFloorArea;
+  // DP threshold: Under RNU there is NO 40m² exception — always 20m²
+  // GPU API dpThreshold overrides everything if provided
+  const dpThreshold = input.dpThreshold ?? (isRnu ? 20 : (inUrbanZone ? 40 : 20));
 
   // ── Rule 1: Change of destination + facade/structure modification → PC (Art. R421-14 c)
   if (changeOfUse && facadeModification) {
