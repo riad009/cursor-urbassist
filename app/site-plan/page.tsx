@@ -160,31 +160,31 @@ const SCALES = [
 ];
 
 const tools = [
-  { id: "select",    label: "Select",      icon: MousePointer2,  shortcut: "V", tooltip: "Select and move objects" },
-  { id: "pan",       label: "Pan",         icon: Move,          shortcut: "H", tooltip: "Pan the canvas" },
-  { id: "line",      label: "Line",        icon: Minus,         shortcut: "L", tooltip: "Draw walls, fences, or segments" },
-  { id: "rectangle",label: "Rectangle",   icon: Square,        shortcut: "R", tooltip: "Quick rectangle for buildings or surfaces" },
-  { id: "polygon",   label: "Polygon",     icon: Pentagon,      shortcut: "P", tooltip: "Free shape: click points, double-click to close" },
-  { id: "circle",    label: "Circle",      icon: Circle,        shortcut: "C", tooltip: "Circles or round surfaces" },
-  { id: "pencil",    label: "Pencil",      icon: Pencil,        shortcut: "B", tooltip: "Freehand drawing" },
-  { id: "text",      label: "Text",        icon: Type,          shortcut: "T", tooltip: "Click to add editable text" },
-  { id: "arrow",     label: "Arrow",       icon: ArrowRight,    shortcut: "W", tooltip: "Arrow annotation" },
-  { id: "callout",   label: "Callout",     icon: MessageSquare, shortcut: "K", tooltip: "Callout bubble annotation" },
-  { id: "measure",   label: "Measure",     icon: Ruler,         shortcut: "M", tooltip: "Measure distance between two points" },
-  { id: "elevation", label: "Elevation",   icon: Ruler,         shortcut: "E", tooltip: "Click to place elevation point (m)" },
-  { id: "section",   label: "Section line",icon: Minus,         shortcut: "S", tooltip: "Draw section cut line" },
-  { id: "parcel",    label: "Land Parcel", icon: MapPin,        shortcut: "A", tooltip: "Draw parcel boundary (polygon)" },
-  { id: "vrd",       label: "VRD Networks",icon: Zap,           shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
-  { id: "vegetation",label: "Vegetation",  icon: Trees,         shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
-  { id: "viewpoint", label: "Viewpoint",   icon: Eye,           shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
+  { id: "select", label: "Select", icon: MousePointer2, shortcut: "V", tooltip: "Select and move objects" },
+  { id: "pan", label: "Pan", icon: Move, shortcut: "H", tooltip: "Pan the canvas" },
+  { id: "line", label: "Line", icon: Minus, shortcut: "L", tooltip: "Draw walls, fences, or segments" },
+  { id: "rectangle", label: "Rectangle", icon: Square, shortcut: "R", tooltip: "Quick rectangle for buildings or surfaces" },
+  { id: "polygon", label: "Polygon", icon: Pentagon, shortcut: "P", tooltip: "Free shape: click points, double-click to close" },
+  { id: "circle", label: "Circle", icon: Circle, shortcut: "C", tooltip: "Circles or round surfaces" },
+  { id: "pencil", label: "Pencil", icon: Pencil, shortcut: "B", tooltip: "Freehand drawing" },
+  { id: "text", label: "Text", icon: Type, shortcut: "T", tooltip: "Click to add editable text" },
+  { id: "arrow", label: "Arrow", icon: ArrowRight, shortcut: "W", tooltip: "Arrow annotation" },
+  { id: "callout", label: "Callout", icon: MessageSquare, shortcut: "K", tooltip: "Callout bubble annotation" },
+  { id: "measure", label: "Measure", icon: Ruler, shortcut: "M", tooltip: "Measure distance between two points" },
+  { id: "elevation", label: "Elevation", icon: Ruler, shortcut: "E", tooltip: "Click to place elevation point (m)" },
+  { id: "section", label: "Section line", icon: Minus, shortcut: "S", tooltip: "Draw section cut line" },
+  { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A", tooltip: "Draw parcel boundary (polygon)" },
+  { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
+  { id: "vegetation", label: "Vegetation", icon: Trees, shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
+  { id: "viewpoint", label: "Viewpoint", icon: Eye, shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
 ];
 
 /** Phase 8: Tool groups with section labels for grouped toolbar rendering */
 const TOOL_GROUPS = [
-  { label: "Select",   ids: ["select", "pan"] },
-  { label: "Draw",     ids: ["line", "rectangle", "polygon", "circle", "pencil"] },
+  { label: "Select", ids: ["select", "pan"] },
+  { label: "Draw", ids: ["line", "rectangle", "polygon", "circle", "pencil"] },
   { label: "Annotate", ids: ["text", "arrow", "callout", "measure", "elevation", "section"] },
-  { label: "Place",    ids: ["parcel", "vrd", "vegetation", "viewpoint"] },
+  { label: "Place", ids: ["parcel", "vrd", "vegetation", "viewpoint"] },
 ];
 
 const templatesList = [
@@ -636,7 +636,7 @@ function SitePlanContent() {
       const currentJson = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
       redoStackRef.current.push({ canvas: currentJson, buildings: buildingDetailsSnapshotRef.current });
       setCanRedo(true);
-      restoreUndoEntry(prev, () => {});
+      restoreUndoEntry(prev, () => { });
     }
   }, [restoreUndoEntry]);
 
@@ -649,7 +649,7 @@ function SitePlanContent() {
       const currentJson = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
       undoStackRef.current.push({ canvas: currentJson, buildings: buildingDetailsSnapshotRef.current });
       setCanUndo(true);
-      restoreUndoEntry(next, () => {});
+      restoreUndoEntry(next, () => { });
     }
   }, [restoreUndoEntry]);
 
@@ -934,9 +934,9 @@ function SitePlanContent() {
           lngLatToCanvas(lng, lat, transformOpts)
         );
         // Shift all points so the polygon's local centroid is at (0,0) (Fabric requirement)
-        const cxLocal = pts.reduce((s: number, p: {x:number;y:number}) => s + p.x, 0) / pts.length;
-        const cyLocal = pts.reduce((s: number, p: {x:number;y:number}) => s + p.y, 0) / pts.length;
-        const localPts = pts.map((p: {x:number;y:number}) => ({ x: p.x - cxLocal, y: p.y - cyLocal }));
+        const cxLocal = pts.reduce((s: number, p: { x: number; y: number }) => s + p.x, 0) / pts.length;
+        const cyLocal = pts.reduce((s: number, p: { x: number; y: number }) => s + p.y, 0) / pts.length;
+        const localPts = pts.map((p: { x: number; y: number }) => ({ x: p.x - cxLocal, y: p.y - cyLocal }));
 
         const poly = new fabric.Polygon(localPts, {
           left: cxLocal,
@@ -980,7 +980,7 @@ function SitePlanContent() {
     setExistingBuildingsLoaded(true);
     setLoadingExistingBuildings(false);
   }, [projectData?.existingBuildingsGeoJSON, projectData?.parcelGeometry, existingBuildingsLoaded,
-      currentScale.pixelsPerMeter, canvasSize, updateLayers]);
+  currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
   useEffect(() => {
     if (projectData?.existingBuildingsGeoJSON && canvasReady && !existingBuildingsLoaded) {
@@ -1377,12 +1377,12 @@ function SitePlanContent() {
       // Auto-name fallback: if an object has a known type marker but no name, infer one.
       const inferredName =
         o.isParcel ? "Land Parcel" :
-        o.isVrd ? o.vrdType || "VRD" :
-        o.isSectionLine ? "Section line" :
-        o.isAnnotation ? (o.type === "i-text" ? "Text Label" : o.elementName || "Annotation") :
-        o.type === "i-text" ? "Text Label" :
-        o.type === "path" ? "Freehand Drawing" :
-        null;
+          o.isVrd ? o.vrdType || "VRD" :
+            o.isSectionLine ? "Section line" :
+              o.isAnnotation ? (o.type === "i-text" ? "Text Label" : o.elementName || "Annotation") :
+                o.type === "i-text" ? "Text Label" :
+                  o.type === "path" ? "Freehand Drawing" :
+                    null;
       const rawName = String(o.elementName ?? o.name ?? "").trim();
       const name = rawName || inferredName || "Unnamed";
       // Backfill the elementName so the layers panel and save both reflect it
@@ -1394,7 +1394,7 @@ function SitePlanContent() {
         type: o.type, name: name || "Unnamed",
         category: o.templateType || o.surfaceType === "building" ? "building" : undefined,
         templateType: o.templateType, surfaceType: o.surfaceType, vrdType: o.vrdType,
-          constructionType: o.constructionType,
+        constructionType: o.constructionType,
         width: o.width, height: o.height,
         area: o.width != null && o.height != null ? toM(o.width * (o.scaleX || 1)) * toM(o.height * (o.scaleY || 1)) : undefined,
       };
@@ -1600,7 +1600,7 @@ function SitePlanContent() {
     canvas.on("object:removed", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
 
     return () => { setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasSize]);
 
   // ─── Mouse handlers ────────────────────────────────────────────────────────
@@ -1855,9 +1855,9 @@ function SitePlanContent() {
       if (!isDrawingRef.current || !drawingStartRef.current) return;
       const pointer = (e.scenePoint || e.viewportPoint) ? (e.scenePoint || e.viewportPoint) : drawingStartRef.current;
       if (!pointer) return;
-      
+
       const currentStart = drawingStartRef.current;
-      
+
       if (tempShapeRef.current) { canvas.remove(tempShapeRef.current); tempShapeRef.current = null; }
 
       const shapeId = `shape-${Date.now()}`;
@@ -2028,8 +2028,32 @@ function SitePlanContent() {
     };
     canvas.on("mouse:move", trackPos);
     return () => { canvas.off("mouse:move", trackPos); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — register once and never re-register
+
+  // ─── Mouse wheel zoom ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const onWheel = (opt: fabric.TPointerEventInfo<WheelEvent>) => {
+      const e = opt.e;
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY;
+      let currentZoom = canvas.getZoom();
+      const zoomStep = delta > 0 ? -0.05 : 0.05;
+      currentZoom = Math.max(0.1, Math.min(5, currentZoom + zoomStep));
+      // Zoom towards mouse pointer
+      const rect = canvas.getElement().getBoundingClientRect();
+      const point = new fabric.Point(e.clientX - rect.left, e.clientY - rect.top);
+      canvas.zoomToPoint(point, currentZoom);
+      setZoom(Math.round(currentZoom * 100));
+      canvas.renderAll();
+    };
+    canvas.on("mouse:wheel", onWheel);
+    return () => { canvas.off("mouse:wheel", onWheel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Delete selected ────────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
@@ -2999,9 +3023,9 @@ function SitePlanContent() {
       // Auto-name fallback (mirrors saveSitePlan logic)
       const inferred =
         o.isParcel ? "Land Parcel" :
-        o.type === "i-text" ? "Text Label" :
-        o.type === "path" ? "Freehand Drawing" :
-        null;
+          o.type === "i-text" ? "Text Label" :
+            o.type === "path" ? "Freehand Drawing" :
+              null;
       if (inferred && !String(o.elementName ?? "").trim()) {
         o.elementName = inferred;
         o.name = inferred;
@@ -3342,7 +3366,7 @@ function SitePlanContent() {
                   <svg className="w-20 h-20 -rotate-90" viewBox="0 0 64 64">
                     <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
                     <circle cx="32" cy="32" r="28" fill="none" stroke="url(#editorGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'editorRing 2.5s ease-in-out infinite' }} />
-                    <defs><linearGradient id="editorGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#3b82f6"/><stop offset="100%" stopColor="#8b5cf6"/></linearGradient></defs>
+                    <defs><linearGradient id="editorGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#3b82f6" /><stop offset="100%" stopColor="#8b5cf6" /></linearGradient></defs>
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <svg className="w-7 h-7 text-blue-500" style={{ animation: 'editorPulse 2s ease-in-out infinite' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" /></svg>
@@ -3364,78 +3388,78 @@ function SitePlanContent() {
           )}
           {/* === 2D Canvas Layer (always mounted, hidden via CSS when in 3D) === */}
           <div style={{ display: viewMode === "2d" ? "block" : "none" }} className="absolute inset-0">
-              {currentMeasurement && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
-                  <div className="px-6 py-3 rounded-xl bg-amber-500 text-slate-900 font-mono font-bold text-xl shadow-lg shadow-amber-500/25">{currentMeasurement}</div>
+            {currentMeasurement && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+                <div className="px-6 py-3 rounded-xl bg-amber-500 text-slate-900 font-mono font-bold text-xl shadow-lg shadow-amber-500/25">{currentMeasurement}</div>
+              </div>
+            )}
+            {(activeTool === "polygon" || activeTool === "parcel") && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
+                <div className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm">
+                  Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
+                  {polygonPoints.length > 0 && <span className="ml-2 text-emerald-600">({polygonPoints.length} pts)</span>}
                 </div>
-              )}
-              {(activeTool === "polygon" || activeTool === "parcel") && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-                  <div className="px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm">
-                    Click to add points. <span className="text-amber-600 font-medium">Double-click</span> to complete.
-                    {polygonPoints.length > 0 && <span className="ml-2 text-emerald-600">({polygonPoints.length} pts)</span>}
-                  </div>
-                </div>
-              )}
-              {loadingExistingBuildings && (
-                <div className="absolute top-4 right-4 z-20 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />Loading existing buildings...
-                </div>
-              )}
-              {loadingParcelsGeoJSON && (
-                <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
-                  <div className="flex flex-col items-center gap-4 px-8 py-6 rounded-2xl bg-white/95 border border-slate-200 shadow-2xl">
-                    <style>{`
+              </div>
+            )}
+            {loadingExistingBuildings && (
+              <div className="absolute top-4 right-4 z-20 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />Loading existing buildings...
+              </div>
+            )}
+            {loadingParcelsGeoJSON && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
+                <div className="flex flex-col items-center gap-4 px-8 py-6 rounded-2xl bg-white/95 border border-slate-200 shadow-2xl">
+                  <style>{`
                       @keyframes parcelDraw { 0% { stroke-dashoffset: 188; } 100% { stroke-dashoffset: 0; } }
                       @keyframes parcelFade { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
                     `}</style>
-                    <div className="relative w-16 h-16">
-                      <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
-                        <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
-                        <circle cx="32" cy="32" r="28" fill="none" stroke="url(#parcelGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'parcelDraw 2s ease-in-out infinite' }} />
-                        <defs><linearGradient id="parcelGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#22c55e"/><stop offset="100%" stopColor="#3b82f6"/></linearGradient></defs>
-                      </svg>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <svg className="w-6 h-6 text-emerald-500" style={{ animation: 'parcelFade 2s ease-in-out infinite' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-center gap-1">
-                      <p className="text-sm font-semibold text-slate-700">Drawing parcel boundaries…</p>
-                      <p className="text-xs text-slate-400">Importing GeoJSON data onto the canvas</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <div className="w-8 h-0.5 rounded-full bg-emerald-300" />
-                      <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                  <div className="relative w-16 h-16">
+                    <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
+                      <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                      <circle cx="32" cy="32" r="28" fill="none" stroke="url(#parcelGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'parcelDraw 2s ease-in-out infinite' }} />
+                      <defs><linearGradient id="parcelGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#22c55e" /><stop offset="100%" stopColor="#3b82f6" /></linearGradient></defs>
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg className="w-6 h-6 text-emerald-500" style={{ animation: 'parcelFade 2s ease-in-out infinite' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>
                     </div>
                   </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-sm font-semibold text-slate-700">Drawing parcel boundaries…</p>
+                    <p className="text-xs text-slate-400">Importing GeoJSON data onto the canvas</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <div className="w-8 h-0.5 rounded-full bg-emerald-300" />
+                    <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                  </div>
                 </div>
-              )}
-              {placementMode && selectedPreset && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-6 py-3 rounded-xl bg-amber-500 text-slate-900 font-medium text-sm shadow-lg">
-                  Click on the plan to place your {selectedPreset.shortLabel}
-                </div>
-              )}
+              </div>
+            )}
+            {placementMode && selectedPreset && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-6 py-3 rounded-xl bg-amber-500 text-slate-900 font-medium text-sm shadow-lg">
+                Click on the plan to place your {selectedPreset.shortLabel}
+              </div>
+            )}
 
-              <div className="absolute bottom-4 right-4 z-20">
-                <div className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-mono">
-                  X: {formatMeasurement(pixelsToMeters(mousePos.x))} | Y: {formatMeasurement(pixelsToMeters(mousePos.y))}
-                </div>
+            <div className="absolute bottom-4 right-4 z-20">
+              <div className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs font-mono">
+                X: {formatMeasurement(pixelsToMeters(mousePos.x))} | Y: {formatMeasurement(pixelsToMeters(mousePos.y))}
               </div>
-              {/* Graphic scale (spec 2.9) */}
-              <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1">
-                <div className="px-3 py-1.5 rounded-lg bg-slate-100/90 border border-slate-200 text-slate-600 text-xs font-mono">
-                  Scale 1:{currentScale.value === 0.5 ? "50" : currentScale.value === 1 ? "100" : currentScale.value === 2 ? "200" : "500"}
-                </div>
-                <div className="flex items-center gap-0.5">
-                  <div className="h-1.5 bg-white/80 rounded-l" style={{ width: currentScale.pixelsPerMeter * 5 }} />
-                  <span className="text-[10px] text-slate-400 ml-1">5 m</span>
-                </div>
+            </div>
+            {/* Graphic scale (spec 2.9) */}
+            <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1">
+              <div className="px-3 py-1.5 rounded-lg bg-slate-100/90 border border-slate-200 text-slate-600 text-xs font-mono">
+                Scale 1:{currentScale.value === 0.5 ? "50" : currentScale.value === 1 ? "100" : currentScale.value === 2 ? "200" : "500"}
               </div>
-              <div className="absolute inset-0 flex items-center justify-center bg-white">
-                <canvas ref={canvasRef} className="shadow-2xl" />
+              <div className="flex items-center gap-0.5">
+                <div className="h-1.5 bg-white/80 rounded-l" style={{ width: currentScale.pixelsPerMeter * 5 }} />
+                <span className="text-[10px] text-slate-400 ml-1">5 m</span>
               </div>
-              <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center bg-white">
+              <canvas ref={canvasRef} className="shadow-2xl" />
+            </div>
+            <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
 
           </div>
 
@@ -4083,9 +4107,9 @@ function Inline3DViewer({
           let rotY = 0;
 
           if (b.canvasX !== undefined) {
-             posX = (b.canvasX - centerX) / pixelsPerMeter;
-             posZ = (b.canvasY - centerY) / pixelsPerMeter;
-             rotY = b.canvasAngle ? -b.canvasAngle * (Math.PI / 180) : 0;
+            posX = (b.canvasX - centerX) / pixelsPerMeter;
+            posZ = (b.canvasY - centerY) / pixelsPerMeter;
+            rotY = b.canvasAngle ? -b.canvasAngle * (Math.PI / 180) : 0;
           }
 
           const buildingType = String(b.name || "").toLowerCase().trim();
@@ -4216,8 +4240,8 @@ function Inline3DViewer({
             const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9, metalness: 0.0 });
             const hedgeH = 0.8, hedgeW = 0.3;
             [{ p: [0, hedgeH / 2 + 0.15, d / 2 - hedgeW / 2], s: [w * 0.9, hedgeH, hedgeW] },
-             { p: [0, hedgeH / 2 + 0.15, -d / 2 + hedgeW / 2], s: [w * 0.9, hedgeH, hedgeW] },
-             { p: [w / 2 - hedgeW / 2, hedgeH / 2 + 0.15, 0], s: [hedgeW, hedgeH, d * 0.7] },
+            { p: [0, hedgeH / 2 + 0.15, -d / 2 + hedgeW / 2], s: [w * 0.9, hedgeH, hedgeW] },
+            { p: [w / 2 - hedgeW / 2, hedgeH / 2 + 0.15, 0], s: [hedgeW, hedgeH, d * 0.7] },
             ].forEach(h => {
               const g = new THREE.BoxGeometry(h.s[0], h.s[1], h.s[2]);
               const m = new THREE.Mesh(g, hedgeMat);
@@ -4270,8 +4294,8 @@ function Inline3DViewer({
             const railMat = new THREE.MeshStandardMaterial({ color: 0x6d4c41, roughness: 0.7, metalness: 0.1 });
             const railH = 0.9, railW = 0.05;
             [{ s: [w, railH, railW], p: [0, railH / 2 + deckH, d / 2] },
-             { s: [railW, railH, d], p: [w / 2, railH / 2 + deckH, 0] },
-             { s: [railW, railH, d], p: [-w / 2, railH / 2 + deckH, 0] },
+            { s: [railW, railH, d], p: [w / 2, railH / 2 + deckH, 0] },
+            { s: [railW, railH, d], p: [-w / 2, railH / 2 + deckH, 0] },
             ].forEach(r => {
               const g = new THREE.BoxGeometry(r.s[0], r.s[1], r.s[2]);
               const m = new THREE.Mesh(g, railMat);
@@ -4418,7 +4442,7 @@ function Inline3DViewer({
             const halfD = d / 2 + over;
             const isSpanX = w < d;
             const roofH = isSpanX ? (w / 2) * Math.tan(pitch) : (d / 2) * Math.tan(pitch);
-            
+
             const r1 = isSpanX ? [0, roofH, -halfD] : [-halfW, roofH, 0];
             const r2 = isSpanX ? [0, roofH, halfD] : [halfW, roofH, 0];
             const p1 = [-halfW, 0, halfD];
@@ -4427,13 +4451,13 @@ function Inline3DViewer({
             const p4 = [-halfW, 0, -halfD];
 
             const vertices = isSpanX ? new Float32Array([
-              ...p4, ...p1, ...r1,   ...p1, ...r2, ...r1,
-              ...p2, ...p3, ...r2,   ...p3, ...r1, ...r2,
-              ...p1, ...p2, ...r2,   ...p3, ...p4, ...r1
+              ...p4, ...p1, ...r1, ...p1, ...r2, ...r1,
+              ...p2, ...p3, ...r2, ...p3, ...r1, ...r2,
+              ...p1, ...p2, ...r2, ...p3, ...p4, ...r1
             ]) : new Float32Array([
-              ...p1, ...p2, ...r1,   ...p2, ...r2, ...r1,
-              ...p3, ...p4, ...r2,   ...p4, ...r1, ...r2,
-              ...p4, ...p1, ...r1,   ...p2, ...p3, ...r2
+              ...p1, ...p2, ...r1, ...p2, ...r2, ...r1,
+              ...p3, ...p4, ...r2, ...p4, ...r1, ...r2,
+              ...p4, ...p1, ...r1, ...p2, ...p3, ...r2
             ]);
 
             const geom = new THREE.BufferGeometry();
@@ -4457,7 +4481,7 @@ function Inline3DViewer({
             const p3 = [halfW, 0, -halfD];
             const p4 = [-halfW, 0, -halfD];
             const verts = new Float32Array([
-              ...p1, ...p2, ...p3,  ...p1, ...p3, ...p4
+              ...p1, ...p2, ...p3, ...p1, ...p3, ...p4
             ]);
             const geom = new THREE.BufferGeometry();
             geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
@@ -4495,10 +4519,10 @@ function Inline3DViewer({
               const uHalfW = upperW / 2, uHalfD = upperD / 2;
               const r1 = [0, upperH, 0];
               const verts = new Float32Array([
-                -uHalfW, 0, uHalfD,   uHalfW, 0, uHalfD,  ...r1,
-                uHalfW, 0, uHalfD,    uHalfW, 0, -uHalfD, ...r1,
-                uHalfW, 0, -uHalfD,  -uHalfW, 0, -uHalfD, ...r1,
-                -uHalfW, 0, -uHalfD, -uHalfW, 0, uHalfD,  ...r1,
+                -uHalfW, 0, uHalfD, uHalfW, 0, uHalfD, ...r1,
+                uHalfW, 0, uHalfD, uHalfW, 0, -uHalfD, ...r1,
+                uHalfW, 0, -uHalfD, -uHalfW, 0, -uHalfD, ...r1,
+                -uHalfW, 0, -uHalfD, -uHalfW, 0, uHalfD, ...r1,
               ]);
               const geom = new THREE.BufferGeometry();
               geom.setAttribute("position", new THREE.BufferAttribute(verts, 3));
@@ -4570,10 +4594,10 @@ function Inline3DViewer({
           if (userOpenings.length > 0) {
             // Render user-defined openings placed on their specified facades
             const facadeMap: Record<string, { normal: number[]; offset: number[]; rotY: number }> = {
-              south: { normal: [0,0,1], offset: [0, 0, d/2 + 0.02], rotY: 0 },
-              north: { normal: [0,0,-1], offset: [0, 0, -d/2 - 0.02], rotY: Math.PI },
-              east:  { normal: [1,0,0], offset: [w/2 + 0.02, 0, 0], rotY: -Math.PI/2 },
-              west:  { normal: [-1,0,0], offset: [-w/2 - 0.02, 0, 0], rotY: Math.PI/2 },
+              south: { normal: [0, 0, 1], offset: [0, 0, d / 2 + 0.02], rotY: 0 },
+              north: { normal: [0, 0, -1], offset: [0, 0, -d / 2 - 0.02], rotY: Math.PI },
+              east: { normal: [1, 0, 0], offset: [w / 2 + 0.02, 0, 0], rotY: -Math.PI / 2 },
+              west: { normal: [-1, 0, 0], offset: [-w / 2 - 0.02, 0, 0], rotY: Math.PI / 2 },
             };
 
             // Group openings by facade for distribution
@@ -4885,7 +4909,7 @@ function Inline3DViewer({
           const mesh = new THREE.Mesh(geom, mat);
           mesh.position.set(nx, pt.value + 0.3, nz);
           scene.add(mesh);
-          
+
           const labelGeom = new THREE.SphereGeometry(0.15, 8, 8);
           const labelMat = new THREE.MeshStandardMaterial({ color: 0x0284c7 });
           const labelMesh = new THREE.Mesh(labelGeom, labelMat);

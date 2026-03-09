@@ -24,8 +24,15 @@ interface ElevationPoint {
   z: number;
 }
 
+interface AltiElevationEntry {
+  lon: number;
+  lat: number;
+  z: number;
+  acc: string;
+}
+
 interface AltiResponse {
-  elevations: number[];
+  elevations: AltiElevationEntry[];
 }
 
 /**
@@ -145,16 +152,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Map response elevations to point coordinates
+  // IGN RGE Alti API returns objects { lon, lat, z, acc } — extract z from each
   const elevations: ElevationPoint[] = [];
   const rawElevations = result.data.elevations;
 
-  for (let i = 0; i < samplePoints.length; i++) {
-    const z = rawElevations[i];
+  for (let i = 0; i < rawElevations.length; i++) {
+    const entry = rawElevations[i];
+    const z = typeof entry === "number" ? entry : entry?.z;
     // IGN returns -99999 for unavailable elevations (sea, foreign territory)
     if (typeof z === "number" && z > -9999) {
       elevations.push({
-        lon: samplePoints[i][0],
-        lat: samplePoints[i][1],
+        lon: samplePoints[i]?.[0] ?? entry?.lon ?? 0,
+        lat: samplePoints[i]?.[1] ?? entry?.lat ?? 0,
         z: Math.round(z * 100) / 100, // 2 decimal places (cm precision)
       });
     }

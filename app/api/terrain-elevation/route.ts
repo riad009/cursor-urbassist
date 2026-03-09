@@ -45,8 +45,15 @@ export interface TerrainElevationPoint {
   source: "ign_rge_alti";
 }
 
+interface AltiElevationEntry {
+  lon: number;
+  lat: number;
+  z: number;
+  acc: string;
+}
+
 interface AltiApiResponse {
-  elevations: number[];
+  elevations: AltiElevationEntry[];
 }
 
 // ─── Grid generation ─────────────────────────────────────────────────────
@@ -220,15 +227,17 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Map response elevations to typed points ───────────────────────────
+  // IGN RGE Alti API returns objects { lon, lat, z, acc } — extract z from each
   const rawElevations = result.data.elevations;
   const points: TerrainElevationPoint[] = [];
 
-  for (let i = 0; i < samplePoints.length; i++) {
-    const z = rawElevations[i];
+  for (let i = 0; i < rawElevations.length; i++) {
+    const entry = rawElevations[i];
+    const z = typeof entry === "number" ? entry : entry?.z;
     // IGN returns -99999 for unavailable elevations (sea, foreign territory)
     if (typeof z === "number" && z > -9999) {
-      const lon = samplePoints[i][0];
-      const lat = samplePoints[i][1];
+      const lon = samplePoints[i]?.[0] ?? entry?.lon ?? 0;
+      const lat = samplePoints[i]?.[1] ?? entry?.lat ?? 0;
       const roundedZ = Math.round(z * 100) / 100; // cm precision
       points.push({
         pointId: `elev-${i}-${lon.toFixed(6)}-${lat.toFixed(6)}`,
@@ -249,8 +258,8 @@ export async function POST(req: NextRequest) {
   const mean =
     zValues.length > 0
       ? Math.round(
-          (zValues.reduce((s, v) => s + v, 0) / zValues.length) * 100
-        ) / 100
+        (zValues.reduce((s, v) => s + v, 0) / zValues.length) * 100
+      ) / 100
       : null;
 
   // Compute approximate slope: max elevation difference / horizontal distance

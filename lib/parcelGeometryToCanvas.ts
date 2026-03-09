@@ -69,17 +69,30 @@ function polygonFromCoords(
   // Sanitize coordinates — strip altitude (z) components and validate
   const sanitized = sanitizeRing(exterior as unknown as number[][]);
   if (sanitized.length < 3) return null;
-  const n = sanitized.length;
-  const centroidLng = sanitized.reduce((s, c) => s + c[0], 0) / n;
-  const centroidLat = sanitized.reduce((s, c) => s + c[1], 0) / n;
-  const mx = degLngToMeters(centroidLng - refLng, refLat);
-  const my = degLatToMeters(centroidLat - refLat);
-  const left = centerCanvasX + mx * pixelsPerMeter;
-  const top = centerCanvasY - my * pixelsPerMeter;
-  // NaN safety
-  if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-  const points = ringToPoints(sanitized, refLat, centroidLng, centroidLat, pixelsPerMeter);
-  return { left, top, points };
+
+  // 1. Compute ABSOLUTE canvas positions for each vertex using the global reference
+  const absPoints = sanitized.map(([lng, lat]) => {
+    const mx = degLngToMeters(lng - refLng, refLat);
+    const my = degLatToMeters(lat - refLat);
+    const x = centerCanvasX + mx * pixelsPerMeter;
+    const y = centerCanvasY - my * pixelsPerMeter;
+    return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0 };
+  });
+
+  // 2. Compute BOUNDING BOX CENTER (NOT centroid!) — this matches Fabric.js pathOffset
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  absPoints.forEach(p => {
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+  });
+  const bboxCenterX = (minX + maxX) / 2;
+  const bboxCenterY = (minY + maxY) / 2;
+  if (!Number.isFinite(bboxCenterX) || !Number.isFinite(bboxCenterY)) return null;
+
+  // 3. Center points around bbox center → pathOffset will be (0,0) in Fabric.js
+  const points = absPoints.map(p => ({ x: p.x - bboxCenterX, y: p.y - bboxCenterY }));
+
+  return { left: bboxCenterX, top: bboxCenterY, points };
 }
 
 interface GeoPolygon {
