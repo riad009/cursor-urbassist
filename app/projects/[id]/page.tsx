@@ -158,7 +158,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
     type: string;
     label: string;
     labelFr: string;
-    icon: React.ElementType;
+    icon: React.ComponentType<{ className?: string }>;
     href: (id: string) => string;
     isMain?: boolean;
   }[] = [

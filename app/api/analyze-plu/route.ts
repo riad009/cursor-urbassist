@@ -78,31 +78,80 @@ export async function POST(request: NextRequest) {
     // ── 1. Parse multipart/form-data ───────────────────────────────────────
     const formData = await request.formData();
     const pdfFile = formData.get("pdfFile") as File | null;
+    const pdfFile2 = formData.get("pdfFile2") as File | null; // Optional lotissement supplement
+    const pdfUrl = (formData.get("pdfUrl") as string) || "";   // Auto-fetched GPU URL
     const pluZone = (formData.get("pluZone") as string) || "non spécifiée";
     const isABFZone = (formData.get("isABFZone") as string) === "true";
     const parcelAddress = (formData.get("parcelAddress") as string) || "non précisée";
 
-    // ── 2. Validate inputs ─────────────────────────────────────────────────
-    if (!pdfFile || pdfFile.size === 0) {
+    // ── 2. Resolve primary PDF (file upload takes priority over URL) ──────
+    let primaryPdfBase64: string | null = null;
+
+    if (pdfFile && pdfFile.size > 0) {
+      // Validate uploaded file
+      if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
+        return NextResponse.json(
+          { error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.` },
+          { status: 400 }
+        );
+      }
+      if (!pdfFile.type.includes("pdf") && !pdfFile.name.endsWith(".pdf")) {
+        return NextResponse.json(
+          { error: "Seuls les fichiers PDF sont acceptés." },
+          { status: 400 }
+        );
+      }
+      const buf = await pdfFile.arrayBuffer();
+      primaryPdfBase64 = Buffer.from(buf).toString("base64");
+    } else if (pdfUrl.trim()) {
+      // Fetch PDF from auto-detected GPU URL
+      console.log(`[analyze-plu] Fetching PDF from URL: ${pdfUrl}`);
+      try {
+        const res = await fetch(pdfUrl, {
+          signal: AbortSignal.timeout(30_000),
+          headers: { "User-Agent": "UrbAssist/1.0" },
+        });
+        if (res.ok) {
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("pdf") || pdfUrl.endsWith(".pdf")) {
+            const buf = await res.arrayBuffer();
+            if (buf.byteLength > MAX_PDF_SIZE_BYTES) {
+              console.warn(`[analyze-plu] URL PDF too large: ${buf.byteLength} bytes`);
+            } else {
+              primaryPdfBase64 = Buffer.from(buf).toString("base64");
+              console.log(`[analyze-plu] Fetched ${buf.byteLength} bytes from URL`);
+            }
+          } else {
+            console.warn(`[analyze-plu] URL is not a PDF (content-type: ${contentType})`);
+          }
+        } else {
+          console.warn(`[analyze-plu] URL fetch failed: ${res.status}`);
+        }
+      } catch (e) {
+        console.warn(`[analyze-plu] URL fetch error:`, (e as Error).message);
+      }
+    }
+
+    if (!primaryPdfBase64) {
       return NextResponse.json(
-        { error: "Un fichier PDF du règlement PLU est requis." },
+        { error: "Un fichier PDF du règlement PLU est requis. Uploadez un fichier ou vérifiez l'URL automatique." },
         { status: 400 }
       );
     }
 
-    if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
-      return NextResponse.json(
-        { error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.` },
-        { status: 400 }
-      );
+    // ── 3. Resolve optional second PDF (lotissement) ──────────────────────
+    let secondPdfBase64: string | null = null;
+    if (pdfFile2 && pdfFile2.size > 0) {
+      if (pdfFile2.size > MAX_PDF_SIZE_BYTES) {
+        console.warn(`[analyze-plu] Second PDF too large, skipping`);
+      } else {
+        const buf2 = await pdfFile2.arrayBuffer();
+        secondPdfBase64 = Buffer.from(buf2).toString("base64");
+        console.log(`[analyze-plu] Lotissement supplement: ${buf2.byteLength} bytes`);
+      }
     }
 
-    if (!pdfFile.type.includes("pdf") && !pdfFile.name.endsWith(".pdf")) {
-      return NextResponse.json(
-        { error: "Seuls les fichiers PDF sont acceptés." },
-        { status: 400 }
-      );
-    }
+    const hasMultipleDocs = !!secondPdfBase64;
 
     if (!GEMINI_API_KEY) {
       console.error("GEMINI_API_KEY is not configured in environment variables");
@@ -117,23 +166,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── 3. Read PDF as buffer → base64 ─────────────────────────────────────
-    const pdfArrayBuffer = await pdfFile.arrayBuffer();
-    const pdfBase64 = Buffer.from(pdfArrayBuffer).toString("base64");
-
     // ── 4. Initialize Gemini ───────────────────────────────────────────────
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
     // ── 5. Build prompts ───────────────────────────────────────────────────
-    const qualitativeSystemPrompt = buildQualitativeSystemPrompt(pluZone, isABFZone);
-    const qualitativeUserPrompt = buildQualitativeUserPrompt(pluZone, isABFZone, parcelAddress);
-    const extractionSystemPrompt = buildExtractionSystemPrompt(pluZone, isABFZone);
-    const extractionUserPrompt = buildExtractionUserPrompt(pluZone, isABFZone, parcelAddress);
+    const qualitativeSystemPrompt = buildQualitativeSystemPrompt(pluZone, isABFZone, hasMultipleDocs);
+    const qualitativeUserPrompt = buildQualitativeUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs);
+    const extractionSystemPrompt = buildExtractionSystemPrompt(pluZone, isABFZone, hasMultipleDocs);
+    const extractionUserPrompt = buildExtractionUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs);
 
-    // ── 6. Run both Gemini calls in parallel ───────────────────────────────
-    const pdfPart = {
-      inlineData: { data: pdfBase64, mimeType: "application/pdf" },
-    };
+    // ── 6. Build PDF parts array ──────────────────────────────────────────
+    const pdfParts: { inlineData: { data: string; mimeType: string } }[] = [
+      { inlineData: { data: primaryPdfBase64, mimeType: "application/pdf" } },
+    ];
+    if (secondPdfBase64) {
+      pdfParts.push({ inlineData: { data: secondPdfBase64, mimeType: "application/pdf" } });
+    }
 
     const qualitativeConfig: GenerationConfig = {
       temperature: 0.1,
@@ -149,10 +197,8 @@ export async function POST(request: NextRequest) {
     };
 
     const [qualResult, extractResult] = await Promise.allSettled([
-      // Call 1: Deep qualitative compliance analysis
-      callGeminiWithPdf(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, pdfPart, qualitativeConfig),
-      // Call 2: Structured PluRules extraction
-      callGeminiWithPdf(genAI, extractionSystemPrompt, extractionUserPrompt, pdfPart, extractionConfig),
+      callGeminiWithPdfs(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, pdfParts, qualitativeConfig),
+      callGeminiWithPdfs(genAI, extractionSystemPrompt, extractionUserPrompt, pdfParts, extractionConfig),
     ]);
 
     // ── 7. Parse responses ─────────────────────────────────────────────────
@@ -161,7 +207,6 @@ export async function POST(request: NextRequest) {
       try {
         analysis = JSON.parse(qualResult.value) as DeepPluAnalysis;
       } catch {
-        // Try to salvage partial JSON
         analysis = parseLooseJson<DeepPluAnalysis>(qualResult.value) ?? generateFallbackAnalysis(pluZone);
       }
     } else if (qualResult.status === "rejected") {
@@ -187,6 +232,7 @@ export async function POST(request: NextRequest) {
       analysis,
       pluRules,
       source: "gemini",
+      documentsAnalyzed: hasMultipleDocs ? 2 : 1,
     });
   } catch (error) {
     console.error("PLU Analysis error:", error);
@@ -197,11 +243,11 @@ export async function POST(request: NextRequest) {
 
 // ─── Gemini call helper ──────────────────────────────────────────────────────
 
-async function callGeminiWithPdf(
+async function callGeminiWithPdfs(
   genAI: GoogleGenerativeAI,
   systemPrompt: string,
   userPrompt: string,
-  pdfPart: { inlineData: { data: string; mimeType: string } },
+  pdfParts: { inlineData: { data: string; mimeType: string } }[],
   generationConfig: GenerationConfig,
 ): Promise<string | null> {
   const model = genAI.getGenerativeModel({
@@ -210,8 +256,7 @@ async function callGeminiWithPdf(
     generationConfig,
   });
 
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), API_TIMEOUT_MS);
+  const timeout = setTimeout(() => {}, API_TIMEOUT_MS);
 
   try {
     const result = await model.generateContent({
@@ -219,7 +264,7 @@ async function callGeminiWithPdf(
         {
           role: "user",
           parts: [
-            pdfPart,
+            ...pdfParts,
             { text: userPrompt },
           ],
         },
@@ -237,7 +282,10 @@ async function callGeminiWithPdf(
 // MASTER SYSTEM PROMPTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function buildExtractionSystemPrompt(pluZone: string, isABFZone: boolean): string {
+function buildExtractionSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false): string {
+  const multiDocNote = hasMultipleDocs
+    ? `\n\n9. MULTIPLE DOCUMENTS: You are given TWO PDF documents. The FIRST is the main PLU regulation. The SECOND is a subdivision regulation (règlement de lotissement) that may override or supplement the PLU. When both documents address the same rule, the LOTISSEMENT regulation takes precedence. Extract values from BOTH documents, clearly noting in the "notes" field when a lotissement rule overrides the PLU.`
+    : "";
   return `You are an expert-level French urban planning regulation parser (urbaniste confirmé).
 Your SOLE mission is to extract PRECISE, machine-readable regulatory values from a PLU (Plan Local d'Urbanisme) document.
 
@@ -268,46 +316,54 @@ ${isABFZone ? `6. ABF / HERITAGE ZONE: This parcel is in a PROTECTED HERITAGE ZO
    - "medium": You found the zone but some values were ambiguous or the document structure was unusual.
    - "low": You could not clearly identify the zone or the document was poorly structured.
 
-8. OUTPUT: Respond with a SINGLE valid JSON object matching the required schema. No markdown, no comments, no text outside the JSON.`;
+8. OUTPUT: Respond with a SINGLE valid JSON object matching the required schema. No markdown, no comments, no text outside the JSON.${multiDocNote}`;
 }
 
-function buildExtractionUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string): string {
+function buildExtractionUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false): string {
+  const multiDocInstr = hasMultipleDocs
+    ? `\n6. TWO DOCUMENTS ARE ATTACHED: The first PDF is the PLU regulation; the second is a subdivision (lotissement) regulation. Analyze both. Lotissement rules override PLU where they conflict.`
+    : "";
   return `Analyze the attached PLU regulation PDF document.
 
 Context:
 - Parcel address: ${parcelAddress}
 - PLU Zone to extract: ${pluZone}
 - Heritage protection (ABF): ${isABFZone ? "OUI — parcelle en zone protégée" : "NON"}
+- Documents provided: ${hasMultipleDocs ? "2 (PLU + Lotissement)" : "1 (PLU)"}
 
 Instructions:
 1. Locate the section(s) of the document that apply to zone "${pluZone}".
 2. Extract ALL numeric and qualitative regulatory values for this zone.
 3. For each field, if the value is not explicitly stated in the document for this zone, use null.
 4. For setback formulas like "H/2", keep the formula as a string.
-5. Return the structured JSON as specified.
+5. Return the structured JSON as specified.${multiDocInstr}
 
 CRITICAL REMINDER: Do NOT invent values. Only extract what is WRITTEN in the document.`;
 }
 
-function buildQualitativeSystemPrompt(pluZone: string, isABFZone: boolean): string {
+function buildQualitativeSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false): string {
+  const multiDocNote = hasMultipleDocs
+    ? "\n\nMULTIPLE DOCUMENTS: You are given TWO PDF documents. The first is the main PLU regulation, the second is a subdivision (lotissement) regulation. Analyze BOTH documents. When the lotissement has rules that override or supplement the PLU, note this clearly in the relevant item's reglementation field."
+    : "";
   return `You are a strict French urban planning regulation parser (urbaniste confirmé).
 You ONLY extract factual information from provided PLU documents.
 You NEVER invent, hallucinate, or assume values not explicitly stated in the source text.
 When a value is not found, you use "Non réglementé" in the reglementation field and "Non concerné" in the conformite field.
 
 ZONE FOCUS: Only extract rules for zone "${pluZone}". Ignore all other zones.
-${isABFZone ? "ABF ZONE: This project is in a heritage protection zone. Pay special attention to Articles 6, 7, 10, 11 and any ABF-specific requirements." : ""}
+${isABFZone ? "ABF ZONE: This project is in a heritage protection zone. Pay special attention to Articles 6, 7, 10, 11 and any ABF-specific requirements." : ""}${multiDocNote}
 
 Output a SINGLE valid JSON object matching the required structure. No text outside JSON.`;
 }
 
-function buildQualitativeUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string): string {
-  return `Analyze the attached PLU regulation document for a construction project and produce a structured compliance analysis in JSON format.
+function buildQualitativeUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false): string {
+  return `Analyze the attached PLU regulation document${hasMultipleDocs ? "s" : ""} for a construction project and produce a structured compliance analysis in JSON format.
 
 **Project Context:**
 - Address: ${parcelAddress}
 - PLU Zone: ${pluZone}
 - Heritage Zone (ABF): ${isABFZone ? "OUI" : "NON"}
+- Documents provided: ${hasMultipleDocs ? "2 (PLU + Lotissement)" : "1 (PLU)"}
 
 **Your Task:**
 1. Thoroughly review the attached regulation PDF.

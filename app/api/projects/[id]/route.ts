@@ -54,7 +54,7 @@ export async function GET(
     where: { id },
     include: {
       regulatoryAnalysis: {
-        select: { id: true, zoneType: true, protectedZones: true, analyzedAt: true },
+        select: { id: true, zoneType: true, protectedZones: true, analyzedAt: true, pdfUrl: true },
       },
       // sitePlanData intentionally excluded from default GET — it contains
       // massive JSON blobs (canvasData, building3D) that add seconds to the query.

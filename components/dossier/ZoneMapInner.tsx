@@ -158,7 +158,7 @@ function getParcelCenter(parcel: ParcelWithGeometry): [number, number] | null {
 
 /** Minimum zoom to auto-fetch surrounding parcels as skeleton outlines */
 const VIEWPORT_MIN_ZOOM = 13;
-const VIEWPORT_DEBOUNCE_MS = 600;
+const VIEWPORT_DEBOUNCE_MS = 800; // Increased from 600ms — reduces rapid-fire API calls on pan
 
 /**
  * Auto-loads surrounding parcel outlines as skeleton shapes when the user pans/zooms.
@@ -168,9 +168,11 @@ const VIEWPORT_DEBOUNCE_MS = 600;
 function ViewportParcelsLoader({
   onLoaded,
   existingIds,
+  onFetchStart,
 }: {
   onLoaded: (parcels: ParcelWithGeometry[]) => void;
   existingIds: Set<string>;
+  onFetchStart?: () => void;
 }) {
   const map = useMap();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -182,6 +184,8 @@ function ViewportParcelsLoader({
   onLoadedRef.current = onLoaded;
   const existingIdsRef = useRef(existingIds);
   existingIdsRef.current = existingIds;
+  const onFetchStartRef = useRef(onFetchStart);
+  onFetchStartRef.current = onFetchStart;
 
   const fetchForBounds = useCallback(() => {
     try {
@@ -201,6 +205,8 @@ function ViewportParcelsLoader({
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+
+      onFetchStartRef.current?.();
 
       fetch("/api/cadastre/viewport", {
         method: "POST",
@@ -329,6 +335,7 @@ export function ZoneMapInner({
 }) {
   const [zoom, setZoom] = React.useState(17);
   const [viewMode, setViewMode] = useState<"satellite" | "cadastre">("satellite");
+  const [viewportLoading, setViewportLoading] = useState(false);
 
   // Ref always mirrors selectedParcelIds so Leaflet event handlers read the latest value
   const selectedIdsRef = useRef(selectedParcelIds);
@@ -362,11 +369,16 @@ export function ZoneMapInner({
         if (toAdd.length === 0) return prev;
         return [...prev, ...toAdd];
       });
+      setViewportLoading(false);
       // NOTE: Do NOT call onViewportParcelsLoaded here — sidebar addition
       // only happens when user clicks a skeleton parcel (in the GeoJSON layer)
     },
     []
   );
+
+  const handleViewportLoadingStart = useCallback(() => {
+    setViewportLoading(true);
+  }, []);
 
   const handleParcelClick = useCallback(
     (id: string) => {
@@ -567,7 +579,7 @@ export function ZoneMapInner({
             {/* === INITIAL PARCELS — full styling + labels === */}
             {parcelCollection && (
               <GeoJSON
-                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
+                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-vm-${viewMode}`}
                 data={parcelCollection as GeoJsonObject}
                 style={(feature) => {
                   const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
@@ -650,7 +662,7 @@ export function ZoneMapInner({
             {/* === VIEWPORT PARCELS — skeleton outlines only, hover highlight, click to add === */}
             {viewportParcelCollection && (
               <GeoJSON
-                key={`vp-${viewportParcelCollection.features.length}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
+                key={`vp-${viewportParcelCollection.features.length}-vm-${viewMode}`}
                 data={viewportParcelCollection as GeoJsonObject}
                 style={(feature) => {
                   const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
@@ -773,8 +785,15 @@ export function ZoneMapInner({
               <MapClickHandler onClearSelection={() => onParcelSelect([])} parcelClickedRef={parcelClickedRef} />
             )}
             {/* Auto-load surrounding parcel skeletons on pan/zoom */}
-            <ViewportParcelsLoader onLoaded={handleViewportParcels} existingIds={existingParcelIds} />
+            <ViewportParcelsLoader onLoaded={handleViewportParcels} existingIds={existingParcelIds} onFetchStart={handleViewportLoadingStart} />
           </MapContainer>
+          {/* Viewport loading indicator */}
+          {viewportLoading && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-sm border border-white/10 shadow-lg">
+              <div className="w-3 h-3 rounded-full bg-blue-400 animate-pulse" />
+              <span className="text-[11px] text-white/80 font-medium">Chargement des parcelles…</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
