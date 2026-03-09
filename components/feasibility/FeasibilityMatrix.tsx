@@ -26,7 +26,7 @@ const STATUS_CONFIG: Record<
     label: string;
     bg: string;
     text: string;
-    icon: React.ElementType;
+    icon: React.ComponentType<{ className?: string }>;
   }
 > = {
   OUI: {

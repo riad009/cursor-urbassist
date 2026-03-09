@@ -61,6 +61,8 @@ export default function NewProjectPage() {
     const [cadastreError, setCadastreError] = useState<string | null>(null);
     const [showSecondary, setShowSecondary] = useState(false);
     const [northAngleDegrees, setNorthAngleDegrees] = useState<number | null>(null);
+    const [loadingStage, setLoadingStage] = useState<'searching' | 'loading' | 'rendering' | null>(null);
+    const loadingStartRef = React.useRef<number>(0);
 
 
     // When user clicks a surrounding skeleton parcel, add it to the sidebar list
@@ -123,12 +125,14 @@ export default function NewProjectPage() {
         setAddressSuggestions([]);
         setLoadingCadastre(true); setLoadingPlu(true); setLoadingProtectedAreas(true);
         setCadastreError(null); setParcels([]); setPluInfo(null); setPluNoData(false); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]); setHeritageSummary(null);
+        setLoadingStage('searching');
+        loadingStartRef.current = Date.now();
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
-            .then(async (r) => { const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); if (list.length > 0) setSelectedParcelIds([list[0].id]); })
+            .then(async (r) => { setLoadingStage('loading'); const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setLoadingStage('rendering'); setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); if (list.length > 0) setSelectedParcelIds([list[0].id]); })
             .catch(() => setCadastreError("Données cadastrales indisponibles."))
-            .finally(() => setLoadingCadastre(false));
+            .finally(() => { setLoadingCadastre(false); setLoadingStage(null); });
 
         // 2) PLU
         fetch("/api/plu-detection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, address: addr.label }) })
@@ -260,15 +264,59 @@ export default function NewProjectPage() {
                                 ) : loadingCadastre ? (
                                     <div className="flex flex-col items-center justify-center gap-4 text-slate-400 w-full h-full relative">
                                         <div className="absolute inset-0 overflow-hidden">
-                                            <div className="absolute inset-0 bg-slate-100">
-                                                <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: `linear-gradient(rgba(148,163,184,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.5) 1px, transparent 1px)`, backgroundSize: '48px 48px' }} />
-                                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-32 rounded-lg border-2 border-dashed border-blue-500/30 bg-blue-500/5 animate-pulse" />
+                                            <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-100">
+                                                <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: `linear-gradient(rgba(148,163,184,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.5) 1px, transparent 1px)`, backgroundSize: '48px 48px' }} />
+                                                {/* Animated scanning line */}
+                                                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-blue-400/60 to-transparent" style={{ animation: 'scanLine 2.5s ease-in-out infinite', top: '30%' }} />
+                                                <div className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-indigo-400/40 to-transparent" style={{ animation: 'scanLine 2.5s ease-in-out infinite 0.8s', top: '60%' }} />
+                                                {/* Pulsing parcel outlines */}
+                                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-44 h-36 rounded-lg border-2 border-dashed border-blue-400/25 bg-blue-500/[0.03]" style={{ animation: 'parcelPulse 2s ease-in-out infinite' }} />
+                                                <div className="absolute top-[45%] left-[55%] -translate-x-1/2 -translate-y-1/2 w-28 h-24 rounded-lg border-2 border-dashed border-indigo-400/20" style={{ animation: 'parcelPulse 2s ease-in-out infinite 0.5s' }} />
+                                                <div className="absolute top-[55%] left-[40%] -translate-x-1/2 -translate-y-1/2 w-32 h-20 rounded-lg border-2 border-dashed border-blue-300/15" style={{ animation: 'parcelPulse 2s ease-in-out infinite 1s' }} />
                                             </div>
                                         </div>
-                                        <div className="relative z-10 flex flex-col items-center gap-3">
-                                            <MapPin className="w-10 h-10 text-blue-400 animate-bounce" />
-                                            <p className="text-sm font-medium text-slate-600">{t("newProj.loadingParcels")}</p>
-                                            <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                                        <style>{`
+                                            @keyframes scanLine { 0%,100% { opacity: 0; transform: translateY(0); } 50% { opacity: 1; transform: translateY(40px); } }
+                                            @keyframes parcelPulse { 0%,100% { opacity: 0.3; transform: translate(-50%,-50%) scale(0.95); } 50% { opacity: 0.8; transform: translate(-50%,-50%) scale(1.02); } }
+                                            @keyframes progressRing { 0% { stroke-dashoffset: 188; } 100% { stroke-dashoffset: 0; } }
+                                        `}</style>
+                                        <div className="relative z-10 flex flex-col items-center gap-5">
+                                            {/* Progress ring */}
+                                            <div className="relative w-20 h-20">
+                                                <svg className="w-20 h-20 -rotate-90" viewBox="0 0 64 64">
+                                                    <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                                                    <circle cx="32" cy="32" r="28" fill="none" stroke="url(#progressGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'progressRing 3s ease-in-out infinite' }} />
+                                                    <defs><linearGradient id="progressGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#3b82f6"/><stop offset="100%" stopColor="#8b5cf6"/></linearGradient></defs>
+                                                </svg>
+                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                    <MapPin className="w-7 h-7 text-blue-500" style={{ animation: 'parcelPulse 2s ease-in-out infinite' }} />
+                                                </div>
+                                            </div>
+                                            {/* Stage text */}
+                                            <div className="flex flex-col items-center gap-2">
+                                                <p className="text-base font-semibold text-slate-700 tracking-tight">
+                                                    {loadingStage === 'searching' ? '🔍 Recherche dans le cadastre…' : loadingStage === 'loading' ? '🗺️ Chargement des parcelles…' : loadingStage === 'rendering' ? '📐 Préparation de la carte…' : t("newProj.loadingParcels")}
+                                                </p>
+                                                <p className="text-xs text-slate-400 max-w-[260px] text-center leading-relaxed">
+                                                    {loadingStage === 'searching' ? 'Connexion à l\'API IGN Apicarto pour localiser les parcelles cadastrales…' : loadingStage === 'loading' ? 'Récupération des contours et surfaces des parcelles environnantes…' : loadingStage === 'rendering' ? 'Affichage des parcelles sur la carte satellite…' : 'Veuillez patienter quelques instants…'}
+                                                </p>
+                                            </div>
+                                            {/* Step indicators */}
+                                            <div className="flex items-center gap-2">
+                                                {(['searching', 'loading', 'rendering'] as const).map((stage, i) => {
+                                                    const isActive = loadingStage === stage;
+                                                    const isPast = loadingStage ? ['searching', 'loading', 'rendering'].indexOf(loadingStage) > i : false;
+                                                    return (
+                                                        <React.Fragment key={stage}>
+                                                            <div className={cn(
+                                                                'w-2.5 h-2.5 rounded-full transition-all duration-500',
+                                                                isPast ? 'bg-blue-500 scale-100' : isActive ? 'bg-blue-400 scale-125 animate-pulse' : 'bg-slate-200 scale-100'
+                                                            )} />
+                                                            {i < 2 && <div className={cn('w-6 h-0.5 rounded-full transition-all duration-500', isPast ? 'bg-blue-400' : 'bg-slate-200')} />}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     </div>
                                 ) : (

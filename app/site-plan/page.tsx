@@ -290,11 +290,14 @@ function SitePlanContent() {
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
-  const [zoom, setZoom] = useState(100);
+  const [scene3dVersion, setScene3dVersion] = useState(0);
+  const [zoom, setZoom] = useState(95);
   const [activeColor, setActiveColor] = useState("#3b82f6");
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [showGrid, setShowGrid] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const snapEnabledRef = useRef(snapEnabled);
+  snapEnabledRef.current = snapEnabled;
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const [selectedObject, setSelectedObject] = useState<fabric.FabricObject | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
@@ -328,6 +331,8 @@ function SitePlanContent() {
   useEffect(() => { buildingDetailsSnapshotRef.current = buildingDetails; }, [buildingDetails]);
   const [existingBuildingsLoaded, setExistingBuildingsLoaded] = useState(false);
   const [loadingExistingBuildings, setLoadingExistingBuildings] = useState(false);
+  const [loadingParcelsGeoJSON, setLoadingParcelsGeoJSON] = useState(false);
+  const [loadingEditorData, setLoadingEditorData] = useState(true);
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -572,6 +577,7 @@ function SitePlanContent() {
   const complianceDebounceRef = useRef<number | null>(null);
   const undoDebounceRef = useRef<number | null>(null);
   const MAX_UNDO = 50;
+  const initialLoadCompleteRef = useRef(false);
 
   // Each undo/redo entry stores BOTH the canvas JSON *and* the buildingDetails array
   // so `guided` buildings fully round-trip through undo/redo.
@@ -580,6 +586,8 @@ function SitePlanContent() {
   const redoStackRef = useRef<UndoEntry[]>([]);
 
   const pushUndoState = useCallback(() => {
+    // Skip undo tracking during initial canvas setup (parcels, grid, saved data loading)
+    if (!initialLoadCompleteRef.current) return;
     const canvas = fabricRef.current;
     if (!canvas) return;
     if (undoDebounceRef.current) window.clearTimeout(undoDebounceRef.current);
@@ -602,6 +610,8 @@ function SitePlanContent() {
     const canvas = fabricRef.current;
     if (!canvas || !entry) return;
     canvas.loadFromJSON(entry.canvas, () => {
+      // Restore dark background — loadFromJSON may lose it
+      canvas.backgroundColor = "#0f172a";
       canvas.renderAll();
       updateLayers(canvas);
       setBuildingDetails(entry.buildings);
@@ -812,6 +822,9 @@ function SitePlanContent() {
     (canvas: fabric.Canvas) => {
       const gridSize = currentScale.pixelsPerMeter;
       const w = canvasSize.width, h = canvasSize.height;
+      // Draw grid covering 5x the canvas area so it's visible after auto-zoom panning
+      const extW = w * 3, extH = h * 3;
+      const startX = -w, startY = -h;
 
       const addGridLine = (coords: [number, number, number, number], stroke: string, sw: number) => {
         const l = new fabric.Line(coords, {
@@ -821,11 +834,11 @@ function SitePlanContent() {
         canvas.add(l); canvas.sendObjectToBack(l);
       };
 
-      for (let i = 0; i <= w / gridSize; i++) addGridLine([i * gridSize, 0, i * gridSize, h], "#1e293b", 0.5);
-      for (let i = 0; i <= h / gridSize; i++) addGridLine([0, i * gridSize, w, i * gridSize], "#1e293b", 0.5);
+      for (let x = startX; x <= startX + extW; x += gridSize) addGridLine([x, startY, x, startY + extH], "#1e293b", 0.5);
+      for (let y = startY; y <= startY + extH; y += gridSize) addGridLine([startX, y, startX + extW, y], "#1e293b", 0.5);
       const major = gridSize * 5;
-      for (let i = 0; i <= w / major; i++) addGridLine([i * major, 0, i * major, h], "#334155", 1);
-      for (let i = 0; i <= h / major; i++) addGridLine([0, i * major, w, i * major], "#334155", 1);
+      for (let x = startX; x <= startX + extW; x += major) addGridLine([x, startY, x, startY + extH], "#334155", 1);
+      for (let y = startY; y <= startY + extH; y += major) addGridLine([startX, y, startX + extW, y], "#334155", 1);
     },
     [currentScale, canvasSize]
   );
@@ -984,13 +997,43 @@ function SitePlanContent() {
     const hasParcel = canvas.getObjects().some((o: any) => o.isParcel);
     if (hasParcel) return;
 
+    setLoadingParcelsGeoJSON(true);
+
     // Prefer parcelsGeoJSON (individual parcel features with metadata) over merged parcelGeometry
     const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+
+    // ── Validate GeoJSON before conversion ──────────────────────────────
+    try {
+      const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
+      if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
+        const invalid = parsed.features.filter((f: any) => {
+          const gt = f?.geometry?.type;
+          return gt !== "Polygon" && gt !== "MultiPolygon";
+        });
+        if (invalid.length > 0) {
+          console.warn(`[site-plan] ${invalid.length} feature(s) with unsupported geometry type skipped`);
+        }
+      }
+    } catch (e) {
+      console.warn("[site-plan] Failed to validate GeoJSON before import:", e);
+    }
+
     const shapes = parcelGeometryToShapes(geoSource, {
       canvasWidth: canvasSize.width,
       canvasHeight: canvasSize.height,
       pixelsPerMeter: currentScale.pixelsPerMeter,
     });
+
+    // ── Debug: check for degenerate shapes ──────────────────────────────
+    shapes.forEach((s, i) => {
+      if (s.points.length === 0) {
+        console.warn(`[site-plan] Shape ${i} has 0 points — will not render`);
+      }
+      if (s.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) {
+        console.warn(`[site-plan] Shape ${i} has NaN/Infinity coordinates — data may be corrupted`);
+      }
+    });
+
     if (shapes.length === 0) return;
 
     // Extract feature-level properties for labels if we're using parcelsGeoJSON
@@ -1065,7 +1108,7 @@ function SitePlanContent() {
       canvas.sendObjectToBack(poly);
     });
 
-    // Auto-zoom-to-fit all parcels on the canvas
+    // Auto-zoom-to-fit all parcels — centered in the VISIBLE container area
     if (shapes.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       shapes.forEach((s) => {
@@ -1081,20 +1124,23 @@ function SitePlanContent() {
       if (minX !== Infinity) {
         const parcelsW = maxX - minX;
         const parcelsH = maxY - minY;
-        const cw = canvasSize.width;
-        const ch = canvasSize.height;
-        const padding = 80; // px margin
-        const zoomX = (cw - padding * 2) / parcelsW;
-        const zoomY = (ch - padding * 2) / parcelsH;
-        const targetZoom = Math.min(zoomX, zoomY, 3); // cap at 3x
+        // Use the actual visible container dimensions, NOT the Fabric.js canvas dimensions
+        // The canvas is 1400×900 but may be displayed in a smaller container
+        const containerEl = containerRef?.current;
+        const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+        const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+        const padding = 60; // px margin on each side
+        const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
+        const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
+        const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95)); // clamp: max 95%
         if (targetZoom > 0 && isFinite(targetZoom)) {
           const centerPX = (minX + maxX) / 2;
           const centerPY = (minY + maxY) / 2;
           canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // reset first
           const vpt: [number, number, number, number, number, number] = [
             targetZoom, 0, 0, targetZoom,
-            cw / 2 - centerPX * targetZoom,
-            ch / 2 - centerPY * targetZoom,
+            viewW / 2 - centerPX * targetZoom,
+            viewH / 2 - centerPY * targetZoom,
           ];
           canvas.setViewportTransform(vpt);
           setZoom(Math.round(targetZoom * 100));
@@ -1105,6 +1151,7 @@ function SitePlanContent() {
     parcelsDrawnFromGeometryRef.current = currentProjectId;
     canvas.renderAll();
     updateLayers(canvas);
+    setLoadingParcelsGeoJSON(false);
   }, [currentProjectId, projectData?.parcelsGeoJSON, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
   // Load 3D terrain from IGN RGE ALTI® and add as elevation points
@@ -1233,10 +1280,17 @@ function SitePlanContent() {
     [updateLayers]
   );
 
+  // ── Stable refs for callbacks — prevents effect re-fire on scale/canvas changes ──
+  const loadSitePlanRef = useRef(loadSitePlan);
+  loadSitePlanRef.current = loadSitePlan;
+  const drawParcelsRef = useRef(drawParcelsFromProjectData);
+  drawParcelsRef.current = drawParcelsFromProjectData;
+
   useEffect(() => {
     if (currentProjectId && canvasReady) {
-      loadSitePlan(currentProjectId, () => {
-        drawParcelsFromProjectData();
+      setLoadingEditorData(true);
+      loadSitePlanRef.current(currentProjectId, () => {
+        drawParcelsRef.current();
         const canvas = fabricRef.current;
         if (canvas) {
           const pts: { id: string; x: number; y: number; value: number }[] = [];
@@ -1249,9 +1303,30 @@ function SitePlanContent() {
           setElevationPoints(pts);
         }
         setIsDirty(false);
+        setLoadingEditorData(false);
+        // Mark initial load as complete — enable undo/redo tracking from this point
+        initialLoadCompleteRef.current = true;
+        // Clear any stale undo/redo from setup events and take a clean baseline
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        setCanUndo(false);
+        setCanRedo(false);
+        // Take one baseline snapshot so the first undo reverts to the loaded state
+        setTimeout(() => {
+          const c = fabricRef.current;
+          if (c) {
+            try {
+              const json = JSON.stringify((c as any).toJSON([...CANVAS_PROPS]));
+              undoStackRef.current = [{ canvas: json, buildings: buildingDetailsSnapshotRef.current }];
+              setCanUndo(false); // baseline itself shouldn't be "undoable"
+            } catch { /* ignore */ }
+          }
+        }, 500);
       });
+    } else {
+      setLoadingEditorData(false);
     }
-  }, [currentProjectId, canvasReady, loadSitePlan, drawParcelsFromProjectData]);
+  }, [currentProjectId, canvasReady]); // Only re-run when project or canvas readiness changes
 
   // Warn when leaving the tab with unsaved changes
   useEffect(() => {
@@ -1507,7 +1582,20 @@ function SitePlanContent() {
     canvas.on("selection:cleared", () => setSelectedObject(null));
     canvas.on("object:modified", (e) => { setIsDirty(true); if (e.target) updateObjectMeasurements(e.target); runComplianceCheck(); pushUndoState(); });
     canvas.on("object:scaling", (e) => { if (e.target) updateObjectMeasurements(e.target); runComplianceCheck(); });
-    canvas.on("object:moving", (e) => { if (e.target) updateObjectMeasurements(e.target); runComplianceCheck(); });
+    canvas.on("object:moving", (e) => {
+      if (!e.target) return;
+      // Snap to grid when snap is enabled
+      if (snapEnabledRef.current) {
+        const gridSize = currentScale.pixelsPerMeter;
+        const obj = e.target;
+        const left = obj.left ?? 0;
+        const top = obj.top ?? 0;
+        obj.set({ left: Math.round(left / gridSize) * gridSize, top: Math.round(top / gridSize) * gridSize });
+        obj.setCoords();
+      }
+      updateObjectMeasurements(e.target);
+      runComplianceCheck();
+    });
     canvas.on("object:added", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
     canvas.on("object:removed", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
 
@@ -2105,7 +2193,26 @@ function SitePlanContent() {
     const nz = Math.max(25, Math.min(400, zoom + delta));
     setZoom(nz);
     const canvas = fabricRef.current;
-    if (canvas) { canvas.setZoom(nz / 100); canvas.renderAll(); }
+    if (!canvas) return;
+    const newZoom = nz / 100;
+    const oldZoom = canvas.getZoom();
+    if (oldZoom === newZoom) return;
+    // Zoom towards the center of the visible area, preserving pan position
+    const vpt = canvas.viewportTransform;
+    if (!vpt) { canvas.setZoom(newZoom); canvas.renderAll(); return; }
+    // Get the visible container center
+    const el = containerRef?.current;
+    const cx = el ? el.clientWidth / 2 : canvasSize.width / 2;
+    const cy = el ? el.clientHeight / 2 : canvasSize.height / 2;
+    // Compute the new pan so the same content point stays at screen center
+    const ratio = newZoom / oldZoom;
+    const newVpt: [number, number, number, number, number, number] = [
+      newZoom, 0, 0, newZoom,
+      cx - (cx - vpt[4]) * ratio,
+      cy - (cy - vpt[5]) * ratio,
+    ];
+    canvas.setViewportTransform(newVpt);
+    canvas.renderAll();
   };
 
   const handleClearAll = async () => {
@@ -2113,7 +2220,9 @@ function SitePlanContent() {
     if (!canvas) return;
     // Confirm before clearing everything
     if (!window.confirm("Clear all objects and buildings? This cannot be undone.")) return;
-    canvas.getObjects().filter((o: any) => !o.isGrid).forEach((o) => canvas.remove(o));
+    // Remove all non-grid objects
+    const toRemove = canvas.getObjects().filter((o: any) => !o.isGrid);
+    toRemove.forEach((o) => canvas.remove(o));
     measurementLabelsRef.current.clear();
     // Reset all related state so 3D viewer doesn't show stale objects
     setBuildingDetails([]);
@@ -2122,7 +2231,16 @@ function SitePlanContent() {
     buildingPositionsRef.current = {};
     setLayers([]);
     setSelectedObject(null);
+    // Ensure dark background is preserved and redraw grid
+    canvas.backgroundColor = "#0f172a";
+    if (showGrid) {
+      // Remove existing grid lines and redraw
+      canvas.getObjects().filter((o: any) => o.isGrid).forEach((o) => canvas.remove(o));
+      drawGrid(canvas);
+    }
     canvas.renderAll();
+    // Allow parcel re-import on next load
+    parcelsDrawnFromGeometryRef.current = null;
     // Persist the empty state to DB so refresh doesn't bring back old data
     if (currentProjectId) {
       await saveSitePlan();
@@ -2980,6 +3098,7 @@ function SitePlanContent() {
                   });
                   buildingPositionsRef.current = positions;
                 }
+                setScene3dVersion(v => v + 1);
                 setViewMode("3d");
               }}
               className={cn(
@@ -3080,7 +3199,7 @@ function SitePlanContent() {
             {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
           <button onClick={() => setPreviewMode(!previewMode)} className={cn("p-2 rounded-lg", previewMode ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:text-slate-900")} title="Preview mode (read-only)"><Eye className="w-4 h-4" /></button>
-          <button onClick={() => setShowTutorial(true)} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title="Tutorial"><Play className="w-4 h-4" /></button>
+
           <button onClick={() => setShowGrid(!showGrid)} className={cn("p-2 rounded-lg", showGrid ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-900")} title="Toggle grid"><Grid3X3 className="w-4 h-4" /></button>
           <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("p-2 rounded-lg", snapEnabled ? "bg-purple-100 text-purple-600" : "text-slate-400 hover:text-slate-900")} title="Snap"><Magnet className="w-4 h-4" /></button>
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
@@ -3211,6 +3330,38 @@ function SitePlanContent() {
 
         {/* Main Area */}
         <div className="flex-1 relative overflow-hidden" ref={containerRef}>
+          {/* === Full-screen loading overlay while editor data is fetching === */}
+          {loadingEditorData && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-5 px-10 py-8 rounded-2xl bg-white/95 border border-slate-200 shadow-2xl">
+                <style>{`
+                  @keyframes editorRing { 0% { stroke-dashoffset: 188; } 100% { stroke-dashoffset: 0; } }
+                  @keyframes editorPulse { 0%,100% { opacity: 0.4; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.02); } }
+                `}</style>
+                <div className="relative w-20 h-20">
+                  <svg className="w-20 h-20 -rotate-90" viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                    <circle cx="32" cy="32" r="28" fill="none" stroke="url(#editorGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'editorRing 2.5s ease-in-out infinite' }} />
+                    <defs><linearGradient id="editorGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#3b82f6"/><stop offset="100%" stopColor="#8b5cf6"/></linearGradient></defs>
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <svg className="w-7 h-7 text-blue-500" style={{ animation: 'editorPulse 2s ease-in-out infinite' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" /></svg>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-1.5">
+                  <p className="text-base font-semibold text-slate-700">Loading Site Plan…</p>
+                  <p className="text-xs text-slate-400 max-w-[240px] text-center">Fetching project data, canvas elements and parcel boundaries</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                  <div className="w-8 h-0.5 rounded-full bg-blue-300" />
+                  <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                  <div className="w-8 h-0.5 rounded-full bg-violet-300" />
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '0.6s' }} />
+                </div>
+              </div>
+            </div>
+          )}
           {/* === 2D Canvas Layer (always mounted, hidden via CSS when in 3D) === */}
           <div style={{ display: viewMode === "2d" ? "block" : "none" }} className="absolute inset-0">
               {currentMeasurement && (
@@ -3229,6 +3380,35 @@ function SitePlanContent() {
               {loadingExistingBuildings && (
                 <div className="absolute top-4 right-4 z-20 px-4 py-2 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 text-sm flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />Loading existing buildings...
+                </div>
+              )}
+              {loadingParcelsGeoJSON && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
+                  <div className="flex flex-col items-center gap-4 px-8 py-6 rounded-2xl bg-white/95 border border-slate-200 shadow-2xl">
+                    <style>{`
+                      @keyframes parcelDraw { 0% { stroke-dashoffset: 188; } 100% { stroke-dashoffset: 0; } }
+                      @keyframes parcelFade { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+                    `}</style>
+                    <div className="relative w-16 h-16">
+                      <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
+                        <circle cx="32" cy="32" r="28" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                        <circle cx="32" cy="32" r="28" fill="none" stroke="url(#parcelGrad)" strokeWidth="3" strokeLinecap="round" strokeDasharray="176" style={{ animation: 'parcelDraw 2s ease-in-out infinite' }} />
+                        <defs><linearGradient id="parcelGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#22c55e"/><stop offset="100%" stopColor="#3b82f6"/></linearGradient></defs>
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-emerald-500" style={{ animation: 'parcelFade 2s ease-in-out infinite' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                      <p className="text-sm font-semibold text-slate-700">Drawing parcel boundaries…</p>
+                      <p className="text-xs text-slate-400">Importing GeoJSON data onto the canvas</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <div className="w-8 h-0.5 rounded-full bg-emerald-300" />
+                      <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                    </div>
+                  </div>
                 </div>
               )}
               {placementMode && selectedPreset && (
@@ -3263,6 +3443,7 @@ function SitePlanContent() {
           {viewMode === "3d" && (
             <div className="absolute inset-0 bg-white">
               <Inline3DViewer
+                key={`3d-scene-v${scene3dVersion}`}
                 buildings={buildingDetails.map((b) => {
                   // Read positions fresh from the live canvas (always available since canvas persists)
                   const canvas = fabricRef.current;

@@ -15,11 +15,44 @@ function degLatToMeters(lat: number) {
 
 type Coord = [number, number]; // [lng, lat] in GeoJSON
 
+/**
+ * Sanitize a GeoJSON coordinate — strips altitude (z) component and validates precision.
+ * GeoJSON allows [lng, lat, alt] but the alt component would corrupt our 2D transforms.
+ */
+function sanitizeCoord(c: number[]): Coord {
+  const lng = Number(c[0]);
+  const lat = Number(c[1]);
+  // Guard against NaN from malformed data
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+    console.warn('parcelGeometryToCanvas: NaN coordinate detected, defaulting to [0,0]', c);
+    return [0, 0];
+  }
+  // Warn if coordinate precision is too low (< 5 decimal places → ~1m error)
+  const lngStr = String(lng);
+  const latStr = String(lat);
+  const lngDecimals = lngStr.includes('.') ? lngStr.split('.')[1].length : 0;
+  const latDecimals = latStr.includes('.') ? latStr.split('.')[1].length : 0;
+  if (lngDecimals < 5 || latDecimals < 5) {
+    console.warn(`parcelGeometryToCanvas: Low precision coordinate [${lng}, ${lat}] — may cause ~${Math.round(111320 * Math.pow(10, -Math.min(lngDecimals, latDecimals)))}m positional error`);
+  }
+  return [lng, lat];
+}
+
+/**
+ * Sanitize an entire ring of coordinates — strips z-components and validates each point.
+ */
+function sanitizeRing(ring: number[][]): Coord[] {
+  return ring.map(sanitizeCoord);
+}
+
 function ringToPoints(ring: Coord[], refLat: number, centroidLng: number, centroidLat: number, pixelsPerMeter: number): { x: number; y: number }[] {
   return ring.map(([lng, lat]) => {
     const mx = degLngToMeters(lng - centroidLng, refLat);
     const my = degLatToMeters(lat - centroidLat);
-    return { x: mx * pixelsPerMeter, y: -my * pixelsPerMeter };
+    const x = mx * pixelsPerMeter;
+    const y = -my * pixelsPerMeter;
+    // Safety: if transform produces NaN, clamp to 0
+    return { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0 };
   });
 }
 
@@ -33,14 +66,19 @@ function polygonFromCoords(
 ): { left: number; top: number; points: { x: number; y: number }[] } | null {
   const exterior = coords[0];
   if (!exterior || exterior.length < 3) return null;
-  const n = exterior.length;
-  const centroidLng = exterior.reduce((s, c) => s + c[0], 0) / n;
-  const centroidLat = exterior.reduce((s, c) => s + c[1], 0) / n;
+  // Sanitize coordinates — strip altitude (z) components and validate
+  const sanitized = sanitizeRing(exterior as unknown as number[][]);
+  if (sanitized.length < 3) return null;
+  const n = sanitized.length;
+  const centroidLng = sanitized.reduce((s, c) => s + c[0], 0) / n;
+  const centroidLat = sanitized.reduce((s, c) => s + c[1], 0) / n;
   const mx = degLngToMeters(centroidLng - refLng, refLat);
   const my = degLatToMeters(centroidLat - refLat);
   const left = centerCanvasX + mx * pixelsPerMeter;
   const top = centerCanvasY - my * pixelsPerMeter;
-  const points = ringToPoints(exterior, refLat, centroidLng, centroidLat, pixelsPerMeter);
+  // NaN safety
+  if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+  const points = ringToPoints(sanitized, refLat, centroidLng, centroidLat, pixelsPerMeter);
   return { left, top, points };
 }
 
@@ -122,10 +160,14 @@ export function parcelGeometryToShapes(
   const allLat: number[] = [];
   geometries.forEach((g) => {
     if (g.type === "Polygon") {
-      (g.coordinates as Coord[][])[0].forEach((c: Coord) => { allLng.push(c[0]); allLat.push(c[1]); });
+      const ring = ((g.coordinates as unknown as number[][][])[0]) || [];
+      const sanitized = sanitizeRing(ring);
+      sanitized.forEach((c: Coord) => { allLng.push(c[0]); allLat.push(c[1]); });
     } else {
-      (g.coordinates as Coord[][][]).forEach((poly) => {
-        poly[0].forEach((c: Coord) => { allLng.push(c[0]); allLat.push(c[1]); });
+      ((g.coordinates as unknown as number[][][][])).forEach((poly) => {
+        const ring = poly[0] || [];
+        const sanitized = sanitizeRing(ring);
+        sanitized.forEach((c: Coord) => { allLng.push(c[0]); allLat.push(c[1]); });
       });
     }
   });

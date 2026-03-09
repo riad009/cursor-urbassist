@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import MaterialsStep from "@/components/project-description/MaterialsStep";
+import PluDocumentManager from "@/components/project-description/PluDocumentManager";
 import FeasibilityMatrix, { FeasibilityMatrixSkeleton } from "@/components/feasibility/FeasibilityMatrix";
 import type { FeasibilityReport } from "@/lib/feasibility-matrix";
 import { cn } from "@/lib/utils";
@@ -246,6 +247,10 @@ export default function ProjectDescriptionPage({
     const [analysisProgress, setAnalysisProgress] = useState(0);
     const [analysisComplete, setAnalysisComplete] = useState(false);
     const [pluFile, setPluFile] = useState<File | null>(null);
+    const [pluDocUrl, setPluDocUrl] = useState<string | null>(null);
+    const [useAutoDoc, setUseAutoDoc] = useState(true);
+    const [lotissementFile, setLotissementFile] = useState<File | null>(null);
+    const [pluDocReady, setPluDocReady] = useState(false);
     const [designValidated, setDesignValidated] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<string>("PC4 / DPC 8-1");
 
@@ -276,6 +281,7 @@ export default function ProjectDescriptionPage({
                 if (d.project?.name) setProjectName(d.project.name);
                 if (d.project?.address) setProjectAddress(d.project.address);
                 if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
+                if (d.project?.regulatoryAnalysis?.pdfUrl) setPluDocUrl(d.project.regulatoryAnalysis.pdfUrl);
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
                 if (d.project?.authorizationType) setAuthorizationType(d.project.authorizationType);
@@ -536,10 +542,7 @@ export default function ProjectDescriptionPage({
         }
     }, [projectId, nearPhoto, farPhoto]);
 
-    // ─── Dynamic document list based on authorization type ─────────────
-    const activeDocs = useMemo(() => {
-        return authorizationType === "DP" ? DP_DOCS : PC_DOCS;
-    }, [authorizationType]);
+    // ─── Recalculate DP/PC determination whenever jobs change ────────────
     const dpcResult = useMemo(() => {
         if (jobs.length === 0) return null;
         const severity: Record<string, number> = { NONE: 0, DP: 1, PC: 2, ARCHITECT_REQUIRED: 3, REVIEW: 1 };
@@ -561,6 +564,40 @@ export default function ProjectDescriptionPage({
         }
         return strictest;
     }, [jobs, submitter]);
+
+    // ─── CRITICAL FIX: Sync dpcResult → authorizationType ──────────────
+    // When the user adds/removes jobs, dpcResult recalculates the determination.
+    // We MUST sync this back to authorizationType so activeDocs updates.
+    useEffect(() => {
+        if (!dpcResult) return;
+        const det = dpcResult.determination;
+        // Map determination to authorization type (strict, case-insensitive)
+        const upper = det.toUpperCase();
+        let resolved: string;
+        if (upper === "PC" || upper === "ARCHITECT_REQUIRED") {
+            resolved = "PC";
+        } else if (upper === "DP") {
+            resolved = "DP";
+        } else {
+            // NONE or unknown → don't change (keep the DB-fetched value)
+            return;
+        }
+        setAuthorizationType((prev) => {
+            if (prev !== resolved) {
+                console.log(`[project-description] authorizationType synced: ${prev} → ${resolved} (from dpcResult.determination: ${det})`);
+            }
+            return resolved;
+        });
+    }, [dpcResult]);
+
+    // ─── Dynamic document list based on authorization type ─────────────
+    const activeDocs = useMemo(() => {
+        const upper = (authorizationType || "").toUpperCase();
+        if (upper === "PC" || upper === "ARCHITECT_REQUIRED") return PC_DOCS;
+        if (upper === "DP") return DP_DOCS;
+        // Fallback: use PC_DOCS (never default to DP silently)
+        return PC_DOCS;
+    }, [authorizationType]);
 
     // ─── Toggle work type for existing extension ─────────────────────────
     function toggleWorkType(wt: WorkType) {
@@ -716,9 +753,10 @@ export default function ProjectDescriptionPage({
         setAnalysisComplete(false);
         setGenerationError(null);
 
-        // Validate PDF is provided
-        if (!pluFile) {
-            setGenerationError("Veuillez uploader un document PLU en PDF avant de lancer l'analyse.");
+        // Validate: need either a PDF file or auto-fetched URL
+        const hasDoc = !!pluFile || (useAutoDoc && !!pluDocUrl);
+        if (!hasDoc) {
+            setGenerationError("Veuillez uploader un document PLU en PDF ou utiliser le document auto-détecté.");
             setAnalysisProgress(100);
             setAnalysisComplete(true);
             return;
@@ -736,9 +774,16 @@ export default function ProjectDescriptionPage({
         }, 500);
 
         try {
-            // ── Build FormData with PDF + context ──────────────────────────
+            // ── Build FormData with PDF(s) + context ──────────────────────
             const formData = new FormData();
-            formData.append("pdfFile", pluFile);
+            if (pluFile) {
+                formData.append("pdfFile", pluFile);
+            } else if (useAutoDoc && pluDocUrl) {
+                formData.append("pdfUrl", pluDocUrl);
+            }
+            if (lotissementFile) {
+                formData.append("pdfFile2", lotissementFile);
+            }
             formData.append("pluZone", projectZoneType || "non spécifiée");
             formData.append("isABFZone", String(projectProtectedAreas.length > 0));
             formData.append("parcelAddress", projectAddress || "non précisée");
@@ -768,7 +813,11 @@ export default function ProjectDescriptionPage({
                     }).join(", ") || "Projet de construction";
 
                     const feasFormData = new FormData();
-                    feasFormData.append("pdfFile", pluFile!);
+                    if (pluFile) {
+                        feasFormData.append("pdfFile", pluFile);
+                    } else if (useAutoDoc && pluDocUrl) {
+                        feasFormData.append("pdfUrl", pluDocUrl);
+                    }
                     feasFormData.append("pluZone", projectZoneType || "non spécifiée");
                     feasFormData.append("projectIntent", intent);
 
@@ -1936,42 +1985,19 @@ export default function ProjectDescriptionPage({
                                             </div>
                                         </div>
 
-                                        {/* PLU Document Upload */}
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-900 mb-3">
-                                                {isEn ? "PLU Document (Optional)" : "Document du PLU (Facultatif)"}
-                                            </h3>
-                                            <div
-                                                className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-indigo-400 transition-colors cursor-pointer"
-                                                onDragOver={(e) => e.preventDefault()}
-                                                onDrop={(e) => {
-                                                    e.preventDefault();
-                                                    if (e.dataTransfer.files[0]) setPluFile(e.dataTransfer.files[0]);
-                                                }}
-                                                onClick={() => {
-                                                    const input = document.createElement("input");
-                                                    input.type = "file";
-                                                    input.accept = ".pdf";
-                                                    input.onchange = (e) => {
-                                                        const f = (e.target as HTMLInputElement).files?.[0];
-                                                        if (f) setPluFile(f);
-                                                    };
-                                                    input.click();
-                                                }}
-                                            >
-                                                <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                                                <p className="text-sm font-semibold text-slate-600">
-                                                    {pluFile
-                                                        ? pluFile.name
-                                                        : isEn ? "Drop the regulation PDF here" : "Glisser le PDF du règlement ici"}
-                                                </p>
-                                                <p className="text-xs text-slate-400 mt-1">
-                                                    {isEn
-                                                        ? "AI will analyze this document to refine compliance."
-                                                        : "L'IA analysera ce document pour affiner la conformité."}
-                                                </p>
-                                            </div>
-                                        </div>
+                                        {/* PLU Document Manager */}
+                                        <PluDocumentManager
+                                            autoFetchedUrl={pluDocUrl}
+                                            zoneType={projectZoneType}
+                                            pluFile={pluFile}
+                                            onPluFileChange={setPluFile}
+                                            useAutoDoc={useAutoDoc}
+                                            onUseAutoDocChange={setUseAutoDoc}
+                                            lotissementFile={lotissementFile}
+                                            onLotissementChange={setLotissementFile}
+                                            onDocumentReady={setPluDocReady}
+                                            isEn={isEn}
+                                        />
 
                                         {/* Project Intent (for feasibility matrix) */}
                                         <div>
@@ -1995,12 +2021,24 @@ export default function ProjectDescriptionPage({
                                             </p>
                                         </div>
 
-                                        {/* Launch Analysis Button */}
-                                        <div className="flex justify-center pt-2">
+                                        {/* Launch Analysis Button + Back */}
+                                        <div className="flex items-center justify-between pt-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setStep(4)}
+                                                className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
+                                            >
+                                                {isEn ? "← Back" : "← Retour"}
+                                            </button>
                                             <button
                                                 type="button"
                                                 onClick={handleRequestAnalysis}
-                                                className="flex items-center gap-2 px-8 py-4 rounded-xl bg-indigo-600 text-white font-bold text-base hover:bg-indigo-700 transition-all shadow-lg hover:shadow-xl"
+                                                disabled={!pluDocReady}
+                                                className={`flex items-center gap-2 px-8 py-4 rounded-xl font-bold text-base transition-all shadow-lg ${
+                                                    pluDocReady
+                                                        ? "bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl"
+                                                        : "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                                                }`}
                                             >
                                                 <FileText className="w-5 h-5" />
                                                 {isEn ? "Launch Compliance Analysis" : "Lancer l'analyse de conformité"}
@@ -2430,8 +2468,15 @@ export default function ProjectDescriptionPage({
                                             </div>
                                         )}
 
-                                        {/* Go to 3D */}
-                                        <div className="flex justify-end pt-2">
+                                        {/* Back + Go to 3D */}
+                                        <div className="flex items-center justify-between pt-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setStep(5)}
+                                                className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
+                                            >
+                                                {isEn ? "← Back to Analysis" : "← Retour à l'analyse"}
+                                            </button>
                                             <button
                                                 type="button"
                                                 onClick={() => setStep(7)}
@@ -2731,7 +2776,7 @@ export default function ProjectDescriptionPage({
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold uppercase">
-                                                    {authorizationType || "DP"}
+                                                    {authorizationType || "—"}
                                                 </span>
                                                 <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-colors">
                                                     <Download className="w-3 h-3" />
