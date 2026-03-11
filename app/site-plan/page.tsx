@@ -82,6 +82,8 @@ import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel"
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
 import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
+import { renderProcessedSite, clearProcessedLayers } from "@/lib/renderProcessedSite";
+import type { ProcessedSiteData } from "@/types/processed-site-data";
 import {
   drawOverhangOverlay,
   drawInteriorLayout,
@@ -92,6 +94,8 @@ import {
   drawExteriorEnvelope,
 } from "@/lib/buildingCanvasOverlays";
 import { calculateRoofData } from "@/lib/roofCalculations";
+import { useEditorStore } from "@/store/editorStore";
+import { useAutoSave } from "@/hooks/useAutoSave";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -274,6 +278,15 @@ function SitePlanContent() {
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get("project");
 
+  // ── Editor Store: initialize for this project (hydrates from sessionStorage) ──
+  const editorStoreInit = useEditorStore((s) => s.initProject);
+  useEffect(() => {
+    if (projectIdFromUrl) editorStoreInit(projectIdFromUrl);
+  }, [projectIdFromUrl, editorStoreInit]);
+
+  // ── Auto-save hook: debounced 2s push to DB ──
+  useAutoSave(projectIdFromUrl);
+
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -333,6 +346,8 @@ function SitePlanContent() {
   const [loadingExistingBuildings, setLoadingExistingBuildings] = useState(false);
   const [loadingParcelsGeoJSON, setLoadingParcelsGeoJSON] = useState(false);
   const [loadingEditorData, setLoadingEditorData] = useState(true);
+  /** Fully pre-processed site data (boundary, edges, elevations) from process-geometry API */
+  const [processedSiteData, setProcessedSiteData] = useState<ProcessedSiteData | null>(null);
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -372,6 +387,10 @@ function SitePlanContent() {
   // (typed in pushUndoState block below)
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  /** Flag: true while undo/redo/clear restoring canvas → skip pushUndoState */
+  const isRestoringRef = useRef(false);
+  /** Save feedback toast: null | 'saved' | 'error' */
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'error' | null>(null);
   // Perf: debounce updateLayers so rapid canvas events don't spam O(n) layer recomputes
   const updateLayersDebounceRef = useRef<number | null>(null);
 
@@ -588,11 +607,15 @@ function SitePlanContent() {
   const pushUndoState = useCallback(() => {
     // Skip undo tracking during initial canvas setup (parcels, grid, saved data loading)
     if (!initialLoadCompleteRef.current) return;
+    // Skip during undo/redo/clear restore — loadFromJSON fires object:added events
+    if (isRestoringRef.current) return;
     const canvas = fabricRef.current;
     if (!canvas) return;
     if (undoDebounceRef.current) window.clearTimeout(undoDebounceRef.current);
     undoDebounceRef.current = window.setTimeout(() => {
       undoDebounceRef.current = null;
+      // Double-check restoring flag after debounce
+      if (isRestoringRef.current) return;
       try {
         const json = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
         // Snapshot current buildingDetails via a ref so the callback stays stable
@@ -609,6 +632,7 @@ function SitePlanContent() {
   const restoreUndoEntry = useCallback((entry: { canvas: string; buildings: BuildingDetail[] }, afterFn: () => void) => {
     const canvas = fabricRef.current;
     if (!canvas || !entry) return;
+    isRestoringRef.current = true; // Prevent pushUndoState from clearing redo
     canvas.loadFromJSON(entry.canvas, () => {
       // Restore dark background — loadFromJSON may lose it
       canvas.backgroundColor = "#0f172a";
@@ -623,6 +647,8 @@ function SitePlanContent() {
         }
       });
       setElevationPoints(pts);
+      // Release the lock AFTER loadFromJSON has settled
+      setTimeout(() => { isRestoringRef.current = false; }, 50);
       afterFn();
     });
   }, [updateLayers]);
@@ -884,6 +910,13 @@ function SitePlanContent() {
       .catch(() => setProjectData(null));
   }, [currentProjectId]);
 
+  // ── Sync project data into editor store for persistence ──
+  useEffect(() => {
+    if (projectData && currentProjectId) {
+      useEditorStore.getState().setProjectData(projectData);
+    }
+  }, [projectData, currentProjectId]);
+
   // Draw existing buildings from IGN BDTOPO GeoJSON stored on the project.
   // Each BDTOPO feature is a GeoJSON Polygon/MultiPolygon — we project every vertex
   // to canvas coordinates using the same geo->canvas transform as parcel boundaries.
@@ -989,163 +1022,167 @@ function SitePlanContent() {
   }, [projectData?.existingBuildingsGeoJSON, canvasReady, existingBuildingsLoaded, drawExistingBuildingsFromGeoJSON]);
 
   // Auto-draw parcel boundaries from project parcelsGeoJSON (individual parcels) or parcelGeometry (merged)
-  const drawParcelsFromProjectData = useCallback(() => {
+  const drawParcelsFromProjectData = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || !currentProjectId) return;
     if (!projectData?.parcelsGeoJSON && !projectData?.parcelGeometry) return;
     if (parcelsDrawnFromGeometryRef.current === currentProjectId) return;
-    const hasParcel = canvas.getObjects().some((o: any) => o.isParcel);
+    const hasParcel = canvas.getObjects().some((o: any) =>
+      o.isParcel || (o as any).processedBoundary || (o as any).processedParcel
+    );
     if (hasParcel) return;
+
+    // ── CRITICAL: Lock the ref BEFORE async work to prevent concurrent re-invocations ──
+    // The fetch to process-geometry takes 2-3s. Without this early lock, re-renders
+    // during that await would pass the guard check and fire additional fetches,
+    // creating a cascade that hammers the IGN API with HTTP 429 rate limits.
+    parcelsDrawnFromGeometryRef.current = currentProjectId;
 
     setLoadingParcelsGeoJSON(true);
 
     // Prefer parcelsGeoJSON (individual parcel features with metadata) over merged parcelGeometry
     const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
 
-    // ── Validate GeoJSON before conversion ──────────────────────────────
+    // ── Parse GeoJSON into features for process-geometry API ──────────────
+    let parcelFeatures: any[] = [];
     try {
       const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
       if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
-        const invalid = parsed.features.filter((f: any) => {
+        parcelFeatures = parsed.features.filter((f: any) => {
           const gt = f?.geometry?.type;
-          return gt !== "Polygon" && gt !== "MultiPolygon";
+          return gt === "Polygon" || gt === "MultiPolygon";
         });
-        if (invalid.length > 0) {
-          console.warn(`[site-plan] ${invalid.length} feature(s) with unsupported geometry type skipped`);
-        }
+      } else if (parsed?.type === "Feature" && parsed.geometry) {
+        parcelFeatures = [parsed];
+      } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
+        parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
       }
     } catch (e) {
-      console.warn("[site-plan] Failed to validate GeoJSON before import:", e);
+      console.warn("[site-plan] Failed to parse GeoJSON for process-geometry:", e);
     }
 
-    const shapes = parcelGeometryToShapes(geoSource, {
-      canvasWidth: canvasSize.width,
-      canvasHeight: canvasSize.height,
-      pixelsPerMeter: currentScale.pixelsPerMeter,
-    });
+    if (parcelFeatures.length === 0) {
+      setLoadingParcelsGeoJSON(false);
+      return;
+    }
 
-    // ── Debug: check for degenerate shapes ──────────────────────────────
-    shapes.forEach((s, i) => {
-      if (s.points.length === 0) {
-        console.warn(`[site-plan] Shape ${i} has 0 points — will not render`);
-      }
-      if (s.points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) {
-        console.warn(`[site-plan] Shape ${i} has NaN/Infinity coordinates — data may be corrupted`);
-      }
-    });
+    // ── Call process-geometry API for full pipeline ─────────────────────────
+    try {
+      const apiPayload = {
+        parcels: parcelFeatures.map((f: any, idx: number) => ({
+          type: f.type,
+          properties: {
+            id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
+            section: f.properties?.section || f.properties?.SEC || "",
+            number: f.properties?.number || f.properties?.NUM || "",
+            area: f.properties?.area || f.properties?.contenance || 0,
+          },
+          geometry: f.geometry,
+        })),
+      };
 
-    if (shapes.length === 0) return;
+      const res = await fetch("/api/projects/process-geometry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiPayload),
+      });
 
-    // Extract feature-level properties for labels if we're using parcelsGeoJSON
-    let featureProps: Array<{ section?: string; number?: string; area?: number; id?: string }> = [];
-    if (projectData.parcelsGeoJSON) {
-      try {
-        const fc = typeof projectData.parcelsGeoJSON === "string"
-          ? JSON.parse(projectData.parcelsGeoJSON)
-          : projectData.parcelsGeoJSON;
-        if (fc?.type === "FeatureCollection" && Array.isArray(fc.features)) {
-          featureProps = fc.features.map((f: any) => f.properties || {});
+      if (res.ok) {
+        const siteData: ProcessedSiteData = await res.json();
+        setProcessedSiteData(siteData);
+
+        // ── Render using the full pipeline (boundary + parcels + edge labels + NGF labels) ──
+        const projected = renderProcessedSite(
+          fabric as any,
+          canvas as any,
+          siteData,
+          {
+            canvasWidth: canvasSize.width,
+            canvasHeight: canvasSize.height,
+            pixelsPerMeter: currentScale.pixelsPerMeter,
+          }
+        );
+
+        // Also set elevation points from the processed data for the terrain store
+        if (siteData.vertices3D && siteData.vertices3D.length > 0) {
+          const pts = siteData.vertices3D
+            .filter(v => v.elevation > 0)
+            .map((v, i) => {
+              const canvasPos = projected.vertexLabels[i]?.position;
+              return canvasPos ? {
+                id: `ngf-${i}`,
+                x: canvasPos.x,
+                y: canvasPos.y,
+                value: v.elevation,
+              } : null;
+            })
+            .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
+          if (pts.length > 0) setElevationPoints(pts);
         }
-      } catch { /* ignore */ }
-    }
 
-    // Distinct fill colors for each parcel for visual clarity
-    const parcelColors = [
-      { fill: "rgba(34, 197, 94, 0.15)", stroke: "#16a34a", labelFill: "#15803d" },
-      { fill: "rgba(59, 130, 246, 0.12)", stroke: "#2563eb", labelFill: "#1d4ed8" },
-      { fill: "rgba(168, 85, 247, 0.12)", stroke: "#7c3aed", labelFill: "#6d28d9" },
-      { fill: "rgba(245, 158, 11, 0.12)", stroke: "#d97706", labelFill: "#b45309" },
-      { fill: "rgba(236, 72, 153, 0.12)", stroke: "#db2777", labelFill: "#be185d" },
-      { fill: "rgba(6, 182, 212, 0.12)", stroke: "#0891b2", labelFill: "#0e7490" },
-    ];
-
-    shapes.forEach((shape, idx) => {
-      const props = featureProps[idx];
-      const color = parcelColors[idx % parcelColors.length];
-      const labelParts: string[] = [];
-      if (props?.section) labelParts.push(props.section);
-      if (props?.number) labelParts.push(`N°${props.number}`);
-      if (props?.area) labelParts.push(`${props.area.toLocaleString()} m²`);
-      const label = labelParts.length > 0 ? labelParts.join(" · ") : `Parcel ${idx + 1}`;
-
-      const poly = new fabric.Polygon(shape.points, {
-        left: shape.left,
-        top: shape.top,
-        fill: color.fill,
-        stroke: color.stroke,
-        strokeWidth: 2.5,
-        strokeLineJoin: "round",
-      });
-      const pid = `parcel-geo-${currentProjectId}-${idx}`;
-      (poly as any).id = pid;
-      (poly as any).elementName = label;
-      (poly as any).isParcel = true;
-      (poly as any).excludeFromExport = false;
-      canvas.add(poly);
-      // Skip dimension-line measurements for parcels — they create visual clutter
-      // Only add a clean centroid label
-      const center = poly.getCenterPoint();
-      const labelText = new fabric.Text(label, {
-        left: center.x,
-        top: center.y,
-        fontSize: 12,
-        fontFamily: "Inter, sans-serif",
-        fontWeight: "bold",
-        fill: color.labelFill,
-        backgroundColor: "rgba(255,255,255,0.85)",
-        padding: 4,
-        originX: "center",
-        originY: "center",
-        selectable: false,
-        evented: false,
-      });
-      (labelText as any).isMeasurement = true;
-      (labelText as any).parentId = pid;
-      (labelText as any).excludeFromExport = true;
-      canvas.add(labelText);
-      measurementLabelsRef.current.set(pid, [labelText]);
-
-      canvas.sendObjectToBack(poly);
-    });
-
-    // Auto-zoom-to-fit all parcels — centered in the VISIBLE container area
-    if (shapes.length > 0) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      shapes.forEach((s) => {
-        s.points.forEach((p) => {
-          const px = s.left + p.x;
-          const py = s.top + p.y;
-          minX = Math.min(minX, px);
-          minY = Math.min(minY, py);
-          maxX = Math.max(maxX, px);
-          maxY = Math.max(maxY, py);
+        // ── Auto-zoom-to-fit the projected boundary ────────────────────────
+        const boundary = projected.boundary;
+        if (boundary && boundary.points.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          boundary.points.forEach((p) => {
+            const px = boundary.left + p.x;
+            const py = boundary.top + p.y;
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+            maxX = Math.max(maxX, px);
+            maxY = Math.max(maxY, py);
+          });
+          if (minX !== Infinity) {
+            const parcelsW = maxX - minX;
+            const parcelsH = maxY - minY;
+            const containerEl = containerRef?.current;
+            const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+            const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+            const padding = 60;
+            const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
+            const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
+            const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
+            if (targetZoom > 0 && isFinite(targetZoom)) {
+              const centerPX = (minX + maxX) / 2;
+              const centerPY = (minY + maxY) / 2;
+              canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+              const vpt: [number, number, number, number, number, number] = [
+                targetZoom, 0, 0, targetZoom,
+                viewW / 2 - centerPX * targetZoom,
+                viewH / 2 - centerPY * targetZoom,
+              ];
+              canvas.setViewportTransform(vpt);
+              setZoom(Math.round(targetZoom * 100));
+            }
+          }
+        }
+      } else {
+        // Fallback to old pipeline if process-geometry API fails
+        console.warn("[site-plan] process-geometry API failed, falling back to parcelGeometryToShapes");
+        const shapes = parcelGeometryToShapes(geoSource, {
+          canvasWidth: canvasSize.width,
+          canvasHeight: canvasSize.height,
+          pixelsPerMeter: currentScale.pixelsPerMeter,
         });
-      });
-      if (minX !== Infinity) {
-        const parcelsW = maxX - minX;
-        const parcelsH = maxY - minY;
-        // Use the actual visible container dimensions, NOT the Fabric.js canvas dimensions
-        // The canvas is 1400×900 but may be displayed in a smaller container
-        const containerEl = containerRef?.current;
-        const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
-        const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
-        const padding = 60; // px margin on each side
-        const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
-        const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
-        const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95)); // clamp: max 95%
-        if (targetZoom > 0 && isFinite(targetZoom)) {
-          const centerPX = (minX + maxX) / 2;
-          const centerPY = (minY + maxY) / 2;
-          canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // reset first
-          const vpt: [number, number, number, number, number, number] = [
-            targetZoom, 0, 0, targetZoom,
-            viewW / 2 - centerPX * targetZoom,
-            viewH / 2 - centerPY * targetZoom,
-          ];
-          canvas.setViewportTransform(vpt);
-          setZoom(Math.round(targetZoom * 100));
-        }
+        shapes.forEach((shape, idx) => {
+          const poly = new fabric.Polygon(shape.points, {
+            left: shape.left,
+            top: shape.top,
+            fill: "rgba(34, 197, 94, 0.15)",
+            stroke: "#16a34a",
+            strokeWidth: 2.5,
+            strokeLineJoin: "round",
+          });
+          (poly as any).id = `parcel-geo-${currentProjectId}-${idx}`;
+          (poly as any).elementName = `Parcel ${idx + 1}`;
+          (poly as any).isParcel = true;
+          (poly as any).excludeFromExport = false;
+          canvas.add(poly);
+          canvas.sendObjectToBack(poly);
+        });
       }
+    } catch (err) {
+      console.error("[site-plan] Error in drawParcelsFromProjectData:", err);
     }
 
     parcelsDrawnFromGeometryRef.current = currentProjectId;
@@ -1319,6 +1356,10 @@ function SitePlanContent() {
               const json = JSON.stringify((c as any).toJSON([...CANVAS_PROPS]));
               undoStackRef.current = [{ canvas: json, buildings: buildingDetailsSnapshotRef.current }];
               setCanUndo(false); // baseline itself shouldn't be "undoable"
+              // ── Persist canvas snapshot to editor store ──
+              useEditorStore.getState().setCanvasData(json);
+              useEditorStore.getState().setBuildingDetails(buildingDetailsSnapshotRef.current);
+              useEditorStore.getState().markClean(); // Initial load = not dirty
             } catch { /* ignore */ }
           }
         }, 500);
@@ -1327,6 +1368,25 @@ function SitePlanContent() {
       setLoadingEditorData(false);
     }
   }, [currentProjectId, canvasReady]); // Only re-run when project or canvas readiness changes
+
+  // ── RACE-CONDITION FIX: re-draw parcels when projectData arrives late ───────
+  // On refresh, loadSitePlan's callback calls drawParcelsFromProjectData() before
+  // the /api/projects/{id} fetch completes → projectData is null → early return.
+  // This effect ensures parcels are drawn when projectData becomes available.
+  // Guards inside drawParcelsFromProjectData (parcelsDrawnFromGeometryRef, hasParcel)
+  // prevent double-drawing when data arrives in the correct order.
+  useEffect(() => {
+    if (canvasReady && currentProjectId && projectData?.parcelsGeoJSON) {
+      // Only trigger if parcels haven't been drawn yet for this project
+      if (parcelsDrawnFromGeometryRef.current !== currentProjectId) {
+        const canvas = fabricRef.current;
+        const hasParcel = canvas?.getObjects().some((o: any) => (o as any).isParcel);
+        if (!hasParcel) {
+          drawParcelsRef.current();
+        }
+      }
+    }
+  }, [canvasReady, currentProjectId, projectData?.parcelsGeoJSON]);
 
   // Warn when leaving the tab with unsaved changes
   useEffect(() => {
@@ -1439,6 +1499,8 @@ function SitePlanContent() {
 
       if (res.ok) {
         setIsDirty(false);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(null), 2500);
         const compRes = await fetch("/api/compliance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1449,7 +1511,13 @@ function SitePlanContent() {
         setSaving(false);
         return true;
       }
-    } catch (e) { console.error(e); }
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (e) {
+      console.error(e);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(null), 3000);
+    }
     setSaving(false);
     return false;
   }, [currentProjectId, currentScale.pixelsPerMeter, projectData, buildingDetails]);
@@ -2244,6 +2312,8 @@ function SitePlanContent() {
     if (!canvas) return;
     // Confirm before clearing everything
     if (!window.confirm("Clear all objects and buildings? This cannot be undone.")) return;
+    // Suppress undo tracking during bulk removal
+    isRestoringRef.current = true;
     // Remove all non-grid objects
     const toRemove = canvas.getObjects().filter((o: any) => !o.isGrid);
     toRemove.forEach((o) => canvas.remove(o));
@@ -2263,6 +2333,13 @@ function SitePlanContent() {
       drawGrid(canvas);
     }
     canvas.renderAll();
+    // Release restoring lock
+    setTimeout(() => { isRestoringRef.current = false; }, 50);
+    // Clear undo/redo stacks
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
     // Allow parcel re-import on next load
     parcelsDrawnFromGeometryRef.current = null;
     // Persist the empty state to DB so refresh doesn't bring back old data
@@ -3176,6 +3253,16 @@ function SitePlanContent() {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+              {saveStatus === 'saved' && (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
+                </span>
+              )}
+              {saveStatus === 'error' && (
+                <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-red-500 text-xs font-medium">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Save failed
+                </span>
+              )}
               {editorCanProceed && (
                 <span className="hidden sm:inline flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-100 text-emerald-600 text-xs font-medium">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Site plan completed
@@ -3521,6 +3608,7 @@ function SitePlanContent() {
                   if (id) setRightTab("buildings");
                 }}
                 parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
+                processedSiteData={processedSiteData}
               />
               <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
                 <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
@@ -3920,6 +4008,7 @@ function Inline3DViewer({
   canvasHeight = 1500,
   onBuildingSelect,
   parcelGeoJSON = null,
+  processedSiteData = null,
 }: {
   buildings: BuildingDetail[];
   elevationPoints?: { id: string; x: number; y: number; value: number }[];
@@ -3929,6 +4018,7 @@ function Inline3DViewer({
   canvasHeight?: number;
   onBuildingSelect?: (buildingId: string | null) => void;
   parcelGeoJSON?: unknown;
+  processedSiteData?: ProcessedSiteData | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
@@ -4056,17 +4146,153 @@ function Inline3DViewer({
 
         // === Ground & grid — scales with scene ===
         const groundSize = Math.max(250, sceneExtent * 3);
-        const groundGeom = new THREE.PlaneGeometry(groundSize, groundSize, 32, 32);
-        const groundMat = new THREE.MeshStandardMaterial({
-          color: 0x5a9c4e,
-          roughness: 0.92,
-          metalness: 0.0,
-          envMapIntensity: 0.3,
-        });
-        const ground = new THREE.Mesh(groundGeom, groundMat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        scene.add(ground);
+
+        // ── Real terrain mesh from ProcessedSiteData (if available) ──
+        if (processedSiteData && processedSiteData.vertices3D && processedSiteData.vertices3D.length >= 3) {
+          // Build a sloped terrain mesh from real NGF elevation data
+          const verts3D = processedSiteData.vertices3D;
+          const refPoint = processedSiteData.refPoint;
+
+          // Project vertices to 3D scene space (same coordinate system as buildings)
+          const METERS_PER_DEG = 111320;
+          const cosLat = Math.cos(refPoint.lat * Math.PI / 180);
+
+          // Find min elevation for baseline
+          const validElevations = verts3D.filter(v => v.elevation > 0).map(v => v.elevation);
+          const minElev = validElevations.length > 0 ? Math.min(...validElevations) : 0;
+
+          // Project vertices to scene space
+          const sceneVerts = verts3D.map(v => ({
+            x: (v.lng - refPoint.lng) * METERS_PER_DEG * cosLat,
+            z: -(v.lat - refPoint.lat) * METERS_PER_DEG, // negate: lat increases north, Z increases south
+            y: v.elevation > 0 ? (v.elevation - minElev) * 0.5 : 0, // Scale elevation for visibility
+          }));
+
+          // Create a grid-based terrain using IDW (Inverse Distance Weighting) interpolation
+          const gridRes = 40;
+          let minSX = Infinity, maxSX = -Infinity, minSZ = Infinity, maxSZ = -Infinity;
+          sceneVerts.forEach(v => {
+            minSX = Math.min(minSX, v.x); maxSX = Math.max(maxSX, v.x);
+            minSZ = Math.min(minSZ, v.z); maxSZ = Math.max(maxSZ, v.z);
+          });
+          // Pad the terrain extent
+          const padX = (maxSX - minSX) * 0.3 || 10;
+          const padZ = (maxSZ - minSZ) * 0.3 || 10;
+          minSX -= padX; maxSX += padX;
+          minSZ -= padZ; maxSZ += padZ;
+
+          const terrainGeom = new THREE.PlaneGeometry(
+            maxSX - minSX, maxSZ - minSZ,
+            gridRes, gridRes
+          );
+          terrainGeom.rotateX(-Math.PI / 2);
+
+          // IDW interpolation for each grid vertex
+          const posArray = terrainGeom.attributes.position;
+          for (let i = 0; i < posArray.count; i++) {
+            const gx = posArray.getX(i) + (minSX + maxSX) / 2;
+            const gz = posArray.getZ(i) + (minSZ + maxSZ) / 2;
+
+            let weightSum = 0;
+            let valueSum = 0;
+            const elevVerts = sceneVerts.filter(v => v.y > 0 || verts3D[sceneVerts.indexOf(v)]?.elevation > 0);
+
+            for (const sv of elevVerts) {
+              const dist = Math.sqrt((gx - sv.x) ** 2 + (gz - sv.z) ** 2);
+              const w = 1 / Math.max(dist ** 2, 0.001);
+              weightSum += w;
+              valueSum += w * sv.y;
+            }
+
+            const interpY = weightSum > 0 ? valueSum / weightSum : 0;
+            posArray.setY(i, interpY);
+          }
+          terrainGeom.computeVertexNormals();
+
+          // Color the terrain based on elevation
+          const colors = new Float32Array(posArray.count * 3);
+          const lowColor = new THREE.Color(0x4a8c3e); // Valley green
+          const highColor = new THREE.Color(0x8fbc8f); // Highland green
+          let maxY = 0;
+          for (let i = 0; i < posArray.count; i++) {
+            maxY = Math.max(maxY, posArray.getY(i));
+          }
+          for (let i = 0; i < posArray.count; i++) {
+            const t = maxY > 0 ? posArray.getY(i) / maxY : 0;
+            const c = lowColor.clone().lerp(highColor, t);
+            colors[i * 3] = c.r;
+            colors[i * 3 + 1] = c.g;
+            colors[i * 3 + 2] = c.b;
+          }
+          terrainGeom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+          const terrainMat = new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            roughness: 0.9,
+            metalness: 0.0,
+            side: THREE.DoubleSide,
+          });
+          const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
+          terrainMesh.position.set((minSX + maxSX) / 2, 0, (minSZ + maxSZ) / 2);
+          terrainMesh.receiveShadow = true;
+          scene.add(terrainMesh);
+
+          // Add elevation marker posts at each vertex
+          sceneVerts.forEach((sv, i) => {
+            if (verts3D[i].elevation <= 0) return;
+            // Post
+            const postGeom = new THREE.CylinderGeometry(0.08, 0.08, sv.y + 0.5, 6);
+            const postMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed, roughness: 0.5 });
+            const post = new THREE.Mesh(postGeom, postMat);
+            post.position.set(sv.x, (sv.y + 0.5) / 2, sv.z);
+            scene.add(post);
+            // Sphere on top
+            const sphereGeom = new THREE.SphereGeometry(0.2, 12, 12);
+            const sphere = new THREE.Mesh(sphereGeom, postMat);
+            sphere.position.set(sv.x, sv.y + 0.5, sv.z);
+            scene.add(sphere);
+          });
+
+          // Add boundary line on terrain
+          if (processedSiteData.globalBoundary) {
+            const boundaryCoords = processedSiteData.globalBoundary.geometry.type === "Polygon"
+              ? processedSiteData.globalBoundary.geometry.coordinates[0]
+              : processedSiteData.globalBoundary.geometry.coordinates[0][0];
+
+            const boundaryPoints = boundaryCoords.map((coord: number[]) => {
+              const sx = (coord[0] - refPoint.lng) * METERS_PER_DEG * cosLat;
+              const sz = -(coord[1] - refPoint.lat) * METERS_PER_DEG;
+              // Sample terrain height at this point via IDW
+              let wSum = 0, vSum = 0;
+              sceneVerts.forEach(sv => {
+                const d = Math.sqrt((sx - sv.x) ** 2 + (sz - sv.z) ** 2);
+                const w = 1 / Math.max(d ** 2, 0.001);
+                wSum += w; vSum += w * sv.y;
+              });
+              const y = wSum > 0 ? vSum / wSum + 0.15 : 0.15;
+              return new THREE.Vector3(sx, y, sz);
+            });
+
+            const boundaryLineGeom = new THREE.BufferGeometry().setFromPoints(boundaryPoints);
+            const boundaryLineMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 2 });
+            const boundaryLine = new THREE.LineLoop(boundaryLineGeom, boundaryLineMat);
+            scene.add(boundaryLine);
+          }
+
+        } else {
+          // Fallback: flat green ground
+          const groundGeom = new THREE.PlaneGeometry(groundSize, groundSize, 32, 32);
+          const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x5a9c4e,
+            roughness: 0.92,
+            metalness: 0.0,
+            envMapIntensity: 0.3,
+          });
+          const ground = new THREE.Mesh(groundGeom, groundMat);
+          ground.rotation.x = -Math.PI / 2;
+          ground.receiveShadow = true;
+          scene.add(ground);
+        }
 
         const gridSize = Math.max(200, sceneExtent * 2.5);
         const gridHelper = new THREE.GridHelper(gridSize, Math.min(80, Math.round(gridSize / 5)), 0x4a8c3e, 0x4a8c3e);

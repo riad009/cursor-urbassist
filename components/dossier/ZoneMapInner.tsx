@@ -579,7 +579,7 @@ export function ZoneMapInner({
             {/* === INITIAL PARCELS — full styling + labels === */}
             {parcelCollection && (
               <GeoJSON
-                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-vm-${viewMode}`}
+                key={`parcels-${parcelCollection.features.map((f) => (f.properties as { id?: string })?.id).join("-")}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
                 data={parcelCollection as GeoJsonObject}
                 style={(feature) => {
                   const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
@@ -621,26 +621,6 @@ export function ZoneMapInner({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
                         parcelClickedRef.current = true;
-                        const wasSelected = selectedIdsRef.current.includes(id);
-                        // Forcefully clear all visual styling when deselecting
-                        if (wasSelected) {
-                          pathLayer.setStyle({
-                            color: viewMode === "cadastre" ? "#3b82f6" : "#ffffff",
-                            weight: 1.5,
-                            fillColor: "transparent",
-                            fillOpacity: 0,
-                            opacity: viewMode === "cadastre" ? 0.5 : 0.95,
-                            dashArray: viewMode === "cadastre" ? "4 4" : undefined,
-                          });
-                          // Also force the DOM element to clear any lingering styles
-                          const el = pathLayer._path;
-                          if (el) {
-                            el.style.fill = "transparent";
-                            el.style.fillOpacity = "0";
-                            el.style.stroke = viewMode === "cadastre" ? "#3b82f6" : "#ffffff";
-                            el.style.strokeWidth = "1.5";
-                          }
-                        }
                         handleParcelClick(id);
                       },
                     });
@@ -662,7 +642,7 @@ export function ZoneMapInner({
             {/* === VIEWPORT PARCELS — skeleton outlines only, hover highlight, click to add === */}
             {viewportParcelCollection && (
               <GeoJSON
-                key={`vp-${viewportParcelCollection.features.length}-vm-${viewMode}`}
+                key={`vp-${viewportParcelCollection.features.length}-sel-${selectedParcelIds.join(",")}-vm-${viewMode}`}
                 data={viewportParcelCollection as GeoJsonObject}
                 style={(feature) => {
                   const selected = (feature?.properties as { selected?: boolean })?.selected ?? false;
@@ -701,28 +681,12 @@ export function ZoneMapInner({
                   }
 
                   if (id && onParcelSelect) {
-                    // Click: add to selection + add to sidebar
+                    // Click: toggle selection + add to sidebar if new
                     layer.on({
                       click: (e: L.LeafletMouseEvent) => {
                         L.DomEvent.stopPropagation(e);
                         parcelClickedRef.current = true;
                         const wasSelected = selectedIdsRef.current.includes(id);
-                        // Forcefully clear all visual styling when deselecting
-                        if (wasSelected) {
-                          pathLayer.setStyle({
-                            color: viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)",
-                            weight: 1,
-                            fillColor: "transparent",
-                            fillOpacity: 0,
-                          });
-                          const el = pathLayer._path;
-                          if (el) {
-                            el.style.fill = "transparent";
-                            el.style.fillOpacity = "0";
-                            el.style.stroke = viewMode === "cadastre" ? "rgba(71,85,105,0.5)" : "rgba(255,255,255,0.3)";
-                            el.style.strokeWidth = "1";
-                          }
-                        }
                         handleParcelClick(id);
                         // Only add to sidebar when selecting (not deselecting)
                         if (!wasSelected) {

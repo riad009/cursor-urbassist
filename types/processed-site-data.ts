@@ -1,0 +1,133 @@
+/**
+ * ProcessedSiteData — The unified data contract for the True-Scale GIS Pipeline.
+ *
+ * Produced by: POST /api/projects/process-geometry
+ * Consumed by: projectToCanvas() (2D), renderProcessedSite() (Fabric.js), RealTerrain3D (Three.js)
+ */
+
+import type { Feature, Polygon, MultiPolygon } from "geojson";
+
+// ─── Core Primitives ─────────────────────────────────────────────────────────
+
+/** A 3D vertex in WGS84 with NGF elevation */
+export interface Vertex3D {
+  /** Longitude (WGS84 EPSG:4326) */
+  lng: number;
+  /** Latitude (WGS84 EPSG:4326) */
+  lat: number;
+  /** NGF elevation in metres (from IGN RGE Alti) */
+  elevation: number;
+}
+
+/** A measured edge of the global boundary */
+export interface EdgeMeasurement {
+  /** Start vertex of the edge */
+  from: Vertex3D;
+  /** End vertex of the edge */
+  to: Vertex3D;
+  /** Geodesic length in metres */
+  lengthMeters: number;
+}
+
+/** A single cadastral parcel (original, not merged) */
+export interface ProcessedParcel {
+  id: string;
+  section: string;
+  number: string;
+  /** Cadastral area in m² */
+  area: number;
+  /** Polygon coordinates (GeoJSON Polygon rings) */
+  coordinates: number[][][];
+}
+
+// ─── Master Data Object ──────────────────────────────────────────────────────
+
+export interface ProcessedSiteData {
+  /** Original individual parcels */
+  parcels: ProcessedParcel[];
+
+  /** Union of all parcels — the merged property boundary */
+  globalBoundary: Feature<Polygon | MultiPolygon>;
+
+  /** Every edge of the globalBoundary with its measured length */
+  edges: EdgeMeasurement[];
+
+  /** Every vertex of the globalBoundary with its NGF elevation */
+  vertices3D: Vertex3D[];
+
+  /**
+   * Master anchor point = bounding box center of globalBoundary.
+   * This is the (0,0) origin for both 2D canvas and 3D scene.
+   * Using bbox center (not centroid) guarantees symmetric alignment.
+   */
+  refPoint: { lng: number; lat: number };
+
+  /** Elevation statistics */
+  stats: {
+    minElevation: number;
+    maxElevation: number;
+    meanElevation: number;
+    /** Approximate slope as percentage, or null if insufficient data */
+    slopePercent: number | null;
+  };
+}
+
+// ─── Canvas Projection Types ─────────────────────────────────────────────────
+
+export interface CanvasPoint {
+  x: number;
+  y: number;
+}
+
+export interface CanvasProjectionOptions {
+  /** Canvas width in pixels */
+  canvasWidth: number;
+  /** Canvas height in pixels */
+  canvasHeight: number;
+  /** Scale: pixels per real-world metre (e.g. 2 for 1:500 on a 1000px canvas) */
+  pixelsPerMeter: number;
+}
+
+export interface ProjectedPolygon {
+  points: CanvasPoint[];
+  /** Left position (Fabric.js centroid X) */
+  left: number;
+  /** Top position (Fabric.js centroid Y) */
+  top: number;
+}
+
+export interface ProjectedEdgeLabel {
+  /** Canvas position of the label (midpoint of edge) */
+  position: CanvasPoint;
+  /** Angle in radians — for rotating the label to follow the edge */
+  angle: number;
+  /** Human-readable text, e.g. "12.4m" */
+  text: string;
+}
+
+export interface ProjectedVertexLabel {
+  /** Canvas position of the vertex */
+  position: CanvasPoint;
+  /** Human-readable text, e.g. "NGF: 45.2m" */
+  text: string;
+}
+
+export interface ProjectedParcel extends ProjectedPolygon {
+  id: string;
+  section: string;
+  number: string;
+  area: number;
+}
+
+export interface ProjectedSiteData {
+  /** Global boundary projected to canvas */
+  boundary: ProjectedPolygon;
+  /** Individual parcels projected to canvas */
+  parcels: ProjectedParcel[];
+  /** Edge measurement labels */
+  edgeLabels: ProjectedEdgeLabel[];
+  /** NGF elevation labels at vertices */
+  vertexLabels: ProjectedVertexLabel[];
+  /** Reference point in canvas coordinates (should be canvas center) */
+  refCanvas: CanvasPoint;
+}

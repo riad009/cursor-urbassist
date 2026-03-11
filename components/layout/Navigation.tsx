@@ -56,7 +56,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, loading: authLoading, logout } = useAuth();
   const { t } = useLanguage();
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
   const isNewProjectPage = pathname === "/projects/new";
@@ -133,7 +133,13 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
               <Settings className="w-5 h-5 text-slate-500" />
             </button>
             <div className="w-px h-8 bg-slate-200" />
-            {user ? (
+            {authLoading ? (
+              /* Auth hydrating — show skeleton to prevent sign-in flash */
+              <div className="flex items-center gap-2 animate-pulse">
+                <div className="w-20 h-7 rounded-full bg-slate-200" />
+                <div className="w-9 h-9 rounded-full bg-slate-200" />
+              </div>
+            ) : user ? (
               <>
                 <span className="hidden sm:inline px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm border border-slate-200">
                   {user.credits} credits

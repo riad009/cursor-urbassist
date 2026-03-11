@@ -130,7 +130,7 @@ export default function NewProjectPage() {
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
-            .then(async (r) => { setLoadingStage('loading'); const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setLoadingStage('rendering'); setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); if (list.length > 0) setSelectedParcelIds([list[0].id]); })
+            .then(async (r) => { setLoadingStage('loading'); const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setLoadingStage('rendering'); setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); })
             .catch(() => setCadastreError("Données cadastrales indisponibles."))
             .finally(() => { setLoadingCadastre(false); setLoadingStage(null); });
 
