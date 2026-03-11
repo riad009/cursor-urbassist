@@ -134,7 +134,7 @@ interface Layer {
   type: "photo" | "design" | "overlay";
   visible: boolean;
   opacity: number;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 export default function LandscapePage() {
