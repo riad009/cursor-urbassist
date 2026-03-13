@@ -105,7 +105,6 @@ model Project {
   existingBuildingsData    Json?                 @map("existing_buildings_data")
   processedSiteData        Json?                 @map("processed_site_data")
   northAngle               Float?                @map("north_angle")
-  processedSiteData        Json?                 @map("processed_site_data")
   status                   ProjectStatus         @default(DRAFT)
   projectType              String?               @map("project_type")
   authorizationType        String?               @map("authorization_type")
