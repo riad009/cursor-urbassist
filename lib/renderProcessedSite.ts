@@ -126,6 +126,8 @@ export function renderProcessedSite(
   const boundaryPoly = new fabric.Polygon(projected.boundary.points, {
     left: projected.boundary.left,
     top: projected.boundary.top,
+    originX: "center",
+    originY: "center",
     fill: BOUNDARY_STYLE.fill,
     stroke: BOUNDARY_STYLE.stroke,
     strokeWidth: BOUNDARY_STYLE.strokeWidth,

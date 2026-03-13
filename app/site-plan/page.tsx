@@ -66,6 +66,7 @@ import {
   Bold,
   Italic,
   ChevronRight,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep, getPrevStep } from "@/lib/step-flow";
@@ -78,6 +79,7 @@ import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
 import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
 import { ParcelManagementPanel, type DetectedRoad, type ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
+import { ShowDataPanel } from "@/components/site-plan/ShowDataPanel";
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
@@ -151,6 +153,7 @@ interface ProjectData {
   parcelGeometry: unknown;
   parcelsGeoJSON: unknown; // GeoJSON FeatureCollection with individual parcel features
   existingBuildingsGeoJSON: unknown; // GeoJSON FeatureCollection from IGN BDTOPO
+  precomputedSiteData?: unknown; // Pre-computed ProcessedSiteData from project creation
   pluSetbacks?: Record<string, number>;
 }
 
@@ -348,6 +351,8 @@ function SitePlanContent() {
   const [loadingEditorData, setLoadingEditorData] = useState(true);
   /** Fully pre-processed site data (boundary, edges, elevations) from process-geometry API */
   const [processedSiteData, setProcessedSiteData] = useState<ProcessedSiteData | null>(null);
+  /** Show Data panel visibility */
+  const [showDataPanel, setShowDataPanel] = useState(false);
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -905,6 +910,7 @@ function SitePlanContent() {
           parcelGeometry: p.parcelGeometry,
           parcelsGeoJSON: p.parcelsGeoJSON ?? null,
           existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
+          precomputedSiteData: p.processedSiteData ?? null,
         });
       })
       .catch(() => setProjectData(null));
@@ -1040,55 +1046,77 @@ function SitePlanContent() {
 
     setLoadingParcelsGeoJSON(true);
 
-    // Prefer parcelsGeoJSON (individual parcel features with metadata) over merged parcelGeometry
-    const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+    // ── Check for pre-computed data first (instant load) ─────────────────
+    // When the project was created, the process-geometry pipeline runs and
+    // saves ProcessedSiteData to the DB. Use it directly to skip the 2-3s API call.
+    let siteData: ProcessedSiteData | null = null;
 
-    // ── Parse GeoJSON into features for process-geometry API ──────────────
-    let parcelFeatures: any[] = [];
-    try {
-      const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
-      if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
-        parcelFeatures = parsed.features.filter((f: any) => {
-          const gt = f?.geometry?.type;
-          return gt === "Polygon" || gt === "MultiPolygon";
-        });
-      } else if (parsed?.type === "Feature" && parsed.geometry) {
-        parcelFeatures = [parsed];
-      } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
-        parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
+    if (projectData.precomputedSiteData) {
+      try {
+        siteData = projectData.precomputedSiteData as ProcessedSiteData;
+        console.log("[site-plan] Using pre-computed ProcessedSiteData from DB (instant load)");
+      } catch {
+        console.warn("[site-plan] Failed to parse pre-computed site data, falling back to API");
       }
-    } catch (e) {
-      console.warn("[site-plan] Failed to parse GeoJSON for process-geometry:", e);
     }
 
-    if (parcelFeatures.length === 0) {
-      setLoadingParcelsGeoJSON(false);
-      return;
+    // ── Fallback: call process-geometry API if no pre-computed data ──────
+    if (!siteData) {
+      const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+
+      let parcelFeatures: any[] = [];
+      try {
+        const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
+        if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
+          parcelFeatures = parsed.features.filter((f: any) => {
+            const gt = f?.geometry?.type;
+            return gt === "Polygon" || gt === "MultiPolygon";
+          });
+        } else if (parsed?.type === "Feature" && parsed.geometry) {
+          parcelFeatures = [parsed];
+        } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
+          parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
+        }
+      } catch (e) {
+        console.warn("[site-plan] Failed to parse GeoJSON for process-geometry:", e);
+      }
+
+      if (parcelFeatures.length === 0) {
+        setLoadingParcelsGeoJSON(false);
+        return;
+      }
+
+      try {
+        const apiPayload = {
+          parcels: parcelFeatures.map((f: any, idx: number) => ({
+            type: f.type,
+            properties: {
+              id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
+              section: f.properties?.section || f.properties?.SEC || "",
+              number: f.properties?.number || f.properties?.NUM || "",
+              area: f.properties?.area || f.properties?.contenance || 0,
+            },
+            geometry: f.geometry,
+          })),
+        };
+
+        const res = await fetch("/api/projects/process-geometry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(apiPayload),
+        });
+
+        if (res.ok) {
+          siteData = await res.json() as ProcessedSiteData;
+        }
+      } catch (err) {
+        console.error("[site-plan] process-geometry API error:", err);
+      }
     }
 
-    // ── Call process-geometry API for full pipeline ─────────────────────────
+    // ── Render with ProcessedSiteData (from DB or API) ───────────────────
     try {
-      const apiPayload = {
-        parcels: parcelFeatures.map((f: any, idx: number) => ({
-          type: f.type,
-          properties: {
-            id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
-            section: f.properties?.section || f.properties?.SEC || "",
-            number: f.properties?.number || f.properties?.NUM || "",
-            area: f.properties?.area || f.properties?.contenance || 0,
-          },
-          geometry: f.geometry,
-        })),
-      };
-
-      const res = await fetch("/api/projects/process-geometry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(apiPayload),
-      });
-
-      if (res.ok) {
-        const siteData: ProcessedSiteData = await res.json();
+      if (siteData) {
         setProcessedSiteData(siteData);
 
         // ── Render using the full pipeline (boundary + parcels + edge labels + NGF labels) ──
@@ -1157,8 +1185,9 @@ function SitePlanContent() {
           }
         }
       } else {
-        // Fallback to old pipeline if process-geometry API fails
-        console.warn("[site-plan] process-geometry API failed, falling back to parcelGeometryToShapes");
+        // Fallback to old pipeline if both pre-computed data and API failed
+        console.warn("[site-plan] No ProcessedSiteData available, falling back to parcelGeometryToShapes");
+        const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
         const shapes = parcelGeometryToShapes(geoSource, {
           canvasWidth: canvasSize.width,
           canvasHeight: canvasSize.height,
@@ -1168,6 +1197,8 @@ function SitePlanContent() {
           const poly = new fabric.Polygon(shape.points, {
             left: shape.left,
             top: shape.top,
+            originX: "center",
+            originY: "center",
             fill: "rgba(34, 197, 94, 0.15)",
             stroke: "#16a34a",
             strokeWidth: 2.5,
@@ -3253,6 +3284,19 @@ function SitePlanContent() {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+              <button
+                onClick={() => setShowDataPanel(!showDataPanel)}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                  showDataPanel
+                    ? "bg-indigo-500 text-white shadow-md"
+                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                )}
+                title="Show all processed site data"
+              >
+                <Database className="w-4 h-4" />
+                Show Data
+              </button>
               {saveStatus === 'saved' && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
@@ -3325,7 +3369,14 @@ function SitePlanContent() {
       </div>
 
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Show Data Panel (overlay) */}
+        {showDataPanel && (
+          <ShowDataPanel
+            data={processedSiteData}
+            onClose={() => setShowDataPanel(false)}
+          />
+        )}
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
           <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">

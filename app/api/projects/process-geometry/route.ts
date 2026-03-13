@@ -371,15 +371,62 @@ export async function POST(req: NextRequest) {
     lat: (bboxMinLat + bboxMaxLat) / 2,
   };
 
-  // ── Step 5: Fetch NGF elevations for all boundary vertices ────────────────
-  const elevationMap = await fetchElevations(boundaryVertexCoords);
+  // ── Step 5: Generate dense topography grid within the boundary ──────────
+  // Use turf.pointGrid to create a ~5m-spaced grid of sample points inside
+  // the global boundary. These will be used for smooth 3D terrain mesh.
+  let topoGridCoords: [number, number][] = [];
+  try {
+    // Convert 5 metres to approximate degrees (~0.000045° at mid-latitudes)
+    const cellSizeKm = 0.005; // 5m = 0.005km
+    const grid = turf.pointGrid(
+      [bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat],
+      cellSizeKm,
+      { units: "kilometers", mask: globalBoundary as Feature<Polygon> }
+    );
+    topoGridCoords = grid.features
+      .map((f) => f.geometry.coordinates as [number, number])
+      .filter(([lng, lat]) => isFinite(lng) && isFinite(lat));
+    // Cap at 500 points to avoid IGN rate limits
+    if (topoGridCoords.length > 500) {
+      // Increase cell size and regenerate
+      const scaleFactor = Math.ceil(Math.sqrt(topoGridCoords.length / 500));
+      const biggerGrid = turf.pointGrid(
+        [bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat],
+        cellSizeKm * scaleFactor,
+        { units: "kilometers", mask: globalBoundary as Feature<Polygon> }
+      );
+      topoGridCoords = biggerGrid.features
+        .map((f) => f.geometry.coordinates as [number, number])
+        .filter(([lng, lat]) => isFinite(lng) && isFinite(lat));
+    }
+  } catch (e) {
+    console.warn("process-geometry: topography grid generation failed:", e);
+    topoGridCoords = [];
+  }
 
-  // Build Vertex3D array
+  // ── Step 6: Fetch NGF elevations for boundary vertices + topo grid ────────
+  // Combine all coords into a single batch to minimize IGN API calls
+  const allCoords: [number, number][] = [
+    ...boundaryVertexCoords,
+    ...topoGridCoords,
+  ];
+  const elevationMap = await fetchElevations(allCoords);
+
+  // Build Vertex3D array for boundary vertices
   const vertices3D: Vertex3D[] = boundaryVertexCoords.map(([lng, lat]) => {
     const key = `${lng.toFixed(8)},${lat.toFixed(8)}`;
     const elevation = elevationMap.get(key) ?? 0;
     return { lng, lat, elevation };
   });
+
+  // Build topography grid Vertex3D array
+  const topographyGrid: Vertex3D[] = topoGridCoords
+    .map(([lng, lat]) => {
+      const key = `${lng.toFixed(8)},${lat.toFixed(8)}`;
+      const elevation = elevationMap.get(key) ?? 0;
+      return { lng, lat, elevation };
+    })
+    .filter((v) => v.elevation !== 0); // Only include points with valid elevation
 
   // Build EdgeMeasurement array with elevation data
   const edges: EdgeMeasurement[] = rawEdges.map((e) => {
@@ -400,22 +447,25 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  // ── Step 6: Compute elevation stats ───────────────────────────────────────
-  const elevationValues = vertices3D.map((v) => v.elevation).filter((z) => z !== 0);
-  const minElevation = elevationValues.length > 0 ? Math.min(...elevationValues) : 0;
-  const maxElevation = elevationValues.length > 0 ? Math.max(...elevationValues) : 0;
+  // ── Step 7: Compute elevation stats (using ALL elevation sources) ─────────
+  const allElevations = [...vertices3D, ...topographyGrid]
+    .map((v) => v.elevation)
+    .filter((z) => z !== 0);
+  const minElevation = allElevations.length > 0 ? Math.min(...allElevations) : 0;
+  const maxElevation = allElevations.length > 0 ? Math.max(...allElevations) : 0;
   const meanElevation =
-    elevationValues.length > 0
+    allElevations.length > 0
       ? Math.round(
-          (elevationValues.reduce((s, v) => s + v, 0) / elevationValues.length) * 100
-        ) / 100
+        (allElevations.reduce((s, v) => s + v, 0) / allElevations.length) * 100
+      ) / 100
       : 0;
 
   // Compute slope between min and max elevation vertices
   let slopePercent: number | null = null;
-  if (elevationValues.length >= 2 && maxElevation !== minElevation) {
-    const minVtx = vertices3D.find((v) => v.elevation === minElevation)!;
-    const maxVtx = vertices3D.find((v) => v.elevation === maxElevation)!;
+  const allVerts = [...vertices3D, ...topographyGrid];
+  if (allElevations.length >= 2 && maxElevation !== minElevation) {
+    const minVtx = allVerts.find((v) => v.elevation === minElevation)!;
+    const maxVtx = allVerts.find((v) => v.elevation === maxElevation)!;
     const horizDist = turf.distance(
       turf.point([minVtx.lng, minVtx.lat]),
       turf.point([maxVtx.lng, maxVtx.lat]),
@@ -427,12 +477,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Step 7: Assemble & return ProcessedSiteData ───────────────────────────
+  // ── Step 8: Assemble & return ProcessedSiteData ───────────────────────────
   const result: ProcessedSiteData = {
     parcels: processedParcels,
     globalBoundary,
     edges,
     vertices3D,
+    topographyGrid,
     refPoint,
     stats: {
       minElevation,
@@ -444,3 +495,4 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(result);
 }
+
