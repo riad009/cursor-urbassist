@@ -160,7 +160,9 @@ export function renderProcessedSite(
   const boundaryPoly = new fabric.Polygon(projected.boundary.points, {
     left: projected.boundary.left,
     top: projected.boundary.top,
-    fill: "transparent",                     // No fill — individual parcels handle it
+    originX: "center",
+    originY: "center",
+    fill: BOUNDARY_STYLE.fill,
     stroke: BOUNDARY_STYLE.stroke,
     strokeWidth: BOUNDARY_STYLE.strokeWidth,
     strokeDashArray: [10, 5],                // Dashed line for property boundary

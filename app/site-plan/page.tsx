@@ -66,6 +66,7 @@ import {
   Bold,
   Italic,
   ChevronRight,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep, getPrevStep } from "@/lib/step-flow";
@@ -81,6 +82,7 @@ import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
 import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
 import { ParcelManagementPanel, type DetectedRoad, type ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
+import { ShowDataPanel } from "@/components/site-plan/ShowDataPanel";
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
@@ -154,6 +156,7 @@ interface ProjectData {
   parcelGeometry: unknown;
   parcelsGeoJSON: unknown; // GeoJSON FeatureCollection with individual parcel features
   existingBuildingsGeoJSON: unknown; // GeoJSON FeatureCollection from IGN BDTOPO
+  precomputedSiteData?: unknown; // Pre-computed ProcessedSiteData from project creation
   pluSetbacks?: Record<string, number>;
 }
 
@@ -352,6 +355,8 @@ function SitePlanContent() {
   const [loadingEditorData, setLoadingEditorData] = useState(true);
   /** Fully pre-processed site data (boundary, edges, elevations) from process-geometry API */
   const [processedSiteData, setProcessedSiteData] = useState<ProcessedSiteData | null>(null);
+  /** Show Data panel visibility */
+  const [showDataPanel, setShowDataPanel] = useState(false);
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -909,6 +914,7 @@ function SitePlanContent() {
           parcelGeometry: p.parcelGeometry,
           parcelsGeoJSON: p.parcelsGeoJSON ?? null,
           existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
+          precomputedSiteData: p.processedSiteData ?? null,
         });
 
         // ── COMPUTE SHIFT: Load pre-computed ProcessedSiteData from DB ──
@@ -1049,12 +1055,24 @@ function SitePlanContent() {
     parcelsDrawnFromGeometryRef.current = currentProjectId;
     setLoadingParcelsGeoJSON(true);
 
-    // ── Resolve processedSiteData: DB first, then API fallback ──
-    let siteData = processedSiteData;
+    // ── Check for pre-computed data first (instant load) ─────────────────
+    // When the project was created, the process-geometry pipeline runs and
+    // saves ProcessedSiteData to the DB. Use it directly to skip the 2-3s API call.
+    let siteData: ProcessedSiteData | null = null;
 
-    if (!siteData && (projectData?.parcelsGeoJSON || projectData?.parcelGeometry)) {
-      // Fallback: call process-geometry API for projects that don't have DB-stored data
+    if (projectData.precomputedSiteData) {
+      try {
+        siteData = projectData.precomputedSiteData as ProcessedSiteData;
+        console.log("[site-plan] Using pre-computed ProcessedSiteData from DB (instant load)");
+      } catch {
+        console.warn("[site-plan] Failed to parse pre-computed site data, falling back to API");
+      }
+    }
+
+    // ── Fallback: call process-geometry API if no pre-computed data ──────
+    if (!siteData) {
       const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+
       let parcelFeatures: any[] = [];
       try {
         const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
@@ -1068,48 +1086,118 @@ function SitePlanContent() {
         } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
           parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
         }
-      } catch { /* ignore parse errors */ }
+      } catch (e) {
+        console.warn("[site-plan] Failed to parse GeoJSON for process-geometry:", e);
+      }
 
-      if (parcelFeatures.length > 0) {
-        try {
-          const res = await fetch("/api/projects/process-geometry", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              parcels: parcelFeatures.map((f: any, idx: number) => ({
-                type: f.type,
-                properties: {
-                  id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
-                  section: f.properties?.section || f.properties?.SEC || "",
-                  number: f.properties?.number || f.properties?.NUM || "",
-                  area: f.properties?.area || f.properties?.contenance || 0,
-                },
-                geometry: f.geometry,
-              })),
-            }),
-          });
-          if (res.ok) {
-            siteData = await res.json() as ProcessedSiteData;
-            setProcessedSiteData(siteData);
-          }
-        } catch (err) {
-          console.error("[site-plan] process-geometry API fallback failed:", err);
+      if (parcelFeatures.length === 0) {
+        setLoadingParcelsGeoJSON(false);
+        return;
+      }
+
+      try {
+        const apiPayload = {
+          parcels: parcelFeatures.map((f: any, idx: number) => ({
+            type: f.type,
+            properties: {
+              id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
+              section: f.properties?.section || f.properties?.SEC || "",
+              number: f.properties?.number || f.properties?.NUM || "",
+              area: f.properties?.area || f.properties?.contenance || 0,
+            },
+            geometry: f.geometry,
+          })),
+        };
+
+        const res = await fetch("/api/projects/process-geometry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(apiPayload),
+        });
+
+        if (res.ok) {
+          siteData = await res.json() as ProcessedSiteData;
         }
+      } catch (err) {
+        console.error("[site-plan] process-geometry API error:", err);
       }
     }
 
-    if (!siteData) {
-      setLoadingParcelsGeoJSON(false);
-      return;
-    }
-
+    // ── Render with ProcessedSiteData (from DB or API) ───────────────────
     try {
-      // ── Render using the full pipeline (boundary + edge labels + NGF labels) ──
-      const projected = renderProcessedSite(
-        fabric as any,
-        canvas as any,
-        siteData,
-        {
+      if (siteData) {
+        setProcessedSiteData(siteData);
+
+        // ── Render using the full pipeline (boundary + parcels + edge labels + NGF labels) ──
+        const projected = renderProcessedSite(
+          fabric as any,
+          canvas as any,
+          siteData,
+          {
+            canvasWidth: canvasSize.width,
+            canvasHeight: canvasSize.height,
+            pixelsPerMeter: currentScale.pixelsPerMeter,
+          }
+        );
+
+        // Also set elevation points from the processed data for the terrain store
+        if (siteData.vertices3D && siteData.vertices3D.length > 0) {
+          const pts = siteData.vertices3D
+            .filter(v => v.elevation > 0)
+            .map((v, i) => {
+              const canvasPos = projected.vertexLabels[i]?.position;
+              return canvasPos ? {
+                id: `ngf-${i}`,
+                x: canvasPos.x,
+                y: canvasPos.y,
+                value: v.elevation,
+              } : null;
+            })
+            .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
+          if (pts.length > 0) setElevationPoints(pts);
+        }
+
+        // ── Auto-zoom-to-fit the projected boundary ────────────────────────
+        const boundary = projected.boundary;
+        if (boundary && boundary.points.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          boundary.points.forEach((p) => {
+            const px = boundary.left + p.x;
+            const py = boundary.top + p.y;
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+            maxX = Math.max(maxX, px);
+            maxY = Math.max(maxY, py);
+          });
+          if (minX !== Infinity) {
+            const parcelsW = maxX - minX;
+            const parcelsH = maxY - minY;
+            const containerEl = containerRef?.current;
+            const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+            const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+            const padding = 60;
+            const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
+            const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
+            const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
+            if (targetZoom > 0 && isFinite(targetZoom)) {
+              const centerPX = (minX + maxX) / 2;
+              const centerPY = (minY + maxY) / 2;
+              canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+              const vpt: [number, number, number, number, number, number] = [
+                targetZoom, 0, 0, targetZoom,
+                viewW / 2 - centerPX * targetZoom,
+                viewH / 2 - centerPY * targetZoom,
+              ];
+              canvas.setViewportTransform(vpt);
+              setZoom(Math.round(targetZoom * 100));
+            }
+          }
+        }
+      } else {
+        // Fallback to old pipeline if both pre-computed data and API failed
+        console.warn("[site-plan] No ProcessedSiteData available, falling back to parcelGeometryToShapes");
+        const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+        const shapes = parcelGeometryToShapes(geoSource, {
           canvasWidth: canvasSize.width,
           canvasHeight: canvasSize.height,
           pixelsPerMeter: currentScale.pixelsPerMeter,
@@ -1145,29 +1233,24 @@ function SitePlanContent() {
           maxX = Math.max(maxX, px);
           maxY = Math.max(maxY, py);
         });
-        if (minX !== Infinity) {
-          const parcelsW = maxX - minX;
-          const parcelsH = maxY - minY;
-          const containerEl = containerRef?.current;
-          const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
-          const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
-          const padding = 60;
-          const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
-          const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
-          const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
-          if (targetZoom > 0 && isFinite(targetZoom)) {
-            const centerPX = (minX + maxX) / 2;
-            const centerPY = (minY + maxY) / 2;
-            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-            const vpt: [number, number, number, number, number, number] = [
-              targetZoom, 0, 0, targetZoom,
-              viewW / 2 - centerPX * targetZoom,
-              viewH / 2 - centerPY * targetZoom,
-            ];
-            canvas.setViewportTransform(vpt);
-            setZoom(Math.round(targetZoom * 100));
-          }
-        }
+        shapes.forEach((shape, idx) => {
+          const poly = new fabric.Polygon(shape.points, {
+            left: shape.left,
+            top: shape.top,
+            originX: "center",
+            originY: "center",
+            fill: "rgba(34, 197, 94, 0.15)",
+            stroke: "#16a34a",
+            strokeWidth: 2.5,
+            strokeLineJoin: "round",
+          });
+          (poly as any).id = `parcel-geo-${currentProjectId}-${idx}`;
+          (poly as any).elementName = `Parcel ${idx + 1}`;
+          (poly as any).isParcel = true;
+          (poly as any).excludeFromExport = false;
+          canvas.add(poly);
+          canvas.sendObjectToBack(poly);
+        });
       }
     } catch (err) {
       console.error("[site-plan] Error in drawParcelsFromProjectData:", err);
@@ -3252,6 +3335,19 @@ function SitePlanContent() {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+              <button
+                onClick={() => setShowDataPanel(!showDataPanel)}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                  showDataPanel
+                    ? "bg-indigo-500 text-white shadow-md"
+                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                )}
+                title="Show all processed site data"
+              >
+                <Database className="w-4 h-4" />
+                Show Data
+              </button>
               {saveStatus === 'saved' && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
@@ -3324,7 +3420,14 @@ function SitePlanContent() {
       </div>
 
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Show Data Panel (overlay) */}
+        {showDataPanel && (
+          <ShowDataPanel
+            data={processedSiteData}
+            onClose={() => setShowDataPanel(false)}
+          />
+        )}
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
           <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">

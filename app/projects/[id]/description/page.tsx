@@ -237,7 +237,7 @@ export default function ProjectDescriptionPage({ params }: { params: Promise<{ i
     const hasRoofType = roofType.length > 0;
     const canLaunchPlu = hasDescription && hasRoofType && !!project.coordinates;
 
-    const SectionHeader = ({ id, title, icon: Icon }: { id: string; title: string; icon: React.ElementType }) => (
+    const SectionHeader = ({ id, title, icon: Icon }: { id: string; title: string; icon: React.ComponentType<{ className?: string }> }) => (
         <button
             onClick={() => toggleSection(id)}
             className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"

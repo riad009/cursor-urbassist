@@ -171,9 +171,73 @@ export async function POST(request: NextRequest) {
         })),
       });
     }
+
+    // ── Pre-process parcel geometry (async, fire-and-forget) ──────────────
+    // This runs the full GIS pipeline (merge → boundary → edges → NGF elevations)
+    // and saves the result so the site-plan editor can load instantly.
+    if (parcelsGeoJSON || parcelGeometry) {
+      (async () => {
+        try {
+          const geoSource = parcelsGeoJSON || (typeof parcelGeometry === "string" ? JSON.parse(parcelGeometry) : parcelGeometry);
+          let parcelFeatures: { type: string; properties: Record<string, unknown>; geometry: unknown }[] = [];
+
+          if (geoSource?.type === "FeatureCollection" && Array.isArray(geoSource.features)) {
+            parcelFeatures = geoSource.features.filter((f: { geometry?: { type?: string } }) => {
+              const gt = f?.geometry?.type;
+              return gt === "Polygon" || gt === "MultiPolygon";
+            });
+          } else if (geoSource?.type === "Feature" && geoSource.geometry) {
+            parcelFeatures = [geoSource];
+          } else if (geoSource?.type === "Polygon" || geoSource?.type === "MultiPolygon") {
+            parcelFeatures = [{ type: "Feature", properties: {}, geometry: geoSource }];
+          }
+
+          if (parcelFeatures.length > 0) {
+            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+              ? `https://${process.env.VERCEL_URL}`
+              : "http://localhost:3000";
+
+            const apiPayload = {
+              parcels: parcelFeatures.map((f: { type: string; properties?: Record<string, unknown>; geometry: unknown }, idx: number) => ({
+                type: f.type,
+                properties: {
+                  id: (f.properties as Record<string, unknown>)?.id || (f.properties as Record<string, unknown>)?.IDU || `parcel-${idx}`,
+                  section: (f.properties as Record<string, unknown>)?.section || (f.properties as Record<string, unknown>)?.SEC || "",
+                  number: (f.properties as Record<string, unknown>)?.number || (f.properties as Record<string, unknown>)?.NUM || "",
+                  area: (f.properties as Record<string, unknown>)?.area || (f.properties as Record<string, unknown>)?.contenance || 0,
+                },
+                geometry: f.geometry,
+              })),
+            };
+
+            const res = await fetch(`${baseUrl}/api/projects/process-geometry`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(apiPayload),
+            });
+
+            if (res.ok) {
+              const processedData = await res.json();
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (prisma.project.update as any)({
+                where: { id: project.id },
+                data: { processed_site_data: processedData },
+              });
+              console.log(`[project-create] Pre-processed site data saved for project ${project.id}`);
+            } else {
+              console.warn(`[project-create] process-geometry failed for project ${project.id}: ${res.status}`);
+            }
+          }
+        } catch (err) {
+          console.warn("[project-create] Background process-geometry error:", err);
+        }
+      })();
+    }
+
     return NextResponse.json({ project });
   } catch (error) {
     console.error("Create project:", error);
     return NextResponse.json({ error: "Failed to create project" }, { status: 500 });
   }
 }
+

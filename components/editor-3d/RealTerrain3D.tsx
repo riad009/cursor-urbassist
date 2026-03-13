@@ -95,8 +95,8 @@ function TerrainMesh({ data }: TerrainMeshProps) {
     const ringLen = primaryRing.length;
     const limit =
       ringLen > 1 &&
-      primaryRing[0][0] === primaryRing[ringLen - 1][0] &&
-      primaryRing[0][1] === primaryRing[ringLen - 1][1]
+        primaryRing[0][0] === primaryRing[ringLen - 1][0] &&
+        primaryRing[0][1] === primaryRing[ringLen - 1][1]
         ? ringLen - 1
         : ringLen;
 

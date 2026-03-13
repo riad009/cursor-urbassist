@@ -144,7 +144,7 @@ const statusConfig = {
   info: { label: "Info", color: "text-blue-600", bg: "bg-blue-100", icon: Info },
 };
 
-const categoryIcons: Record<string, React.ElementType> = {
+const categoryIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   Height: Building2,
   Setback: Ruler,
   Coverage: Home,
@@ -575,7 +575,7 @@ function RegulationsPageContent() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       setFile(e.dataTransfer.files[0]);
     }
@@ -589,9 +589,9 @@ function RegulationsPageContent() {
 
   const analyzeDocument = async () => {
     if (!file) return;
-    
+
     setIsAnalyzing(true);
-    
+
     try {
       let documentContent = "";
       // Use upload-document API for PDF/DOC parsing, fallback to file.text() for TXT
@@ -604,7 +604,7 @@ function RegulationsPageContent() {
       } else {
         documentContent = await file.text();
       }
-      
+
       // Call the AI analysis API
       const response = await fetch('/api/analyze-plu', {
         method: 'POST',
@@ -615,9 +615,9 @@ function RegulationsPageContent() {
           documentContent,
         }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success && data.analysis) {
         // Phase 4: prefer pluRules for numerical values
         const pr = data.pluRules as Record<string, unknown> | undefined;
@@ -695,7 +695,7 @@ function RegulationsPageContent() {
             value: pr.greenSpaceRequirements as string,
             requirement: `Minimum ${pr.greenSpaceRequirements} permeable/vegetated surface`,
             recommendation: "Semi-permeable surfaces count toward this minimum.",
-        regulationSource,
+            regulationSource,
             zoneLabel,
           });
         }
@@ -728,7 +728,7 @@ function RegulationsPageContent() {
       // Fallback to mock data on error
       setResults(mockAnalysis);
     }
-    
+
     setAnalysisComplete(true);
     setIsAnalyzing(false);
   };
@@ -861,7 +861,7 @@ function RegulationsPageContent() {
 
   const askAIForDetails = async () => {
     if (!selectedResult || !aiQuestion.trim()) return;
-    
+
     setIsAskingAI(true);
     try {
       const response = await fetch('/api/analyze-plu', {
@@ -878,10 +878,10 @@ Context:
 - Status: ${selectedResult.status}`,
         }),
       });
-      
+
       const data = await response.json();
       if (data.success && data.analysis) {
-        setAiResponse(data.analysis.recommendations?.join('\n') || 
+        setAiResponse(data.analysis.recommendations?.join('\n') ||
           `Based on the ${selectedResult.category} analysis:\n\n` +
           `Your current value of ${selectedResult.value} is ${selectedResult.status === 'compliant' ? 'within' : 'outside'} the required parameters.\n\n` +
           `Recommendation: ${selectedResult.recommendation}`);
@@ -969,223 +969,223 @@ Context:
                   From project
                 </button>
               </div>
-            {analysisMode === "document" ? (
-              <div
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                className={cn(
-                  "relative border-2 border-dashed rounded-2xl p-8 text-center transition-all",
-                  dragActive
-                    ? "border-blue-500 bg-blue-50"
-                    : file
-                    ? "border-emerald-500/50 bg-emerald-500/5"
-                    : "border-slate-300 hover:border-white/40 bg-slate-100/30"
-                )}
-              >
-                {!file && (
-                  <input
-                    type="file"
-                    accept=".pdf,.doc,.docx,.txt"
-                    onChange={handleFileChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                )}
-                
-                {file ? (
-                  <div className="space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto">
-                      <FileText className="w-8 h-8 text-emerald-600" />
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-slate-900">{file.name}</p>
-                      <p className="text-sm text-slate-400 mt-1">
-                        {(file.size / 1024 / 1024).toFixed(2)} MB • Ready to analyze
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-center gap-3">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          analyzeDocument();
-                        }}
-                        disabled={isAnalyzing}
-                        className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50"
-                      >
-                        {isAnalyzing ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Analyzing...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-5 h-5" />
-                            Start AI Analysis
-                          </>
-                        )}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setFile(null);
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-100 text-slate-600 font-medium hover:bg-slate-200 transition-all"
-                      >
-                        Change File
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
-                      <Upload className="w-8 h-8 text-slate-400" />
-                    </div>
-                    <div>
-                      <p className="text-lg font-semibold text-slate-900">Drop your PLU document here</p>
-                      <p className="text-sm text-slate-400 mt-1">or click to browse files</p>
-                    </div>
-                    <p className="text-xs text-slate-500">Supports PDF, DOC, DOCX, TXT up to 50MB</p>
-                  </div>
-                )}
-              </div>
-            ) : analysisMode === "project" ? (
-              <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
-                <div className="space-y-4">
-                  <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
-                    <MapPin className="w-8 h-8 text-violet-400" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900 mb-2">Automatic regulatory from project</p>
-                    <p className="text-sm text-slate-400">Run PLU detection and save zone + PDF URL to the project (project must have address and coordinates).</p>
-                  </div>
-                  <select
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900"
-                  >
-                    <option value="">Select project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}{p.address ? ` — ${p.address}` : ""}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => runAutoRegulatory()}
-                    disabled={!selectedProjectId || autoRunning}
-                    className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg transition-all disabled:opacity-50"
-                  >
-                    {autoRunning ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Running deep PLU analysis…
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-5 h-5" />
-                        Run deep PLU analysis (3 credits)
-                      </>
-                    )}
-                  </button>
-                  <p className="text-xs text-slate-500">The analysis covers articles 1–16 (CNIG standard): occupations, setbacks, height, coverage, parking, green space, architecture, risks, etc.</p>
-                  {autoMessage && (
-                    <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-600" : "text-red-600")}>
-                      {autoMessage.text}
-                    </p>
+              {analysisMode === "document" ? (
+                <div
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  className={cn(
+                    "relative border-2 border-dashed rounded-2xl p-8 text-center transition-all",
+                    dragActive
+                      ? "border-blue-500 bg-blue-50"
+                      : file
+                        ? "border-emerald-500/50 bg-emerald-500/5"
+                        : "border-slate-300 hover:border-white/40 bg-slate-100/30"
                   )}
-                  {/* Fallback: upload your own PLU if zone not detected */}
-                  {showUploadFallback && (
-                    <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-3">
-                      <p className="text-sm font-medium text-amber-700">
-                        Zone not detected automatically. Upload your PLU document for analysis.
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        If the address is in an area without digitized PLU, or if the detected zone is uncertain, you can upload the PLU regulation PDF yourself.
-                      </p>
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.txt"
-                        onChange={(e) => setFallbackFile(e.target.files?.[0] || null)}
-                        className="block text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      />
-                      {fallbackFile && (
+                >
+                  {!file && (
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleFileChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                  )}
+
+                  {file ? (
+                    <div className="space-y-4">
+                      <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto">
+                        <FileText className="w-8 h-8 text-emerald-600" />
+                      </div>
+                      <div>
+                        <p className="text-lg font-semibold text-slate-900">{file.name}</p>
+                        <p className="text-sm text-slate-400 mt-1">
+                          {(file.size / 1024 / 1024).toFixed(2)} MB • Ready to analyze
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-center gap-3">
                         <button
-                          type="button"
-                          onClick={handleFallbackUpload}
-                          disabled={uploadingFallback || autoRunning}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/30 text-amber-700 text-sm font-medium hover:bg-amber-500/50 disabled:opacity-50"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            analyzeDocument();
+                          }}
+                          disabled={isAnalyzing}
+                          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50"
                         >
-                          {uploadingFallback ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                          Analyze uploaded PLU (3 credits)
+                          {isAnalyzing ? (
+                            <>
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              Analyzing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-5 h-5" />
+                              Start AI Analysis
+                            </>
+                          )}
                         </button>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setFile(null);
+                          }}
+                          className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-100 text-slate-600 font-medium hover:bg-slate-200 transition-all"
+                        >
+                          Change File
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto">
+                        <Upload className="w-8 h-8 text-slate-400" />
+                      </div>
+                      <div>
+                        <p className="text-lg font-semibold text-slate-900">Drop your PLU document here</p>
+                        <p className="text-sm text-slate-400 mt-1">or click to browse files</p>
+                      </div>
+                      <p className="text-xs text-slate-500">Supports PDF, DOC, DOCX, TXT up to 50MB</p>
+                    </div>
+                  )}
+                </div>
+              ) : analysisMode === "project" ? (
+                <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
+                  <div className="space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
+                      <MapPin className="w-8 h-8 text-violet-400" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-slate-900 mb-2">Automatic regulatory from project</p>
+                      <p className="text-sm text-slate-400">Run PLU detection and save zone + PDF URL to the project (project must have address and coordinates).</p>
+                    </div>
+                    <select
+                      value={selectedProjectId}
+                      onChange={(e) => setSelectedProjectId(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-900"
+                    >
+                      <option value="">Select project</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}{p.address ? ` — ${p.address}` : ""}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => runAutoRegulatory()}
+                      disabled={!selectedProjectId || autoRunning}
+                      className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-slate-900 font-semibold hover:shadow-lg transition-all disabled:opacity-50"
+                    >
+                      {autoRunning ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Running deep PLU analysis…
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-5 h-5" />
+                          Run deep PLU analysis (3 credits)
+                        </>
+                      )}
+                    </button>
+                    <p className="text-xs text-slate-500">The analysis covers articles 1–16 (CNIG standard): occupations, setbacks, height, coverage, parking, green space, architecture, risks, etc.</p>
+                    {autoMessage && (
+                      <p className={cn("text-sm", autoMessage.type === "success" ? "text-emerald-600" : "text-red-600")}>
+                        {autoMessage.text}
+                      </p>
+                    )}
+                    {/* Fallback: upload your own PLU if zone not detected */}
+                    {showUploadFallback && (
+                      <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-3">
+                        <p className="text-sm font-medium text-amber-700">
+                          Zone not detected automatically. Upload your PLU document for analysis.
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          If the address is in an area without digitized PLU, or if the detected zone is uncertain, you can upload the PLU regulation PDF yourself.
+                        </p>
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.txt"
+                          onChange={(e) => setFallbackFile(e.target.files?.[0] || null)}
+                          className="block text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                        />
+                        {fallbackFile && (
+                          <button
+                            type="button"
+                            onClick={handleFallbackUpload}
+                            disabled={uploadingFallback || autoRunning}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/30 text-amber-700 text-sm font-medium hover:bg-amber-500/50 disabled:opacity-50"
+                          >
+                            {uploadingFallback ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                            Analyze uploaded PLU (3 credits)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
+                  <div className="space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
+                      <MapPin className="w-8 h-8 text-violet-400" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-slate-900 mb-2">Enter address for PLU zone detection</p>
+                      <p className="text-sm text-slate-400">We'll detect the PLU zone and basic regulations from the address</p>
+                    </div>
+                    <div className="relative overflow-visible">
+                      <input
+                        type="text"
+                        value={addressForPlu}
+                        onChange={(e) => setAddressForPlu(e.target.value)}
+                        onFocus={() => addressForPlu.trim().length >= 3 && searchAddressForPlu()}
+                        placeholder="e.g. 5 rue de la République, 06000 Nice"
+                        className="w-full px-4 py-3 pr-10 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                        autoComplete="off"
+                      />
+                      {loadingAddress && (
+                        <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin pointer-events-none" />
+                      )}
+                      {addressSearchDone && !loadingAddress && addressSuggestions.length === 0 && addressForPlu.trim().length >= 3 && (
+                        <p className="absolute top-full left-0 right-0 mt-2 text-xs text-slate-500">No addresses found. Try a different search.</p>
+                      )}
+                      {addressSuggestions.length > 0 && (
+                        <ul className="absolute top-full left-0 right-0 mt-1 rounded-xl bg-slate-100 border border-slate-200 shadow-xl z-50 max-h-60 overflow-y-auto">
+                          {addressSuggestions.map((a, i) => (
+                            <li key={i}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (a.coordinates && a.coordinates.length >= 2) {
+                                    setAddressForPlu(a.label);
+                                    setAddressSuggestions([]);
+                                    analyzeByAddress(a.coordinates);
+                                  }
+                                }}
+                                className="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-100 first:rounded-t-xl last:rounded-b-xl transition-colors"
+                              >
+                                {a.label}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 bg-slate-100/30">
-                <div className="space-y-4">
-                  <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center mx-auto">
-                    <MapPin className="w-8 h-8 text-violet-400" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900 mb-2">Enter address for PLU zone detection</p>
-                    <p className="text-sm text-slate-400">We'll detect the PLU zone and basic regulations from the address</p>
-                  </div>
-                  <div className="relative overflow-visible">
-                    <input
-                      type="text"
-                      value={addressForPlu}
-                      onChange={(e) => setAddressForPlu(e.target.value)}
-                      onFocus={() => addressForPlu.trim().length >= 3 && searchAddressForPlu()}
-                      placeholder="e.g. 5 rue de la République, 06000 Nice"
-                      className="w-full px-4 py-3 pr-10 rounded-xl bg-slate-100 border border-slate-200 text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-                      autoComplete="off"
-                    />
-                    {loadingAddress && (
-                      <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin pointer-events-none" />
-                    )}
-                    {addressSearchDone && !loadingAddress && addressSuggestions.length === 0 && addressForPlu.trim().length >= 3 && (
-                      <p className="absolute top-full left-0 right-0 mt-2 text-xs text-slate-500">No addresses found. Try a different search.</p>
-                    )}
-                    {addressSuggestions.length > 0 && (
-                      <ul className="absolute top-full left-0 right-0 mt-1 rounded-xl bg-slate-100 border border-slate-200 shadow-xl z-50 max-h-60 overflow-y-auto">
-                        {addressSuggestions.map((a, i) => (
-                          <li key={i}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (a.coordinates && a.coordinates.length >= 2) {
-                                  setAddressForPlu(a.label);
-                                  setAddressSuggestions([]);
-                                  analyzeByAddress(a.coordinates);
-                                }
-                              }}
-                              className="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-100 first:rounded-t-xl last:rounded-b-xl transition-colors"
-                            >
-                              {a.label}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => searchAddressForPlu()}
-                      disabled={addressForPlu.trim().length < 3 || loadingAddress}
-                      className="px-4 py-2 rounded-lg bg-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loadingAddress ? "Searching…" : "Search addresses"}
-                    </button>
-                    <p className="text-xs text-slate-500">Type 3+ characters, then pick an address to analyze PLU zone.</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => searchAddressForPlu()}
+                        disabled={addressForPlu.trim().length < 3 || loadingAddress}
+                        className="px-4 py-2 rounded-lg bg-violet-500/30 text-violet-300 text-sm font-medium hover:bg-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {loadingAddress ? "Searching…" : "Search addresses"}
+                      </button>
+                      <p className="text-xs text-slate-500">Type 3+ characters, then pick an address to analyze PLU zone.</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
               {isAnalyzing && (
                 <div className="p-6 rounded-2xl bg-white border border-slate-200">
@@ -1419,7 +1419,7 @@ Context:
                         </div>
                       )}
                     </div>
-                    <button 
+                    <button
                       onClick={() => {
                         setShowAiDialog(true);
                         setAiQuestion('');
@@ -1430,7 +1430,7 @@ Context:
                       <MessageSquare className="w-4 h-4" />
                       Ask AI for Details
                     </button>
-                    
+
                     {/* AI Dialog */}
                     {showAiDialog && (
                       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1441,12 +1441,12 @@ Context:
                               ✕
                             </button>
                           </div>
-                          
+
                           <div className="p-3 rounded-xl bg-white text-sm text-slate-600">
                             <p><strong>Current:</strong> {selectedResult?.value}</p>
                             <p><strong>Requirement:</strong> {selectedResult?.requirement}</p>
                           </div>
-                          
+
                           <div>
                             <label className="text-sm text-slate-400 block mb-2">Your question:</label>
                             <textarea
@@ -1457,7 +1457,7 @@ Context:
                               rows={3}
                             />
                           </div>
-                          
+
                           <button
                             onClick={askAIForDetails}
                             disabled={isAskingAI || !aiQuestion.trim()}
@@ -1469,7 +1469,7 @@ Context:
                               <><Sparkles className="w-5 h-5" /> Get AI Answer</>
                             )}
                           </button>
-                          
+
                           {aiResponse && (
                             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
                               <p className="text-sm font-medium text-emerald-600 mb-2">AI Response:</p>

@@ -38,7 +38,7 @@ interface ExportFormat {
   id: string;
   name: string;
   description: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   formats: string[];
   color: string;
 }
@@ -109,7 +109,7 @@ function CreditUsageTrigger() {
     fetch("/api/credits?usage=true")
       .then((r) => r.json())
       .then((d) => setData(d.usage || null))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [open, data]);
   return (
@@ -261,64 +261,64 @@ function ExportPageContent() {
 
   const handleExport = async () => {
     setIsExporting(true);
-    
+
     try {
       // Create a canvas element to generate the export
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      
+
       // Set canvas size based on paper selection (at 72 DPI for preview)
-      const sizes: Record<string, {w: number, h: number}> = {
+      const sizes: Record<string, { w: number, h: number }> = {
         a4: { w: 595, h: 842 },
         a3: { w: 842, h: 1190 },
         a2: { w: 1190, h: 1684 },
         a1: { w: 1684, h: 2384 },
         a0: { w: 2384, h: 3370 },
       };
-      
+
       const size = sizes[selectedPaper] || sizes.a3;
       canvas.width = size.w;
       canvas.height = size.h;
-      
+
       if (ctx) {
         // White background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+
         // Border
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 2;
         ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
-        
+
         // Title block
         const titleBlockHeight = 80;
         const titleBlockWidth = canvas.width / 2;
         ctx.strokeRect(canvas.width - titleBlockWidth - 20, canvas.height - titleBlockHeight - 20, titleBlockWidth, titleBlockHeight);
-        
+
         // Title text
         ctx.fillStyle = '#000000';
         ctx.font = 'bold 16px Arial';
         ctx.fillText(projectInfo.projectName, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight);
-        
+
         ctx.font = '12px Arial';
         ctx.fillText(`Client: ${projectInfo.clientName}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 20);
         ctx.fillText(`Location: ${projectInfo.location}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 35);
         ctx.fillText(`Scale: ${selectedScale}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 50);
         ctx.fillText(`Date: ${projectInfo.date}`, canvas.width - titleBlockWidth - 10, canvas.height - titleBlockHeight + 65);
         ctx.fillText(projectInfo.architect, canvas.width - 150, canvas.height - 30);
-        
+
         // Main content area placeholder
         ctx.strokeStyle = '#cccccc';
         ctx.setLineDash([5, 5]);
         ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - titleBlockHeight - 80);
         ctx.setLineDash([]);
-        
+
         ctx.font = '14px Arial';
         ctx.fillStyle = '#666666';
         ctx.textAlign = 'center';
         ctx.fillText('Architectural Plan - ' + selectedFormat.toUpperCase(), canvas.width / 2, canvas.height / 2);
         ctx.fillText(selectedScale, canvas.width / 2, canvas.height / 2 + 25);
-        
+
         // Scale bar
         if (includeOptions.find(o => o.id === 'scale' && o.checked)) {
           ctx.fillStyle = '#000000';
@@ -327,7 +327,7 @@ function ExportPageContent() {
           ctx.textAlign = 'left';
           ctx.fillText('1m', 145, canvas.height - titleBlockHeight - 45);
         }
-        
+
         // North arrow
         if (includeOptions.find(o => o.id === 'north' && o.checked)) {
           ctx.save();
@@ -345,7 +345,7 @@ function ExportPageContent() {
           ctx.restore();
         }
       }
-      
+
       // Generate download based on format
       if (outputFormat === 'PNG' || outputFormat === 'JPG') {
         const mimeType = outputFormat === 'PNG' ? 'image/png' : 'image/jpeg';
@@ -373,11 +373,11 @@ function ExportPageContent() {
         link.href = dataUrl;
         link.click();
       }
-      
+
     } catch (error) {
       console.error('Export error:', error);
     }
-    
+
     setIsExporting(false);
     setExportComplete(true);
   };
