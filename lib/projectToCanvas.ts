@@ -125,7 +125,37 @@ export function projectToCanvas(
   const { canvasWidth, canvasHeight, pixelsPerMeter } = options;
   const centerCanvasX = canvasWidth / 2;
   const centerCanvasY = canvasHeight / 2;
-  const { refPoint } = data;
+
+  // Compute refPoint from globalBoundary bbox center if not provided
+  let refPoint = data.refPoint;
+  if (!refPoint) {
+    const geom = data.globalBoundary?.geometry;
+    if (geom) {
+      // Extract all coordinates to find bbox center
+      const allCoords: number[][] =
+        geom.type === "Polygon"
+          ? geom.coordinates[0]
+          : geom.coordinates.flatMap((p: number[][][]) => p[0]);
+      if (allCoords.length > 0) {
+        let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+        for (const [lng, lat] of allCoords) {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+        refPoint = { lng: (minLng + maxLng) / 2, lat: (minLat + maxLat) / 2 };
+      }
+    }
+    // Ultimate fallback: first vertex
+    if (!refPoint && data.vertices3D?.length > 0) {
+      refPoint = { lng: data.vertices3D[0].lng, lat: data.vertices3D[0].lat };
+    }
+    // If still nothing, bail
+    if (!refPoint) {
+      throw new Error("projectToCanvas: cannot determine refPoint — no globalBoundary or vertices3D");
+    }
+  }
   const { lng: refLng, lat: refLat } = refPoint;
 
   // ── Project globalBoundary ────────────────────────────────────────────────

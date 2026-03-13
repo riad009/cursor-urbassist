@@ -25,7 +25,27 @@ export const CREDIT_COSTS = {
 
   // Rendering
   RENDERING_BASE: 10,
+
+  // Add-on euro prices (documents page + payment page)
+  ADDON_CERFA_EUR: 5,
+  ADDON_PLU_ANALYSIS_EUR: 15,
+
+  // Base file prices per authorization type (first / relaunch)
+  DP_FIRST_EUR: 15,
+  DP_RELAUNCH_EUR: 5,
+  PC_FIRST_EUR: 89,
+  PC_RELAUNCH_EUR: 29,
 } as const;
+
+/** Get base file euro price based on authorization type and analysis count */
+export function getBaseFilePrice(authType: string | null | undefined, pluAnalysisCount: number): number {
+  const isPC = authType === "PC" || authType === "ARCHITECT_REQUIRED";
+  const isRelaunch = pluAnalysisCount > 0;
+  if (isPC) {
+    return isRelaunch ? CREDIT_COSTS.PC_RELAUNCH_EUR : CREDIT_COSTS.PC_FIRST_EUR;
+  }
+  return isRelaunch ? CREDIT_COSTS.DP_RELAUNCH_EUR : CREDIT_COSTS.DP_FIRST_EUR;
+}
 
 /** Helper to get PLU analysis cost based on analysis count */
 export function getPluAnalysisCost(pluAnalysisCount: number): number {

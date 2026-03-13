@@ -74,10 +74,29 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Cache the result
-  setCache(id, user.id, project);
+  // ── Hydrate processedSiteData via raw SQL ──────────────────────────────
+  // Turbopack caches the Prisma client, so newly added columns may not appear
+  // in the typed SELECT. Raw SQL bypasses this completely.
+  let processedSiteData: unknown = null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ processed_site_data: unknown }[]>(
+      `SELECT "processed_site_data" FROM "Project" WHERE "id" = $1 LIMIT 1`,
+      id
+    );
+    if (rows.length > 0 && rows[0].processed_site_data != null) {
+      processedSiteData = rows[0].processed_site_data;
+    }
+  } catch (e) {
+    // Column might not exist yet — ignore
+  }
 
-  return NextResponse.json({ project });
+  // Merge into the project object so the frontend sees it
+  const projectWithSiteData = { ...project, processedSiteData };
+
+  // Cache the result
+  setCache(id, user.id, projectWithSiteData);
+
+  return NextResponse.json({ project: projectWithSiteData });
 }
 
 export async function PUT(

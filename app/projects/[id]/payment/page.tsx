@@ -25,6 +25,7 @@ import {
   getDocumentsForProject,
   type AuthorizationDocument,
 } from "@/lib/authorization-documents";
+import { CREDIT_COSTS, getBaseFilePrice } from "@/lib/credit-costs";
 
 /* ─── Types ──────────────────────────────────────────────────── */
 
@@ -74,7 +75,7 @@ export default function PaymentPage({
     pluFirstAnalysis: 3,
     pluRelaunch: 1,
   });
-  const [euroPrices, setEuroPrices] = useState({ first: 15, relaunch: 5 });
+  const [euroPrices, setEuroPrices] = useState({ dpFirst: CREDIT_COSTS.DP_FIRST_EUR, dpRelaunch: CREDIT_COSTS.DP_RELAUNCH_EUR, pcFirst: CREDIT_COSTS.PC_FIRST_EUR, pcRelaunch: CREDIT_COSTS.PC_RELAUNCH_EUR });
   const [useCredits, setUseCredits] = useState(false);
 
   const success = searchParams.get("success");
@@ -94,8 +95,10 @@ export default function PaymentPage({
         });
       }
       setEuroPrices({
-        first: settings.pluFirstAnalysisPriceEur ?? 15,
-        relaunch: settings.pluRelaunchPriceEur ?? 5,
+        dpFirst: settings.dpFirstPriceEur ?? CREDIT_COSTS.DP_FIRST_EUR,
+        dpRelaunch: settings.dpRelaunchPriceEur ?? CREDIT_COSTS.DP_RELAUNCH_EUR,
+        pcFirst: settings.pcFirstPriceEur ?? CREDIT_COSTS.PC_FIRST_EUR,
+        pcRelaunch: settings.pcRelaunchPriceEur ?? CREDIT_COSTS.PC_RELAUNCH_EUR,
       });
       setLoading(false);
     });
@@ -121,7 +124,7 @@ export default function PaymentPage({
   const analysisCount = project?.pluAnalysisCount ?? 0;
   const isRelaunch = analysisCount > 0;
   const creditCost = isRelaunch ? creditCosts.pluRelaunch : creditCosts.pluFirstAnalysis;
-  const euroCost = isRelaunch ? euroPrices.relaunch : euroPrices.first;
+  const euroCost = getBaseFilePrice(project?.authorizationType, analysisCount);
   const userCredits = user?.credits ?? 0;
   const hasEnoughCredits = userCredits >= creditCost;
 
@@ -160,9 +163,9 @@ export default function PaymentPage({
   const documents = getDocumentsForProject(authType, { hasABF, isExistingStructure });
   const docCount = documents.length;
 
-  // Calculate dynamic euro price: base + options
-  const cerfaPrice = 5;
-  const pluPrice = 15;
+  // Calculate dynamic euro price: base + options (using centralized costs)
+  const cerfaPrice = CREDIT_COSTS.ADDON_CERFA_EUR;
+  const pluPrice = CREDIT_COSTS.ADDON_PLU_ANALYSIS_EUR;
   const baseEuroCost = euroCost;
   const displayEuroCost = baseEuroCost + (wantCerfa ? cerfaPrice : 0) + (wantPluAnalysis ? pluPrice : 0);
 

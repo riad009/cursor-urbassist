@@ -69,6 +69,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getNextStep, getPrevStep } from "@/lib/step-flow";
+import dynamic from "next/dynamic";
+
+const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
 import {
   BuildingDetailPanel,
   createDefaultBuilding,
@@ -81,7 +84,7 @@ import { ParcelManagementPanel, type DetectedRoad, type ParcelSummary } from "@/
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
-import { parcelGeometryToShapes } from "@/lib/parcelGeometryToCanvas";
+// parcelGeometryToShapes REMOVED — compute shift: all data comes pre-processed from DB
 import { renderProcessedSite, clearProcessedLayers } from "@/lib/renderProcessedSite";
 import type { ProcessedSiteData } from "@/types/processed-site-data";
 import {
@@ -303,6 +306,7 @@ function SitePlanContent() {
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
+  const [showDataModal, setShowDataModal] = useState(false);
   const [scene3dVersion, setScene3dVersion] = useState(0);
   const [zoom, setZoom] = useState(95);
   const [activeColor, setActiveColor] = useState("#3b82f6");
@@ -877,10 +881,10 @@ function SitePlanContent() {
   // Projects are fetched only when the project switcher dropdown is opened.
 
   // Perf: fetch project data on mount — canvas load waits for canvasReady, runs in parallel
+  // COMPUTE SHIFT: processedSiteData is now pre-computed and stored in the DB.
+  // We load it here and inject it into state immediately — zero async processing needed.
   useEffect(() => {
     if (!currentProjectId) { setProjectData(null); return; }
-    // Fire both requests in parallel — project metadata + site-plan canvas data
-    // Site plan load is gated on canvasReady (separate effect), so we only need project metadata here
     fetch(`/api/projects/${currentProjectId}`)
       .then((r) => r.json())
       .then((d) => {
@@ -906,6 +910,16 @@ function SitePlanContent() {
           parcelsGeoJSON: p.parcelsGeoJSON ?? null,
           existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
         });
+
+        // ── COMPUTE SHIFT: Load pre-computed ProcessedSiteData from DB ──
+        if (p.processedSiteData) {
+          const stored = typeof p.processedSiteData === "string"
+            ? JSON.parse(p.processedSiteData)
+            : p.processedSiteData;
+          setProcessedSiteData(stored as ProcessedSiteData);
+          // Sync into editor store for persistence across page refreshes
+          useEditorStore.getState().setProcessedSiteData(stored as ProcessedSiteData);
+        }
       })
       .catch(() => setProjectData(null));
   }, [currentProjectId]);
@@ -1021,175 +1035,148 @@ function SitePlanContent() {
     }
   }, [projectData?.existingBuildingsGeoJSON, canvasReady, existingBuildingsLoaded, drawExistingBuildingsFromGeoJSON]);
 
-  // Auto-draw parcel boundaries from project parcelsGeoJSON (individual parcels) or parcelGeometry (merged)
+  // ── Draw parcels: prefer DB-stored ProcessedSiteData, fallback to process-geometry API ──
   const drawParcelsFromProjectData = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || !currentProjectId) return;
-    if (!projectData?.parcelsGeoJSON && !projectData?.parcelGeometry) return;
+    if (!processedSiteData && !projectData?.parcelsGeoJSON && !projectData?.parcelGeometry) return;
     if (parcelsDrawnFromGeometryRef.current === currentProjectId) return;
     const hasParcel = canvas.getObjects().some((o: any) =>
       o.isParcel || (o as any).processedBoundary || (o as any).processedParcel
     );
     if (hasParcel) return;
 
-    // ── CRITICAL: Lock the ref BEFORE async work to prevent concurrent re-invocations ──
-    // The fetch to process-geometry takes 2-3s. Without this early lock, re-renders
-    // during that await would pass the guard check and fire additional fetches,
-    // creating a cascade that hammers the IGN API with HTTP 429 rate limits.
     parcelsDrawnFromGeometryRef.current = currentProjectId;
-
     setLoadingParcelsGeoJSON(true);
 
-    // Prefer parcelsGeoJSON (individual parcel features with metadata) over merged parcelGeometry
-    const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+    // ── Resolve processedSiteData: DB first, then API fallback ──
+    let siteData = processedSiteData;
 
-    // ── Parse GeoJSON into features for process-geometry API ──────────────
-    let parcelFeatures: any[] = [];
-    try {
-      const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
-      if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
-        parcelFeatures = parsed.features.filter((f: any) => {
-          const gt = f?.geometry?.type;
-          return gt === "Polygon" || gt === "MultiPolygon";
-        });
-      } else if (parsed?.type === "Feature" && parsed.geometry) {
-        parcelFeatures = [parsed];
-      } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
-        parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
+    if (!siteData && (projectData?.parcelsGeoJSON || projectData?.parcelGeometry)) {
+      // Fallback: call process-geometry API for projects that don't have DB-stored data
+      const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+      let parcelFeatures: any[] = [];
+      try {
+        const parsed = typeof geoSource === "string" ? JSON.parse(geoSource) : geoSource;
+        if (parsed?.type === "FeatureCollection" && Array.isArray(parsed.features)) {
+          parcelFeatures = parsed.features.filter((f: any) => {
+            const gt = f?.geometry?.type;
+            return gt === "Polygon" || gt === "MultiPolygon";
+          });
+        } else if (parsed?.type === "Feature" && parsed.geometry) {
+          parcelFeatures = [parsed];
+        } else if (parsed?.type === "Polygon" || parsed?.type === "MultiPolygon") {
+          parcelFeatures = [{ type: "Feature", properties: {}, geometry: parsed }];
+        }
+      } catch { /* ignore parse errors */ }
+
+      if (parcelFeatures.length > 0) {
+        try {
+          const res = await fetch("/api/projects/process-geometry", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              parcels: parcelFeatures.map((f: any, idx: number) => ({
+                type: f.type,
+                properties: {
+                  id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
+                  section: f.properties?.section || f.properties?.SEC || "",
+                  number: f.properties?.number || f.properties?.NUM || "",
+                  area: f.properties?.area || f.properties?.contenance || 0,
+                },
+                geometry: f.geometry,
+              })),
+            }),
+          });
+          if (res.ok) {
+            siteData = await res.json() as ProcessedSiteData;
+            setProcessedSiteData(siteData);
+          }
+        } catch (err) {
+          console.error("[site-plan] process-geometry API fallback failed:", err);
+        }
       }
-    } catch (e) {
-      console.warn("[site-plan] Failed to parse GeoJSON for process-geometry:", e);
     }
 
-    if (parcelFeatures.length === 0) {
+    if (!siteData) {
       setLoadingParcelsGeoJSON(false);
       return;
     }
 
-    // ── Call process-geometry API for full pipeline ─────────────────────────
     try {
-      const apiPayload = {
-        parcels: parcelFeatures.map((f: any, idx: number) => ({
-          type: f.type,
-          properties: {
-            id: f.properties?.id || f.properties?.IDU || `parcel-${idx}`,
-            section: f.properties?.section || f.properties?.SEC || "",
-            number: f.properties?.number || f.properties?.NUM || "",
-            area: f.properties?.area || f.properties?.contenance || 0,
-          },
-          geometry: f.geometry,
-        })),
-      };
-
-      const res = await fetch("/api/projects/process-geometry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(apiPayload),
-      });
-
-      if (res.ok) {
-        const siteData: ProcessedSiteData = await res.json();
-        setProcessedSiteData(siteData);
-
-        // ── Render using the full pipeline (boundary + parcels + edge labels + NGF labels) ──
-        const projected = renderProcessedSite(
-          fabric as any,
-          canvas as any,
-          siteData,
-          {
-            canvasWidth: canvasSize.width,
-            canvasHeight: canvasSize.height,
-            pixelsPerMeter: currentScale.pixelsPerMeter,
-          }
-        );
-
-        // Also set elevation points from the processed data for the terrain store
-        if (siteData.vertices3D && siteData.vertices3D.length > 0) {
-          const pts = siteData.vertices3D
-            .filter(v => v.elevation > 0)
-            .map((v, i) => {
-              const canvasPos = projected.vertexLabels[i]?.position;
-              return canvasPos ? {
-                id: `ngf-${i}`,
-                x: canvasPos.x,
-                y: canvasPos.y,
-                value: v.elevation,
-              } : null;
-            })
-            .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
-          if (pts.length > 0) setElevationPoints(pts);
-        }
-
-        // ── Auto-zoom-to-fit the projected boundary ────────────────────────
-        const boundary = projected.boundary;
-        if (boundary && boundary.points.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boundary.points.forEach((p) => {
-            const px = boundary.left + p.x;
-            const py = boundary.top + p.y;
-            minX = Math.min(minX, px);
-            minY = Math.min(minY, py);
-            maxX = Math.max(maxX, px);
-            maxY = Math.max(maxY, py);
-          });
-          if (minX !== Infinity) {
-            const parcelsW = maxX - minX;
-            const parcelsH = maxY - minY;
-            const containerEl = containerRef?.current;
-            const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
-            const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
-            const padding = 60;
-            const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
-            const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
-            const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
-            if (targetZoom > 0 && isFinite(targetZoom)) {
-              const centerPX = (minX + maxX) / 2;
-              const centerPY = (minY + maxY) / 2;
-              canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-              const vpt: [number, number, number, number, number, number] = [
-                targetZoom, 0, 0, targetZoom,
-                viewW / 2 - centerPX * targetZoom,
-                viewH / 2 - centerPY * targetZoom,
-              ];
-              canvas.setViewportTransform(vpt);
-              setZoom(Math.round(targetZoom * 100));
-            }
-          }
-        }
-      } else {
-        // Fallback to old pipeline if process-geometry API fails
-        console.warn("[site-plan] process-geometry API failed, falling back to parcelGeometryToShapes");
-        const shapes = parcelGeometryToShapes(geoSource, {
+      // ── Render using the full pipeline (boundary + edge labels + NGF labels) ──
+      const projected = renderProcessedSite(
+        fabric as any,
+        canvas as any,
+        siteData,
+        {
           canvasWidth: canvasSize.width,
           canvasHeight: canvasSize.height,
           pixelsPerMeter: currentScale.pixelsPerMeter,
+        }
+      );
+
+      // Set elevation points from the processed data for 3D terrain
+      if (siteData.vertices3D && siteData.vertices3D.length > 0) {
+        const pts = siteData.vertices3D
+          .filter(v => v.elevation > 0)
+          .map((v, i) => {
+            const canvasPos = projected.vertexLabels[i]?.position;
+            return canvasPos ? {
+              id: `ngf-${i}`,
+              x: canvasPos.x,
+              y: canvasPos.y,
+              value: v.elevation,
+            } : null;
+          })
+          .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
+        if (pts.length > 0) setElevationPoints(pts);
+      }
+
+      // ── Auto-zoom-to-fit the projected boundary ────────────────────────
+      const boundary = projected.boundary;
+      if (boundary && boundary.points.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        boundary.points.forEach((p) => {
+          const px = boundary.left + p.x;
+          const py = boundary.top + p.y;
+          minX = Math.min(minX, px);
+          minY = Math.min(minY, py);
+          maxX = Math.max(maxX, px);
+          maxY = Math.max(maxY, py);
         });
-        shapes.forEach((shape, idx) => {
-          const poly = new fabric.Polygon(shape.points, {
-            left: shape.left,
-            top: shape.top,
-            fill: "rgba(34, 197, 94, 0.15)",
-            stroke: "#16a34a",
-            strokeWidth: 2.5,
-            strokeLineJoin: "round",
-          });
-          (poly as any).id = `parcel-geo-${currentProjectId}-${idx}`;
-          (poly as any).elementName = `Parcel ${idx + 1}`;
-          (poly as any).isParcel = true;
-          (poly as any).excludeFromExport = false;
-          canvas.add(poly);
-          canvas.sendObjectToBack(poly);
-        });
+        if (minX !== Infinity) {
+          const parcelsW = maxX - minX;
+          const parcelsH = maxY - minY;
+          const containerEl = containerRef?.current;
+          const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+          const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+          const padding = 60;
+          const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
+          const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
+          const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
+          if (targetZoom > 0 && isFinite(targetZoom)) {
+            const centerPX = (minX + maxX) / 2;
+            const centerPY = (minY + maxY) / 2;
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+            const vpt: [number, number, number, number, number, number] = [
+              targetZoom, 0, 0, targetZoom,
+              viewW / 2 - centerPX * targetZoom,
+              viewH / 2 - centerPY * targetZoom,
+            ];
+            canvas.setViewportTransform(vpt);
+            setZoom(Math.round(targetZoom * 100));
+          }
+        }
       }
     } catch (err) {
       console.error("[site-plan] Error in drawParcelsFromProjectData:", err);
     }
 
-    parcelsDrawnFromGeometryRef.current = currentProjectId;
     canvas.renderAll();
     updateLayers(canvas);
     setLoadingParcelsGeoJSON(false);
-  }, [currentProjectId, projectData?.parcelsGeoJSON, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, updateLayers]);
+  }, [currentProjectId, processedSiteData, projectData?.parcelsGeoJSON, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
   // Load 3D terrain from IGN RGE ALTI® and add as elevation points
   const loadTerrainFromIgn = useCallback(async () => {
@@ -1369,14 +1356,14 @@ function SitePlanContent() {
     }
   }, [currentProjectId, canvasReady]); // Only re-run when project or canvas readiness changes
 
-  // ── RACE-CONDITION FIX: re-draw parcels when projectData arrives late ───────
+  // ── RACE-CONDITION FIX: re-draw parcels when data arrives late ──────────────
   // On refresh, loadSitePlan's callback calls drawParcelsFromProjectData() before
-  // the /api/projects/{id} fetch completes → projectData is null → early return.
-  // This effect ensures parcels are drawn when projectData becomes available.
+  // the /api/projects/{id} fetch completes → data is null → early return.
+  // This effect ensures parcels are drawn when processedSiteData OR projectData becomes available.
   // Guards inside drawParcelsFromProjectData (parcelsDrawnFromGeometryRef, hasParcel)
   // prevent double-drawing when data arrives in the correct order.
   useEffect(() => {
-    if (canvasReady && currentProjectId && projectData?.parcelsGeoJSON) {
+    if (canvasReady && currentProjectId && (processedSiteData || projectData?.parcelsGeoJSON)) {
       // Only trigger if parcels haven't been drawn yet for this project
       if (parcelsDrawnFromGeometryRef.current !== currentProjectId) {
         const canvas = fabricRef.current;
@@ -1386,7 +1373,7 @@ function SitePlanContent() {
         }
       }
     }
-  }, [canvasReady, currentProjectId, projectData?.parcelsGeoJSON]);
+  }, [canvasReady, currentProjectId, processedSiteData, projectData?.parcelsGeoJSON]);
 
   // Warn when leaving the tab with unsaved changes
   useEffect(() => {
@@ -2906,15 +2893,19 @@ function SitePlanContent() {
             // Remove existing parcel polygons
             canvas.getObjects().filter((o: any) => o.isParcel).forEach(o => canvas.remove(o));
             canvas.getObjects().filter((o: any) => o.isBoundaryOverlay).forEach(o => canvas.remove(o));
-            // Draw merged polygon using parcelGeometryToShapes
-            const { parcelGeometryToShapes } = await import("@/lib/parcelGeometryToCanvas");
-            const shapes = parcelGeometryToShapes(
-              JSON.stringify(data.merged.geometry),
-              { canvasWidth: canvasSize.width, canvasHeight: canvasSize.height, pixelsPerMeter: currentScale.pixelsPerMeter }
-            );
-            shapes.forEach((shape, idx) => {
-              const poly = new fabric.Polygon(shape.points, {
-                left: shape.left, top: shape.top,
+            // COMPUTE SHIFT: Draw merged polygon using geoToCanvas instead of parcelGeometryToShapes
+            const { geoToCanvas } = await import("@/lib/projectToCanvas");
+            const geom = data.merged.geometry;
+            const rings = geom.type === "Polygon" ? [geom.coordinates[0]] : geom.coordinates.map((p: number[][][]) => p[0]);
+            const refPt = processedSiteData?.refPoint || { lng: 0, lat: 0 };
+            const projOpts = { canvasWidth: canvasSize.width, canvasHeight: canvasSize.height, pixelsPerMeter: currentScale.pixelsPerMeter };
+            rings.forEach((ring: number[][], idx: number) => {
+              const projected = ring.map(([lng, lat]: number[]) => geoToCanvas(lng, lat, refPt, projOpts));
+              let shapeMinX = Infinity, shapeMinY = Infinity;
+              projected.forEach(p => { shapeMinX = Math.min(shapeMinX, p.x); shapeMinY = Math.min(shapeMinY, p.y); });
+              const points = projected.map(p => new fabric.Point(p.x - shapeMinX, p.y - shapeMinY));
+              const poly = new fabric.Polygon(points, {
+                left: shapeMinX, top: shapeMinY,
                 fill: "rgba(34, 197, 94, 0.1)",
                 stroke: "#22c55e", strokeWidth: 2, strokeDashArray: [4, 2],
               });
@@ -3161,6 +3152,14 @@ function SitePlanContent() {
           <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-600 text-xs font-medium shrink-0">
             {currentScale.label}
           </span>
+
+          {/* ShowData Button */}
+          <button
+            onClick={() => setShowDataModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/25 transition-all shrink-0"
+          >
+            🔍 ShowData
+          </button>
 
           {/* 2D / 3D Toggle */}
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
@@ -4035,12 +4034,31 @@ function Inline3DViewer({
       try {
         const THREE = await import("three");
         const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
-        const { parcelGeometryToShapes } = await import("@/lib/parcelGeometryToCanvas");
-
-        // Compute parcel shapes from raw GeoJSON
-        const parcelShapes = parcelGeoJSON
-          ? parcelGeometryToShapes(parcelGeoJSON, { canvasWidth, canvasHeight, pixelsPerMeter })
-          : [];
+        // COMPUTE SHIFT: Use processedSiteData directly instead of parcelGeometryToShapes
+        // This eliminates the broken per-polygon bounding box that caused 2D offset shifting
+        const parcelShapes: { points: { x: number; y: number }[]; left: number; top: number }[] = [];
+        if (processedSiteData?.parcels && processedSiteData.refPoint) {
+          const { geoToCanvas } = await import("@/lib/projectToCanvas");
+          const projOpts = { canvasWidth, canvasHeight, pixelsPerMeter };
+          for (const parcel of processedSiteData.parcels) {
+            if (!parcel.coordinates || parcel.coordinates.length === 0) continue;
+            const outerRing = parcel.coordinates[0]; // First ring is outer boundary
+            const projected = outerRing.map(([lng, lat]: number[]) =>
+              geoToCanvas(lng, lat, processedSiteData.refPoint, projOpts)
+            );
+            // Compute bounding box for shape positioning
+            let shapeMinX = Infinity, shapeMinY = Infinity;
+            projected.forEach(p => {
+              shapeMinX = Math.min(shapeMinX, p.x);
+              shapeMinY = Math.min(shapeMinY, p.y);
+            });
+            parcelShapes.push({
+              left: shapeMinX,
+              top: shapeMinY,
+              points: projected.map(p => ({ x: p.x - shapeMinX, y: p.y - shapeMinY })),
+            });
+          }
+        }
 
         const width = container.clientWidth || 800;
         const height = container.clientHeight || 600;
@@ -5119,6 +5137,257 @@ function Inline3DViewer({
           scene.add(connLine);
         });
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // ── GLOBAL PROPERTY BOUNDARY — gold line enclosing all parcels ────────
+        // ═══════════════════════════════════════════════════════════════════════
+        if (processedSiteData?.globalBoundary && processedSiteData.refPoint) {
+          const { geoToCanvas: geo2c } = await import("@/lib/projectToCanvas");
+          const projOpts = { canvasWidth, canvasHeight, pixelsPerMeter };
+          const gbGeomData = processedSiteData.globalBoundary.geometry;
+          const outerRings = gbGeomData.type === "Polygon"
+            ? [gbGeomData.coordinates[0]]
+            : gbGeomData.type === "MultiPolygon"
+              ? gbGeomData.coordinates.map((p: number[][][]) => p[0])
+              : [];
+
+          outerRings.forEach((ring: number[][]) => {
+            // Project to 3D world coords using SAME pipeline as parcel slabs
+            const gbWorld = ring.map(([lng, lat]: number[]) => {
+              const cp = geo2c(lng, lat, processedSiteData.refPoint, projOpts);
+              return {
+                x: (cp.x - centerX) / pixelsPerMeter,
+                z: (cp.y - centerY) / pixelsPerMeter,
+              };
+            });
+
+            const gbY = 0.55; // Above parcel slabs
+            const lineVerts: InstanceType<typeof THREE.Vector3>[] = [];
+            gbWorld.forEach(p => lineVerts.push(new THREE.Vector3(p.x, gbY, p.z)));
+            if (gbWorld.length > 0) lineVerts.push(new THREE.Vector3(gbWorld[0].x, gbY, gbWorld[0].z));
+
+            // Primary gold boundary line
+            const lineGeom = new THREE.BufferGeometry().setFromPoints(lineVerts);
+            scene.add(new THREE.Line(lineGeom, new THREE.LineBasicMaterial({
+              color: 0xfbbf24, linewidth: 3, transparent: true, opacity: 0.95,
+            })));
+            // Glow line underneath
+            const glowLine = new THREE.Line(lineGeom.clone(), new THREE.LineBasicMaterial({
+              color: 0xf59e0b, linewidth: 5, transparent: true, opacity: 0.3,
+            }));
+            glowLine.position.y -= 0.03;
+            scene.add(glowLine);
+
+            // Gold corner posts at each vertex
+            const nPosts = Math.min(gbWorld.length, 30);
+            for (let ci = 0; ci < nPosts; ci++) {
+              const p = gbWorld[ci];
+              const postH = 0.9;
+              const postGeom = new THREE.CylinderGeometry(0.06, 0.08, postH, 8);
+              const post = new THREE.Mesh(postGeom, new THREE.MeshStandardMaterial({
+                color: 0xfbbf24, roughness: 0.3, metalness: 0.6,
+              }));
+              post.position.set(p.x, gbY + postH / 2, p.z);
+              post.castShadow = true;
+              scene.add(post);
+              // Sphere cap
+              const cap = new THREE.Mesh(
+                new THREE.SphereGeometry(0.1, 8, 8),
+                new THREE.MeshStandardMaterial({
+                  color: 0xfbbf24, roughness: 0.2, metalness: 0.5,
+                  emissive: 0xf59e0b, emissiveIntensity: 0.2,
+                })
+              );
+              cap.position.set(p.x, gbY + postH + 0.03, p.z);
+              scene.add(cap);
+            }
+
+            // ── Edge measurement labels along the global boundary ──
+            if (processedSiteData.edges && processedSiteData.edges.length > 0) {
+              processedSiteData.edges.forEach((edge: any) => {
+                const fromCP = geo2c(edge.from.lng, edge.from.lat, processedSiteData.refPoint, projOpts);
+                const toCP = geo2c(edge.to.lng, edge.to.lat, processedSiteData.refPoint, projOpts);
+                const fromW = { x: (fromCP.x - centerX) / pixelsPerMeter, z: (fromCP.y - centerY) / pixelsPerMeter };
+                const toW = { x: (toCP.x - centerX) / pixelsPerMeter, z: (toCP.y - centerY) / pixelsPerMeter };
+                const midX = (fromW.x + toW.x) / 2;
+                const midZ = (fromW.z + toW.z) / 2;
+                const meters = edge.lengthMeters;
+                const text = meters >= 100
+                  ? `${Math.round(meters)}m`
+                  : `${(Math.round(meters * 10) / 10).toFixed(1)}m`;
+
+                // Create text sprite for edge measurement
+                const edgeCanvas = document.createElement("canvas");
+                const edgeCtx = edgeCanvas.getContext("2d")!;
+                edgeCanvas.width = 256;
+                edgeCanvas.height = 64;
+                edgeCtx.fillStyle = "rgba(255,255,255,0.9)";
+                edgeCtx.fillRect(0, 0, 256, 64);
+                edgeCtx.fillStyle = "#1e293b";
+                edgeCtx.font = "bold 32px monospace";
+                edgeCtx.textAlign = "center";
+                edgeCtx.textBaseline = "middle";
+                edgeCtx.fillText(text, 128, 32);
+                const edgeTex = new THREE.CanvasTexture(edgeCanvas);
+                const edgeSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                  map: edgeTex, transparent: true, depthWrite: false,
+                }));
+                edgeSprite.scale.set(2.5, 0.6, 1);
+                edgeSprite.position.set(midX, gbY + 1.8, midZ);
+                scene.add(edgeSprite);
+              });
+            }
+          });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ── TOPOGRAPHIC TERRAIN MESH (NGF elevation → real Y displacement) ────
+        // ═══════════════════════════════════════════════════════════════════════
+        if (processedSiteData?.vertices3D && processedSiteData.vertices3D.length >= 3
+            && processedSiteData?.globalBoundary && processedSiteData.refPoint) {
+          const { geoToCanvas: geo2c } = await import("@/lib/projectToCanvas");
+          const projOpts = { canvasWidth, canvasHeight, pixelsPerMeter };
+
+          // Get all valid elevations to compute baseline
+          const validElevations = processedSiteData.vertices3D
+            .map((v: any) => v.elevation)
+            .filter((e: number) => e > 0);
+          const minElev = validElevations.length > 0 ? Math.min(...validElevations) : 0;
+          const maxElev = validElevations.length > 0 ? Math.max(...validElevations) : 0;
+          const elevRange = maxElev - minElev;
+          // Scale factor: make elevation visible but not overwhelming
+          const VERT_SCALE = elevRange > 0 ? Math.max(0.5, Math.min(5.0, 3.0 / elevRange * elevRange)) : 1.0;
+
+          const gbGeomData = processedSiteData.globalBoundary.geometry;
+          const outerRing = gbGeomData.type === "Polygon"
+            ? gbGeomData.coordinates[0]
+            : gbGeomData.type === "MultiPolygon"
+              ? gbGeomData.coordinates[0][0]
+              : [];
+
+          if (outerRing.length >= 3) {
+            // Project each boundary vertex to 3D world + apply elevation
+            const terrainVerts: { x: number; y: number; z: number; elev: number }[] = [];
+            const flatCoords: number[] = []; // for earcut (2D triangulation)
+
+            outerRing.forEach(([lng, lat]: number[], idx: number) => {
+              const cp = geo2c(lng, lat, processedSiteData.refPoint, projOpts);
+              const wx = (cp.x - centerX) / pixelsPerMeter;
+              const wz = (cp.y - centerY) / pixelsPerMeter;
+
+              // Match this vertex to the closest vertices3D entry by geo distance
+              let bestElev = minElev;
+              let bestDist = Infinity;
+              processedSiteData.vertices3D.forEach((v3d: any) => {
+                if (v3d.elevation <= 0) return;
+                const d = Math.sqrt((v3d.lng - lng) ** 2 + (v3d.lat - lat) ** 2);
+                if (d < bestDist) { bestDist = d; bestElev = v3d.elevation; }
+              });
+
+              const wy = (bestElev - minElev) * VERT_SCALE;
+              terrainVerts.push({ x: wx, y: wy, z: wz, elev: bestElev });
+              flatCoords.push(wx, wz);
+            });
+
+            // Triangulate the polygon using earcut
+            try {
+              const earcut = (await import("earcut")).default;
+              const indices = earcut(flatCoords, undefined, 2);
+
+              if (indices.length >= 3) {
+                // Build position buffer
+                const positions = new Float32Array(terrainVerts.length * 3);
+                const colors = new Float32Array(terrainVerts.length * 3);
+                terrainVerts.forEach((v, i) => {
+                  positions[i * 3] = v.x;
+                  positions[i * 3 + 1] = v.y - 0.15; // Below parcel slabs
+                  positions[i * 3 + 2] = v.z;
+
+                  // Color ramp: low=green → high=brown (topographic map style)
+                  const t = elevRange > 0 ? (v.elev - minElev) / elevRange : 0;
+                  colors[i * 3] = 0.3 + t * 0.5;     // R: green → brownish
+                  colors[i * 3 + 1] = 0.7 - t * 0.3;  // G: vivid green → muted
+                  colors[i * 3 + 2] = 0.25 - t * 0.1;  // B: slight blue → none
+                });
+
+                const terrainGeom = new THREE.BufferGeometry();
+                terrainGeom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+                terrainGeom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+                terrainGeom.setIndex(Array.from(indices));
+                terrainGeom.computeVertexNormals();
+
+                // Terrain mesh with vertex colors
+                const terrainMat = new THREE.MeshStandardMaterial({
+                  vertexColors: true,
+                  roughness: 0.92,
+                  metalness: 0.0,
+                  side: THREE.DoubleSide,
+                  transparent: true,
+                  opacity: 0.6,
+                });
+                const terrainMesh = new THREE.Mesh(terrainGeom, terrainMat);
+                terrainMesh.receiveShadow = true;
+                scene.add(terrainMesh);
+
+                // Wireframe contour overlay
+                const wireframe = new THREE.Mesh(terrainGeom.clone(), new THREE.MeshBasicMaterial({
+                  color: 0x22c55e, wireframe: true, transparent: true, opacity: 0.12,
+                }));
+                wireframe.position.y -= 0.02;
+                scene.add(wireframe);
+              }
+            } catch (e) {
+              console.warn("[3D] earcut triangulation failed:", e);
+            }
+
+            // ── NGF ELEVATION SPRITES at each terrain corner ──
+            terrainVerts.forEach((v, i) => {
+              if (v.elev <= 0) return;
+              // Skip last vertex if it's a ring-closure duplicate
+              if (i === terrainVerts.length - 1) {
+                const first = terrainVerts[0];
+                if (Math.abs(v.x - first.x) < 0.01 && Math.abs(v.z - first.z) < 0.01) return;
+              }
+
+              // Elevation marker cone
+              const markerGeom = new THREE.ConeGeometry(0.15, 0.4, 6);
+              const markerMat = new THREE.MeshStandardMaterial({
+                color: 0x0ea5e9, emissive: 0x0284c7, emissiveIntensity: 0.15,
+              });
+              const marker = new THREE.Mesh(markerGeom, markerMat);
+              marker.position.set(v.x, v.y + 0.2, v.z);
+              scene.add(marker);
+
+              // NGF text sprite
+              const ngfCanvas = document.createElement("canvas");
+              const ngfCtx = ngfCanvas.getContext("2d")!;
+              ngfCanvas.width = 256;
+              ngfCanvas.height = 80;
+              // Background
+              ngfCtx.fillStyle = "rgba(15, 23, 42, 0.85)";
+              ngfCtx.beginPath();
+              ngfCtx.roundRect(4, 4, 248, 72, 8);
+              ngfCtx.fill();
+              // Accent bar
+              ngfCtx.fillStyle = "#0ea5e9";
+              ngfCtx.fillRect(4, 4, 6, 72);
+              // Text
+              ngfCtx.fillStyle = "#e2e8f0";
+              ngfCtx.font = "bold 28px monospace";
+              ngfCtx.textAlign = "center";
+              ngfCtx.textBaseline = "middle";
+              ngfCtx.fillText(`NGF ${v.elev.toFixed(1)}m`, 132, 40);
+
+              const ngfTex = new THREE.CanvasTexture(ngfCanvas);
+              const ngfSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: ngfTex, transparent: true, depthWrite: false,
+              }));
+              ngfSprite.scale.set(2.5, 0.8, 1);
+              ngfSprite.position.set(v.x, v.y + 1.2, v.z);
+              scene.add(ngfSprite);
+            });
+          }
+        }
+
         // North arrow
         const northGeom = new THREE.ConeGeometry(0.3, 0.8, 8);
         const northArrow = new THREE.Mesh(northGeom, new THREE.MeshStandardMaterial({ color: 0xc62828 }));
@@ -5222,6 +5491,9 @@ function Inline3DViewer({
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/95 text-red-600 text-sm">{error}</div>
       )}
+
+      {/* Data Debug Modal */}
+      <DataDebugModal open={showDataModal} onClose={() => setShowDataModal(false)} />
     </div>
   );
 }

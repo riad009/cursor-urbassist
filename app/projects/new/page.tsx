@@ -64,6 +64,33 @@ export default function NewProjectPage() {
     const [loadingStage, setLoadingStage] = useState<'searching' | 'loading' | 'rendering' | null>(null);
     const loadingStartRef = React.useRef<number>(0);
 
+    // ── Per-parcel PLU zone detection ─────────────────────────────────────
+    const [parcelZoneMap, setParcelZoneMap] = useState<Record<string, { zoneCode: string; zoneName: string } | null>>({});
+    const [loadingParcelZones, setLoadingParcelZones] = useState(false);
+    const parcelZoneAbortRef = React.useRef<AbortController | null>(null);
+
+    /** Zone color palette — matching Géoportail conventions */
+    const ZONE_COLORS: Record<string, string> = useMemo(() => ({
+        UA: "#c0392b", UB: "#e67e22", UC: "#f1c40f", UD: "#27ae60", UH: "#16a085",
+        AU: "#9b59b6", AUD: "#d35400", A: "#7f8c8d", N: "#2c3e50", U: "#27ae60",
+    }), []);
+
+    const getZoneColor = useCallback((code: string): string => {
+        const upper = (code || "").toUpperCase().trim();
+        const match = Object.keys(ZONE_COLORS).find((k) => upper.startsWith(k));
+        return match ? ZONE_COLORS[match] : "#95a5a6";
+    }, [ZONE_COLORS]);
+
+    /** All unique zones detected across selected parcels */
+    const detectedZones = useMemo(() => {
+        const zones = new Map<string, string>(); // code → name
+        for (const id of selectedParcelIds) {
+            const z = parcelZoneMap[id];
+            if (z) zones.set(z.zoneCode, z.zoneName);
+        }
+        return Array.from(zones.entries()).map(([code, name]) => ({ code, name }));
+    }, [selectedParcelIds, parcelZoneMap]);
+
 
     // When user clicks a surrounding skeleton parcel, add it to the sidebar list
     const handleViewportParcelClicked = React.useCallback((newParcels: typeof parcels) => {
@@ -125,16 +152,17 @@ export default function NewProjectPage() {
         setAddressSuggestions([]);
         setLoadingCadastre(true); setLoadingPlu(true); setLoadingProtectedAreas(true);
         setCadastreError(null); setParcels([]); setPluInfo(null); setPluNoData(false); setManualPluZone(""); setShowManualPluEdit(false); setZoneFeatures([]); setProtectedAreas([]); setHeritageSummary(null);
+        setParcelZoneMap({}); setLoadingParcelZones(false);
         setLoadingStage('searching');
         loadingStartRef.current = Date.now();
 
         // 1) CADASTRE
         fetch("/api/cadastre/lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, bufferMeters: 120 }) })
-            .then(async (r) => { setLoadingStage('loading'); const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown }[]; setLoadingStage('rendering'); setParcels(list); setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); })
+            .then(async (r) => { setLoadingStage('loading'); const d = await r.json(); if (!r.ok) { setCadastreError(d.error || "Failed"); return; } const list = (d.parcels || []) as { id: string; section: string; number: string; area: number; geometry?: unknown; commune?: string }[]; setLoadingStage('rendering'); setParcels(list); if (list.length > 0) { const autoId = d.bestMatchId && list.some((p: { id: string }) => p.id === d.bestMatchId) ? d.bestMatchId : list[0].id; setSelectedParcelIds([autoId]); } setNorthAngleDegrees(typeof d.northAngleDegrees === "number" ? d.northAngleDegrees : null); if (d.source === "estimated") setCadastreError("Données estimées (API IGN indisponible)."); })
             .catch(() => setCadastreError("Données cadastrales indisponibles."))
             .finally(() => { setLoadingCadastre(false); setLoadingStage(null); });
 
-        // 2) PLU
+        // 2) PLU (address-level detection — serves as initial/fallback)
         fetch("/api/plu-detection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ coordinates: coords, address: addr.label }) })
             .then(async (r) => { if (!r.ok) return; const d = await r.json(); const plu = d.plu ?? {}; if (plu.zoneType || plu.zoneName) setPluInfo({ zoneType: plu.zoneType || null, zoneName: plu.zoneName || null, pluType: plu.pluType ?? null }); setPluNoData(!!d.noData); setZoneFeatures(Array.isArray(d.zoneFeatures) ? d.zoneFeatures : []); })
             .catch(() => { })
@@ -146,6 +174,54 @@ export default function NewProjectPage() {
             .catch(() => { })
             .finally(() => setLoadingProtectedAreas(false));
     }, []);
+
+    // ── Per-parcel zone detection — triggered when parcel selection changes ──
+    useEffect(() => {
+        if (selectedParcelIds.length === 0 || parcels.length === 0) {
+            setParcelZoneMap({});
+            return;
+        }
+
+        // Only query for parcels that have real geometry
+        const selected = parcels.filter((p) => selectedParcelIds.includes(p.id) && p.geometry);
+        if (selected.length === 0) return;
+
+        // Abort any in-flight request
+        if (parcelZoneAbortRef.current) parcelZoneAbortRef.current.abort();
+        const controller = new AbortController();
+        parcelZoneAbortRef.current = controller;
+
+        setLoadingParcelZones(true);
+
+        fetch("/api/parcel-zones", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                parcels: selected.map((p) => ({ id: p.id, geometry: p.geometry })),
+            }),
+            signal: controller.signal,
+        })
+            .then(async (r) => {
+                if (!r.ok) return;
+                const d = await r.json();
+                if (d.parcelZones) {
+                    setParcelZoneMap(d.parcelZones);
+                    // Update pluInfo with the primary zone from per-parcel detection
+                    if (d.primaryZone && !manualPluZone.trim()) {
+                        setPluInfo((prev) => ({
+                            zoneType: d.primaryZone,
+                            zoneName: d.primaryZone,
+                            pluType: prev?.pluType ?? null,
+                        }));
+                    }
+                }
+            })
+            .catch((e) => { if (e.name !== "AbortError") console.warn("[parcel-zones]", e); })
+            .finally(() => setLoadingParcelZones(false));
+
+        return () => { controller.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedParcelIds, parcels]);
 
     const createProject = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -343,18 +419,19 @@ export default function NewProjectPage() {
                             {/* TOP: Regulation + Protections & Servitudes stacked */}
                             <div className="space-y-2.5 shrink-0">
 
-                                {/* REGULATION — compact card */}
+                                {/* REGULATION — compact card with per-parcel zone support */}
                                 <div className="rounded-xl bg-white border border-slate-200 overflow-hidden shadow-sm">
                                     <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2">
                                         <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
                                             <Layers className="w-3.5 h-3.5 text-blue-500" />
                                         </div>
                                         <p className="text-sm font-semibold text-slate-900">{t("newProj.zonePlu")}</p>
+                                        {loadingParcelZones && <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin ml-auto" />}
                                     </div>
                                     <div className="px-4 py-3">
                                         {!selectedAddress ? (
                                             <p className="text-xs text-slate-400 italic">Sélectionnez une adresse pour détecter la zone</p>
-                                        ) : loadingPlu ? (
+                                        ) : loadingPlu && !pluInfo ? (
                                             <div className="space-y-2 animate-pulse">
                                                 <div className="h-5 bg-slate-100 rounded-md w-24" />
                                                 <div className="h-3 bg-slate-100 rounded w-16" />
@@ -364,10 +441,45 @@ export default function NewProjectPage() {
                                                 <input type="text" value={manualPluZone} onChange={(e) => setManualPluZone(e.target.value)} placeholder="UB, UC, AU..." className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-xs placeholder-slate-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 transition-all" autoFocus />
                                                 <button type="button" onClick={() => { setShowManualPluEdit(false); if (manualPluZone.trim()) setPluInfo({ zoneType: manualPluZone.trim(), zoneName: manualPluZone.trim(), pluType: null }); }} className="text-xs text-blue-500 hover:text-blue-600 font-medium">{t("newProj.savePlu")}</button>
                                             </div>
+                                        ) : detectedZones.length > 1 ? (
+                                            /* ── Multiple zones detected across parcels ── */
+                                            <div>
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    {detectedZones.map((z) => (
+                                                        <span
+                                                            key={z.code}
+                                                            className="px-2.5 py-1 rounded-lg text-sm font-bold border"
+                                                            style={{
+                                                                backgroundColor: `${getZoneColor(z.code)}12`,
+                                                                color: getZoneColor(z.code),
+                                                                borderColor: `${getZoneColor(z.code)}30`,
+                                                            }}
+                                                        >
+                                                            {z.code}
+                                                        </span>
+                                                    ))}
+                                                    {pluInfo?.pluType && (
+                                                        <span className="text-xs text-slate-500 font-medium">{pluInfo.pluType}</span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 mt-1.5">
+                                                    {detectedZones.length} zones détectées sur les parcelles sélectionnées
+                                                </p>
+                                                <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[11px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1 transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.modify")}</button>
+                                            </div>
                                         ) : pluInfo?.zoneType || pluInfo?.zoneName || manualPluZone.trim() ? (
                                             <div>
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold border border-blue-100">{manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}</span>
+                                                    <span
+                                                        className="px-2.5 py-1 rounded-lg text-sm font-bold border"
+                                                        style={{
+                                                            backgroundColor: `${getZoneColor(manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName || "")}12`,
+                                                            color: getZoneColor(manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName || ""),
+                                                            borderColor: `${getZoneColor(manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName || "")}30`,
+                                                        }}
+                                                    >
+                                                        {manualPluZone.trim() || pluInfo?.zoneType || pluInfo?.zoneName}
+                                                    </span>
                                                     <span className="text-xs text-slate-500 font-medium">{pluInfo?.pluType === "PLUi" ? "PLUi" : pluInfo?.pluType === "RNU" ? "RNU" : pluInfo?.pluType === "CC" ? "CC" : pluInfo?.pluType === "POS" ? "POS" : pluInfo?.pluType ? pluInfo.pluType : ""}</span>
                                                 </div>
                                                 <button type="button" onClick={() => { setShowManualPluEdit(true); if (!manualPluZone && (pluInfo?.zoneType || pluInfo?.zoneName)) setManualPluZone(pluInfo.zoneType || pluInfo.zoneName || ""); }} className="text-[11px] text-slate-400 hover:text-slate-700 inline-flex items-center gap-1 mt-1.5 transition-colors"><Pencil className="w-3 h-3" /> {t("newProj.modify")}</button>
@@ -541,6 +653,7 @@ export default function NewProjectPage() {
                                                 {parcels.map((p) => {
                                                     const selected = selectedParcelIds.includes(p.id);
                                                     const isMain = parcels[0]?.id === p.id;
+                                                    const parcelZone = parcelZoneMap[p.id];
                                                     const toggle = () => setSelectedParcelIds((prev) => prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]);
                                                     return (
                                                         <div key={p.id} role="button" tabIndex={0} aria-pressed={selected}
@@ -554,7 +667,22 @@ export default function NewProjectPage() {
                                                             <span className={cn("w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors", selected ? "border-blue-500 bg-blue-500" : "border-slate-300")}>
                                                                 {selected && <Check className="w-2.5 h-2.5 text-white" />}
                                                             </span>
-                                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold text-slate-500 uppercase shrink-0 min-w-[28px] text-center">{p.section}</span>
+                                                            {/* Zone badge — per-parcel zone from GPU API */}
+                                                            {selected && parcelZone ? (
+                                                                <span
+                                                                    className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0 min-w-[28px] text-center border"
+                                                                    style={{
+                                                                        backgroundColor: `${getZoneColor(parcelZone.zoneCode)}15`,
+                                                                        color: getZoneColor(parcelZone.zoneCode),
+                                                                        borderColor: `${getZoneColor(parcelZone.zoneCode)}30`,
+                                                                    }}
+                                                                    title={parcelZone.zoneName}
+                                                                >
+                                                                    {parcelZone.zoneCode}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold text-slate-500 uppercase shrink-0 min-w-[28px] text-center">{p.section}</span>
+                                                            )}
                                                             <span className="font-medium text-slate-800 flex-1 truncate">{isMain ? "★ " : ""}N°{p.number}</span>
                                                             <span className="tabular-nums text-slate-400 shrink-0 font-medium">{p.area.toLocaleString()} m²</span>
                                                         </div>

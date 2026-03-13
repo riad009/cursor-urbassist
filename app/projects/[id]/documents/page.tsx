@@ -18,6 +18,7 @@ import {
     getDocumentsForProject,
     type AuthorizationDocument,
 } from "@/lib/authorization-documents";
+import { CREDIT_COSTS } from "@/lib/credit-costs";
 
 /* ── Circular checkmark SVG ──────────────────────────────────────────────── */
 function CircleCheck({ className }: { className?: string }) {
@@ -327,7 +328,7 @@ export default function DocumentsPage({
                                             : "Gagnez du temps : nous remplissons automatiquement les champs administratifs."}
                                     </p>
                                 </div>
-                                <span className="text-sm font-bold text-indigo-600 shrink-0">5€</span>
+                                <span className="text-sm font-bold text-indigo-600 shrink-0">{CREDIT_COSTS.ADDON_CERFA_EUR}€</span>
                             </button>
 
                             {/* PLU Option */}
@@ -357,7 +358,7 @@ export default function DocumentsPage({
                                             : "Vérification de la conformité de votre projet avec le règlement local."}
                                     </p>
                                 </div>
-                                <span className="text-sm font-bold text-indigo-600 shrink-0">€15</span>
+                                <span className="text-sm font-bold text-indigo-600 shrink-0">€{CREDIT_COSTS.ADDON_PLU_ANALYSIS_EUR}</span>
                             </button>
                         </div>
 

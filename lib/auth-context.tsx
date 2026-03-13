@@ -28,15 +28,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Deduplication & caching refs ──────────────────────────────────
-  /** In-flight promise — if a fetch is already running, subsequent callers await the same promise */
-  const pendingRef = useRef<Promise<User | null> | null>(null);
   /** Timestamp of last successful fetch */
   const lastFetchRef = useRef<number>(0);
   /** Cached user from last successful fetch */
   const cachedUserRef = useRef<User | null>(null);
-  /** AbortController for cancelling stale requests */
-  const abortRef = useRef<AbortController | null>(null);
+  /**
+   * In-flight promise — deduplicates concurrent calls.
+   * IMPORTANT: We intentionally do NOT abort in-flight requests on cleanup.
+   * React strict mode (and concurrent features) unmount+remount, which was
+   * aborting the initial /api/auth/me fetch and leaving user === null.
+   */
+  const pendingRef = useRef<Promise<User | null> | null>(null);
 
   const fetchSession = useCallback(async (force = false): Promise<User | null> => {
     // ── Stale-while-revalidate: return cached data if fresh ──
@@ -50,16 +52,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return pendingRef.current;
     }
 
-    // Cancel any previous request
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
     const promise = (async (): Promise<User | null> => {
       try {
         const res = await fetch("/api/auth/me", {
           credentials: "include",
-          signal: controller.signal,
         });
         if (res.ok) {
           const { user: fetchedUser } = await res.json();
@@ -71,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         lastFetchRef.current = Date.now();
         return null;
       } catch {
-        // Aborted or network error — don't update cache
+        // Network error — return cached value (may be null on first load)
         return cachedUserRef.current;
       } finally {
         pendingRef.current = null;
@@ -94,20 +90,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchSession]);
 
   useEffect(() => {
-    let cancelled = false;
+    // We use a `mounted` flag to guard stale state updates, but we
+    // intentionally do NOT abort the fetch. In React strict mode the
+    // component unmounts → remounts instantly; aborting would kill the
+    // in-flight request and leave session === null on first render.
+    let mounted = true;
+
     fetchSession()
       .then((result) => {
-        if (!cancelled) setUser(result);
+        if (mounted) setUser(result);
       })
       .catch(() => {
-        if (!cancelled) setUser(null);
+        if (mounted) setUser(null);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (mounted) setLoading(false);
       });
+
     return () => {
-      cancelled = true;
-      if (abortRef.current) abortRef.current.abort();
+      mounted = false;
+      // Note: NOT aborting the request here — this is intentional.
+      // The deduplication ref ensures the remounted effect awaits
+      // the same in-flight promise and applies the result.
     };
   }, [fetchSession]);
 

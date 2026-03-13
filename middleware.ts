@@ -11,9 +11,7 @@ import { jwtVerify } from "jose";
  * NOTE: We use `jose` (edge-compatible) instead of `jsonwebtoken` (Node-only).
  */
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "urbassist-secret-key-change-in-production"
-);
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
 
 /** Routes that do NOT require authentication */
 const PUBLIC_PATHS = [
@@ -59,12 +57,13 @@ export async function middleware(request: NextRequest) {
     await jwtVerify(token, JWT_SECRET);
     return NextResponse.next();
   } catch {
-    // Token expired or invalid → clear cookie and redirect
+    // Token expired or invalid → redirect to login WITHOUT deleting cookie.
+    // Cookie deletion only happens via explicit /api/auth/logout.
+    // This prevents transient server-restart verification failures from
+    // permanently destroying a valid session.
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
-    const response = NextResponse.redirect(loginUrl);
-    response.cookies.delete("auth-token");
-    return response;
+    return NextResponse.redirect(loginUrl);
   }
 }
 

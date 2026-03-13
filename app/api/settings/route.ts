@@ -6,17 +6,20 @@ const PLU_ANALYSIS_CREDITS = parseInt(
   10
 );
 
-// PLU analysis pricing in euros (for display / Stripe checkout fallback)
-const PLU_FIRST_ANALYSIS_PRICE_EUR = parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
-const PLU_RELAUNCH_PRICE_EUR = parseFloat(process.env.PLU_RELAUNCH_PRICE || "5");
-
 /** Public settings used by the frontend (credits costs, prices, etc.) */
 export async function GET() {
   return NextResponse.json({
-    // Legacy euro pricing (kept for backward compat)
     pluAnalysisCredits: isNaN(PLU_ANALYSIS_CREDITS) ? 3 : PLU_ANALYSIS_CREDITS,
-    pluFirstAnalysisPriceEur: PLU_FIRST_ANALYSIS_PRICE_EUR,
-    pluRelaunchPriceEur: PLU_RELAUNCH_PRICE_EUR,
+
+    // Backward-compat: used by /plu-analysis page
+    pluFirstAnalysisPriceEur: CREDIT_COSTS.DP_FIRST_EUR,
+    pluRelaunchPriceEur: CREDIT_COSTS.DP_RELAUNCH_EUR,
+
+    // Per-type euro pricing
+    dpFirstPriceEur: CREDIT_COSTS.DP_FIRST_EUR,
+    dpRelaunchPriceEur: CREDIT_COSTS.DP_RELAUNCH_EUR,
+    pcFirstPriceEur: CREDIT_COSTS.PC_FIRST_EUR,
+    pcRelaunchPriceEur: CREDIT_COSTS.PC_RELAUNCH_EUR,
 
     // Credit costs for all features
     creditCosts: {

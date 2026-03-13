@@ -1470,7 +1470,19 @@ export default function ProjectDescriptionPage({
                                                             <div className="space-y-3">
                                                                 <label className="text-sm text-slate-600">
                                                                     {isEn ? "Specify the type of work (Multiple choices possible):" : "Précisez le type de travaux (Choix multiples possibles) :"}
+                                                                    <span className="text-red-500 ml-0.5">*</span>
                                                                 </label>
+                                                                {addWorkTypes.length === 0 && (
+                                                                    <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 shadow-sm">
+                                                                        <div className="relative shrink-0">
+                                                                            <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                                                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                                                                        </div>
+                                                                        <p className="text-xs font-semibold text-amber-700">
+                                                                            {isEn ? "Please select at least one type of work to continue." : "Veuillez sélectionner au moins un type de travaux pour continuer."}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
                                                                 <div className="flex flex-wrap gap-2">
                                                                     {([
                                                                         { value: "extension" as WorkType, label: isEn ? "Extension / Raising the Height" : "Extension / Surélévation" },
@@ -1658,7 +1670,9 @@ export default function ProjectDescriptionPage({
                                                         disabled={
                                                             addNature === "outdoor"
                                                                 ? (addOutdoorLayout === "pool" ? addPoolSurfaceArea <= 0 : addFootprint <= 0)
-                                                                : addFootprint <= 0
+                                                                : addNature === "existing_extension"
+                                                                    ? (addFootprint <= 0 || addWorkTypes.length === 0)
+                                                                    : addFootprint <= 0
                                                         }
                                                         onClick={handleAddJob}
                                                         className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold disabled:opacity-40 hover:bg-indigo-700 transition-all text-sm"

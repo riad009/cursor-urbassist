@@ -321,22 +321,6 @@ function ChangeDestinationSection({ isEn, mat, update }: { isEn: boolean; mat: J
                     placeholder={isEn ? "Examples: Replacing wooden windows with PVC, repainting the facade in a stone color..." : "Ex: Remplacement des fenêtres bois par du PVC, repeinture de la façade en couleur pierre..."}
                 />
             </div>
-            <div className="space-y-2">
-                <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">
-                    {isEn ? "ASSOCIATED FACADE MODIFICATION?" : "MODIFICATION DE FAÇADE ASSOCIÉE ?"}
-                </p>
-                <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={mat.facadeModification || false}
-                        onChange={e => update(m => ({ ...m, facadeModification: e.target.checked }))}
-                        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-sm text-slate-700">
-                        {isEn ? "Yes, the facades have been modified." : "Oui, les façades ont été modifiées."}
-                    </span>
-                </label>
-            </div>
         </div>
     );
 }

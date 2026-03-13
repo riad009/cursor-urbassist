@@ -1,9 +1,9 @@
 /**
  * renderProcessedSite — Fabric.js rendering of ProcessedSiteData
  *
- * STRICT MANDATE:
- *   - Render ONLY the unified globalBoundary (NO individual parcels)
- *   - CAD Aesthetics: dark slate border (#1e293b), architectural fill (#f8fafc)
+ * Renders:
+ *   - Individual parcel polygons with distinct colors (matching 3D viewer palette)
+ *   - Unified globalBoundary as dashed overlay on top
  *   - Edge measurement labels at midpoints ("14.5m")
  *   - NGF elevation labels at corner vertices ("NGF: 12.3m")
  *
@@ -122,13 +122,48 @@ export function renderProcessedSite(
   // ── Step 2: Clear any previous processed layers ───────────────────────────
   clearProcessedLayers(canvas);
 
-  // ── Step 3: Draw global boundary ONLY ─────────────────────────────────────
+  // ── Step 3: Draw individual parcel polygons ────────────────────────────────
+  // Each parcel gets a distinct color (matching the 3D viewer palette)
+  const PARCEL_COLORS = [
+    { fill: "rgba(96, 165, 250, 0.25)",  stroke: "#3b82f6" },   // Blue
+    { fill: "rgba(52, 211, 153, 0.25)",  stroke: "#10b981" },   // Emerald
+    { fill: "rgba(251, 191, 36, 0.20)",  stroke: "#f59e0b" },   // Amber
+    { fill: "rgba(167, 139, 250, 0.25)", stroke: "#8b5cf6" },   // Violet
+    { fill: "rgba(244, 114, 182, 0.20)", stroke: "#ec4899" },   // Pink
+    { fill: "rgba(45, 212, 191, 0.25)",  stroke: "#14b8a6" },   // Teal
+  ];
+
+  projected.parcels.forEach((parcel, idx) => {
+    if (parcel.points.length < 3) return;
+    const pal = PARCEL_COLORS[idx % PARCEL_COLORS.length];
+    const parcelPoly = new fabric.Polygon(parcel.points, {
+      left: parcel.left,
+      top: parcel.top,
+      fill: pal.fill,
+      stroke: pal.stroke,
+      strokeWidth: 2,
+      strokeLineJoin: "round",
+      objectCaching: false,
+      selectable: false,
+      evented: false,
+      [TAG_PARCEL]: true,
+      isParcel: true,
+      elementType: "parcel",
+      elementName: parcel.section && parcel.number
+        ? `Parcelle ${parcel.section} ${parcel.number}`
+        : `Parcelle ${idx + 1}`,
+    });
+    canvas.add(parcelPoly);
+  });
+
+  // ── Step 3b: Draw global boundary as dashed overlay on top ────────────────
   const boundaryPoly = new fabric.Polygon(projected.boundary.points, {
     left: projected.boundary.left,
     top: projected.boundary.top,
-    fill: BOUNDARY_STYLE.fill,
+    fill: "transparent",                     // No fill — individual parcels handle it
     stroke: BOUNDARY_STYLE.stroke,
     strokeWidth: BOUNDARY_STYLE.strokeWidth,
+    strokeDashArray: [10, 5],                // Dashed line for property boundary
     strokeLineJoin: "miter",
     strokeLineCap: "square",
     objectCaching: false,

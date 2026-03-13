@@ -3,7 +3,16 @@ import { cookies } from "next/headers";
 import { prisma } from "./prisma";
 import * as bcrypt from "bcryptjs";
 
-const JWT_SECRET = process.env.JWT_SECRET || "urbassist-secret-key-change-in-production";
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "FATAL: JWT_SECRET environment variable is not set. " +
+      "Generate one with: openssl rand -base64 32 — then add it to .env"
+    );
+  }
+  return secret;
+}
 
 export interface AuthUser {
   id: string;
@@ -29,7 +38,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 export async function createToken(user: AuthUser): Promise<string> {
   return jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, credits: user.credits },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "7d" }
   );
 }
@@ -46,7 +55,7 @@ export async function verifyToken(
   opts?: { fetchFreshCredits?: boolean }
 ): Promise<AuthUser | null> {
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as {
+    const payload = jwt.verify(token, getJwtSecret()) as {
       id: string;
       email: string;
       name?: string | null;

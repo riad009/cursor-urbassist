@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { CREDIT_COSTS, getBaseFilePrice } from "@/lib/credit-costs";
 
 const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
 
@@ -220,7 +221,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === "plu_analysis") {
-      // Pay-per-use PLU analysis: €15 first, €5 relaunch
+      // Pay-per-use file generation: base price + optional add-ons (CERFA, PLU analysis)
       if (!projectId) {
         return NextResponse.json(
           { error: "projectId is required for PLU analysis payment" },
@@ -238,14 +239,21 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Read add-on selections from projectDescription (saved by documents page)
+      const desc = (project.projectDescription as Record<string, unknown>) || {};
+      const wantCerfa = desc.wantCerfa === true;
+      const wantPluAnalysis = desc.wantPluAnalysis === true;
+
       const isRelaunch = project.pluAnalysisCount > 0;
-      const firstPrice = parseFloat(process.env.PLU_FIRST_ANALYSIS_PRICE || "15");
-      const relaunchPrice = parseFloat(process.env.PLU_RELAUNCH_PRICE || "5");
-      const priceEur = isRelaunch ? relaunchPrice : firstPrice;
-      const priceCents = Math.round(priceEur * 100);
-      const label = isRelaunch
-        ? `PLU Analysis Relaunch — ${project.name || "Project"}`
-        : `PLU Analysis — ${project.name || "Project"}`;
+      const basePrice = getBaseFilePrice(project.authorizationType, project.pluAnalysisCount);
+      const cerfaPrice = CREDIT_COSTS.ADDON_CERFA_EUR;
+      const pluAddonPrice = CREDIT_COSTS.ADDON_PLU_ANALYSIS_EUR;
+
+      const totalPrice = basePrice + (wantCerfa ? cerfaPrice : 0) + (wantPluAnalysis ? pluAddonPrice : 0);
+
+      const baseLabel = isRelaunch
+        ? `Complete File (Relaunch) — ${project.name || "Project"}`
+        : `Complete File — ${project.name || "Project"}`;
 
       if (STRIPE_SECRET) {
         try {
@@ -257,23 +265,61 @@ export async function POST(request: NextRequest) {
             : `/projects/${encodeURIComponent(projectId)}/payment?success=true&type=plu_analysis`;
           const cancelPath = `/projects/${encodeURIComponent(projectId)}/payment?cancelled=true`;
 
+          // Build line items dynamically based on add-on selections
+          const lineItems: {
+            price_data: {
+              currency: string;
+              product_data: { name: string; description: string };
+              unit_amount: number;
+            };
+            quantity: number;
+          }[] = [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: baseLabel,
+                  description: isRelaunch
+                    ? "Updated file generation after project modifications"
+                    : "Complete file generation for your construction project",
+                },
+                unit_amount: Math.round(basePrice * 100),
+              },
+              quantity: 1,
+            },
+          ];
+
+          if (wantCerfa) {
+            lineItems.push({
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: "Pre-filled CERFA Form",
+                  description: "Automatic completion of all administrative CERFA fields",
+                },
+                unit_amount: Math.round(cerfaPrice * 100),
+              },
+              quantity: 1,
+            });
+          }
+
+          if (wantPluAnalysis) {
+            lineItems.push({
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: "PLU Regulatory Analysis",
+                  description: "Verification of project compliance with local planning regulations",
+                },
+                unit_amount: Math.round(pluAddonPrice * 100),
+              },
+              quantity: 1,
+            });
+          }
+
           const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
-            line_items: [
-              {
-                price_data: {
-                  currency: "eur",
-                  product_data: {
-                    name: label,
-                    description: isRelaunch
-                      ? "Updated PLU regulatory analysis after project modifications"
-                      : "Complete PLU regulatory analysis for your construction project",
-                  },
-                  unit_amount: priceCents,
-                },
-                quantity: 1,
-              },
-            ],
+            line_items: lineItems,
             mode: "payment",
             success_url: `${getSiteUrl(request)}${successPath}`,
             cancel_url: `${getSiteUrl(request)}${cancelPath}`,
@@ -282,7 +328,9 @@ export async function POST(request: NextRequest) {
               type: "plu_analysis",
               projectId: String(projectId),
               isRelaunch: isRelaunch ? "true" : "false",
-              priceEur: String(priceEur),
+              priceEur: String(totalPrice),
+              wantCerfa: wantCerfa ? "true" : "false",
+              wantPluAnalysis: wantPluAnalysis ? "true" : "false",
             },
           });
 
@@ -291,10 +339,10 @@ export async function POST(request: NextRequest) {
             data: {
               userId: user.id,
               stripeSessionId: session.id,
-              amount: priceEur,
+              amount: totalPrice,
               type: "plu_analysis",
               status: "pending",
-              metadata: { projectId, isRelaunch },
+              metadata: { projectId, isRelaunch, wantCerfa, wantPluAnalysis, totalPrice },
             },
           });
 
@@ -318,17 +366,17 @@ export async function POST(request: NextRequest) {
           userId: user.id,
           amount: 0,
           type: isRelaunch ? "PLU_ANALYSIS_RELAUNCH" : "PLU_ANALYSIS",
-          description: `PLU analysis (demo mode) — €${priceEur}`,
-          metadata: { projectId, isRelaunch, priceEur },
+          description: `Complete file (demo mode) — €${totalPrice} (base: €${basePrice}${wantCerfa ? ` + CERFA: €${cerfaPrice}` : ""}${wantPluAnalysis ? ` + PLU: €${pluAddonPrice}` : ""})`,
+          metadata: { projectId, isRelaunch, priceEur: totalPrice, wantCerfa, wantPluAnalysis },
         },
       });
 
       return NextResponse.json({
         success: true,
         isRelaunch,
-        priceEur,
+        priceEur: totalPrice,
         pluAnalysisCount: project.pluAnalysisCount + 1,
-        message: `PLU analysis payment recorded (demo mode — €${priceEur}). Set STRIPE_SECRET_KEY to enable real payments.`,
+        message: `Payment recorded (demo mode — €${totalPrice}). Set STRIPE_SECRET_KEY to enable real payments.`,
       });
     }
 

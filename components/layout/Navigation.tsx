@@ -26,6 +26,9 @@ import {
   Plus,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import dynamic from "next/dynamic";
+
+const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/ui/LanguageToggle";
 import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute, getPhaseSteps, getStepPhase } from "@/lib/step-flow";
@@ -56,6 +59,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showDataModal, setShowDataModal] = useState(false);
   const { user, loading: authLoading, logout } = useAuth();
   const { t } = useLanguage();
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
@@ -131,6 +135,12 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
             </button>
             <button className="p-2 rounded-full hover:bg-slate-100 transition-colors">
               <Settings className="w-5 h-5 text-slate-500" />
+            </button>
+            <button
+              onClick={() => setShowDataModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/25 transition-all"
+            >
+              🔍 ShowData
             </button>
             <div className="w-px h-8 bg-slate-200" />
             {authLoading ? (
@@ -281,6 +291,9 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
       <main className={cn("min-h-screen", showStepBar ? "pt-32" : "pt-16")}>
         {children}
       </main>
+
+      {/* Data Debug Modal */}
+      <DataDebugModal open={showDataModal} onClose={() => setShowDataModal(false)} />
     </div>
   );
 }
