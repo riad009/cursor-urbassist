@@ -87,10 +87,10 @@ export function ShowDataPanel({ data, onClose }: ShowDataPanelProps) {
         );
     }
 
-    const totalPerimeter = data.edges.reduce((s, e) => s + e.lengthMeters, 0);
-    const totalArea = data.parcels.reduce((s, p) => s + p.area, 0);
-    const boundaryType = data.globalBoundary.geometry.type;
-    const vertexCount = data.vertices3D.length;
+    const totalPerimeter = data.edges?.reduce((s, e) => s + e.lengthMeters, 0) ?? 0;
+    const totalArea = data.parcels?.reduce((s, p) => s + p.area, 0) ?? 0;
+    const boundaryType = data.globalBoundary?.geometry?.type ?? (data as any).mergedBoundary?.geometry?.type ?? "N/A";
+    const vertexCount = data.vertices3D?.length ?? 0;
 
     return (
         <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-gradient-to-b from-slate-50/98 to-white/98 backdrop-blur-xl border-l border-slate-200 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
@@ -157,12 +157,12 @@ export function ShowDataPanel({ data, onClose }: ShowDataPanelProps) {
                         <DataRow label="Vertices" value={vertexCount} />
                         <DataRow label="Edges" value={data.edges.length} />
                         <DataRow label="Total perimeter" value={`${totalPerimeter.toFixed(1)} m`} />
-                        <DataRow label="Contiguous" value={data.globalBoundary.properties?.isContiguous ? "Yes" : "No"} />
+                        <DataRow label="Contiguous" value={data.globalBoundary?.properties?.isContiguous ? "Yes" : "No"} />
                     </div>
                     <div className="mt-3">
                         <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-1.5">Reference Point</p>
                         <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 font-mono text-xs text-slate-600">
-                            {data.refPoint.lat.toFixed(6)}°N, {data.refPoint.lng.toFixed(6)}°E
+                            {data.refPoint ? `${data.refPoint.lat.toFixed(6)}°N, ${data.refPoint.lng.toFixed(6)}°E` : "Not computed"}
                         </div>
                     </div>
                 </Section>
@@ -199,11 +199,11 @@ export function ShowDataPanel({ data, onClose }: ShowDataPanelProps) {
                     color="bg-violet-50 text-violet-600"
                 >
                     <div className="space-y-0.5">
-                        <DataRow label="Min elevation" value={`${data.stats.minElevation.toFixed(2)} m`} />
-                        <DataRow label="Max elevation" value={`${data.stats.maxElevation.toFixed(2)} m`} />
-                        <DataRow label="Mean elevation" value={`${data.stats.meanElevation.toFixed(2)} m`} />
-                        <DataRow label="Elevation range" value={`${(data.stats.maxElevation - data.stats.minElevation).toFixed(2)} m`} />
-                        {data.stats.slopePercent != null && (
+                        <DataRow label="Min elevation" value={`${(data.stats?.minElevation ?? 0).toFixed(2)} m`} />
+                        <DataRow label="Max elevation" value={`${(data.stats?.maxElevation ?? 0).toFixed(2)} m`} />
+                        <DataRow label="Mean elevation" value={`${(data.stats?.meanElevation ?? 0).toFixed(2)} m`} />
+                        <DataRow label="Elevation range" value={`${((data.stats?.maxElevation ?? 0) - (data.stats?.minElevation ?? 0)).toFixed(2)} m`} />
+                        {data.stats?.slopePercent != null && (
                             <DataRow label="Slope" value={`${data.stats.slopePercent.toFixed(1)} %`} />
                         )}
                     </div>

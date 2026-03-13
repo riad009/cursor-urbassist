@@ -16,6 +16,15 @@ import type {
   ProjectedSiteData,
 } from "@/types/processed-site-data";
 import { projectToCanvas } from "@/lib/projectToCanvas";
+import {
+  computePolygonOffset,
+  classifyBoundaryEdges,
+  toEdgeSetbacks,
+  type Point2D,
+  type EdgeSetback,
+  type SetbackResult,
+} from "@/lib/polygon-offset";
+import { polygonToSetbackSegments, type SetbackSegment } from "@/lib/setback-snap";
 
 // ─── CAD Styling Constants ───────────────────────────────────────────────────
 
@@ -50,12 +59,22 @@ const VERTEX_DOT_STYLE = {
   strokeWidth: 1.5,
 };
 
+// ─── Setback Styling Constants ───────────────────────────────────────────────
+
+const SETBACK_STYLE = {
+  front: { stroke: "#ef4444", label: "#991b1b" },  // Red: road setback
+  side:  { stroke: "#3b82f6", label: "#1e3a5f" },  // Blue: neighbor setback
+  rear:  { stroke: "#8b5cf6", label: "#4c1d95" },  // Violet: rear setback
+};
+
 // ─── Tag names for selective clearing ────────────────────────────────────────
 
 const TAG_BOUNDARY = "processedBoundary";
 const TAG_EDGE_LABEL = "processedEdgeLabel";
 const TAG_VERTEX_LABEL = "processedVertexLabel";
 const TAG_VERTEX_DOT = "processedVertexDot";
+const TAG_SETBACK = "processedSetback";
+const TAG_SETBACK_LABEL = "processedSetbackLabel";
 
 // For backwards-compat clearing: also clear old parcel tags
 const TAG_PARCEL = "processedParcel";
@@ -83,12 +102,13 @@ interface FabricStatic {
   ) => FabricObject;
   Text: new (text: string, options: Record<string, unknown>) => FabricObject;
   Circle: new (options: Record<string, unknown>) => FabricObject;
+  Line: new (coords: number[], options: Record<string, unknown>) => FabricObject;
 }
 
 // ─── Clear previously rendered processed layers ──────────────────────────────
 
 export function clearProcessedLayers(canvas: FabricCanvas): void {
-  const tags = [TAG_BOUNDARY, TAG_PARCEL, TAG_EDGE_LABEL, TAG_VERTEX_LABEL, TAG_VERTEX_DOT];
+  const tags = [TAG_BOUNDARY, TAG_PARCEL, TAG_EDGE_LABEL, TAG_VERTEX_LABEL, TAG_VERTEX_DOT, TAG_SETBACK, TAG_SETBACK_LABEL];
   const toRemove = canvas.getObjects().filter((obj) =>
     tags.some((tag) => obj[tag] === true)
   );
@@ -97,25 +117,43 @@ export function clearProcessedLayers(canvas: FabricCanvas): void {
   }
 }
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface SetbackConfig {
+  /** PLU setback distances in metres */
+  front: number;
+  side: number;
+  rear: number;
+  /** Optional: indices of boundary edges that face a road */
+  roadEdgeIndices?: number[];
+}
+
+export interface RenderResult extends ProjectedSiteData {
+  /** Setback segments for the snap engine */
+  setbackSegments: SetbackSegment[];
+  /** Computed setback result for debugging */
+  setbackResult: SetbackResult | null;
+}
+
 // ─── Main Render Function ────────────────────────────────────────────────────
 
 /**
  * Render the fully processed site data onto a Fabric.js canvas.
  *
- * RENDERS ONLY:
- *   1. Global boundary polygon (unified, CAD-styled)
- *   2. Edge measurement labels ("14.5m")
- *   3. NGF elevation labels at vertices ("NGF: 12.3m")
- *
- * DOES NOT RENDER:
- *   - Individual parcels (FORBIDDEN per client mandate)
+ * RENDERS:
+ *   1. Individual parcel polygons with distinct colors
+ *   2. Global boundary polygon (unified, CAD-styled)
+ *   3. Parametric setback / buildable zone (dashed interior line)
+ *   4. Edge measurement labels ("14.5m")
+ *   5. NGF elevation labels at vertices ("NGF: 12.3m")
  */
 export function renderProcessedSite(
   fabric: FabricStatic,
   canvas: FabricCanvas,
   data: ProcessedSiteData,
-  options: CanvasProjectionOptions
-): ProjectedSiteData {
+  options: CanvasProjectionOptions,
+  setbackConfig?: SetbackConfig
+): RenderResult {
   // ── Step 1: Project all data to canvas coordinates ────────────────────────
   const projected = projectToCanvas(data, options);
 
@@ -139,6 +177,8 @@ export function renderProcessedSite(
     const parcelPoly = new fabric.Polygon(parcel.points, {
       left: parcel.left,
       top: parcel.top,
+      originX: "center",
+      originY: "center",
       fill: pal.fill,
       stroke: pal.stroke,
       strokeWidth: 2,
@@ -177,6 +217,119 @@ export function renderProcessedSite(
     elementName: "Limite de propriété",
   });
   canvas.add(boundaryPoly);
+
+  // ── Step 3c: Draw parametric setback / buildable zone ───────────────────
+  let setbackSegments: SetbackSegment[] = [];
+  let setbackResult: SetbackResult | null = null;
+
+  if (setbackConfig && projected.boundary.points.length >= 3) {
+    // Convert projected boundary from centroid-relative to absolute canvas coords
+    const absBoundaryPts: Point2D[] = projected.boundary.points.map((p) => ({
+      x: p.x + projected.boundary.left,
+      y: p.y + projected.boundary.top,
+    }));
+
+    // Classify each edge as front/side/rear
+    const classified = classifyBoundaryEdges(
+      absBoundaryPts,
+      setbackConfig,
+      options.pixelsPerMeter,
+      setbackConfig.roadEdgeIndices
+    );
+
+    // Convert to pixel-based setbacks
+    const edgeSetbacks = toEdgeSetbacks(classified, options.pixelsPerMeter);
+
+    // Compute the inset polygon
+    setbackResult = computePolygonOffset(absBoundaryPts, edgeSetbacks);
+
+    if (setbackResult.points.length >= 3) {
+      // Compute centroid of inset polygon for Fabric.js positioning
+      const n = setbackResult.points.length;
+      const insetCx = setbackResult.points.reduce((s, p) => s + p.x, 0) / n;
+      const insetCy = setbackResult.points.reduce((s, p) => s + p.y, 0) / n;
+      const relativeInset = setbackResult.points.map((p) => ({
+        x: p.x - insetCx,
+        y: p.y - insetCy,
+      }));
+
+      // Draw the buildable zone polygon (dashed)
+      const insetPoly = new fabric.Polygon(relativeInset, {
+        left: insetCx,
+        top: insetCy,
+        originX: "center",
+        originY: "center",
+        fill: "rgba(59, 130, 246, 0.04)",
+        stroke: "#3b82f6",
+        strokeWidth: 2,
+        strokeDashArray: [6, 4],
+        strokeLineJoin: "miter",
+        strokeLineCap: "butt",
+        objectCaching: false,
+        selectable: false,
+        evented: false,
+        [TAG_SETBACK]: true,
+        elementType: "setbackZone",
+        elementName: "Zone constructible",
+      });
+      canvas.add(insetPoly);
+
+      // Draw individual setback edge lines with type-specific colors
+      for (let i = 0; i < setbackResult.points.length; i++) {
+        const j = (i + 1) % setbackResult.points.length;
+        const edgeType = setbackResult.edgeTypes[i] || "side";
+        const style = SETBACK_STYLE[edgeType];
+
+        const line = new fabric.Line(
+          [
+            setbackResult.points[i].x,
+            setbackResult.points[i].y,
+            setbackResult.points[j].x,
+            setbackResult.points[j].y,
+          ],
+          {
+            stroke: style.stroke,
+            strokeWidth: 2.5,
+            strokeDashArray: [5, 5],
+            selectable: false,
+            evented: false,
+            [TAG_SETBACK]: true,
+          }
+        );
+        canvas.add(line);
+      }
+
+      // Draw setback labels ("Recul 5m")
+      setbackResult.labels.forEach((label) => {
+        const edgeType = setbackResult!.edgeTypes[0] || "side";
+        const style = SETBACK_STYLE[edgeType];
+
+        const textObj = new fabric.Text(label.text, {
+          left: label.position.x,
+          top: label.position.y,
+          fontSize: 9,
+          fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
+          fontWeight: "600",
+          fill: style.label,
+          backgroundColor: "rgba(255, 255, 255, 0.85)",
+          padding: 3,
+          angle: (label.angle * 180) / Math.PI,
+          originX: "center",
+          originY: "center",
+          selectable: false,
+          evented: false,
+          [TAG_SETBACK_LABEL]: true,
+        });
+        canvas.add(textObj);
+      });
+
+      // Convert to segments for the snap engine
+      setbackSegments = polygonToSetbackSegments(
+        setbackResult.points,
+        setbackResult.edgeTypes
+      );
+    }
+  }
 
   // ── Step 4: Draw edge measurement labels ──────────────────────────────────
   projected.edgeLabels.forEach((label) => {
@@ -229,5 +382,9 @@ export function renderProcessedSite(
   // ── Step 6: Request render ────────────────────────────────────────────────
   canvas.requestRenderAll();
 
-  return projected;
+  return {
+    ...projected,
+    setbackSegments,
+    setbackResult,
+  };
 }

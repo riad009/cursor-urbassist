@@ -60,7 +60,7 @@ interface TerrainMeshProps {
 function TerrainMesh({ data }: TerrainMeshProps) {
   const geometry = useMemo(() => {
     const { refPoint, vertices3D, globalBoundary, stats } = data;
-    const minElev = stats.minElevation;
+    const minElev = stats?.minElevation ?? 0;
 
     // ── Step 1: Extract outer ring(s) of the globalBoundary ──────────────
     const geom = globalBoundary.geometry;
@@ -102,7 +102,7 @@ function TerrainMesh({ data }: TerrainMeshProps) {
 
     for (let i = 0; i < limit; i++) {
       const [lng, lat] = primaryRing[i];
-      const [x, z] = geoToLocal3D(lng, lat, refPoint.lng, refPoint.lat);
+      const [x, z] = geoToLocal3D(lng, lat, refPoint?.lng ?? 0, refPoint?.lat ?? 0);
       const key = `${lng.toFixed(6)},${lat.toFixed(6)}`;
       const rawElev = elevLookup.get(key) ?? minElev;
       const y = (rawElev - minElev) * VERTICAL_SCALE;
@@ -164,7 +164,7 @@ function TerrainMesh({ data }: TerrainMeshProps) {
 function BoundaryEdges({ data }: { data: ProcessedSiteData }) {
   const lineGeometry = useMemo(() => {
     const { refPoint, vertices3D, globalBoundary, stats } = data;
-    const minElev = stats.minElevation;
+    const minElev = stats?.minElevation ?? 0;
 
     const geom = globalBoundary.geometry;
     const rings: number[][][] = [];
@@ -185,7 +185,7 @@ function BoundaryEdges({ data }: { data: ProcessedSiteData }) {
     for (const ring of rings) {
       for (let i = 0; i < ring.length; i++) {
         const [lng, lat] = ring[i];
-        const [x, z] = geoToLocal3D(lng, lat, refPoint.lng, refPoint.lat);
+        const [x, z] = geoToLocal3D(lng, lat, refPoint?.lng ?? 0, refPoint?.lat ?? 0);
         const key = `${lng.toFixed(6)},${lat.toFixed(6)}`;
         const rawElev = elevLookup.get(key) ?? minElev;
         const y = (rawElev - minElev) * VERTICAL_SCALE + 0.15; // Slightly above surface
@@ -208,10 +208,10 @@ function BoundaryEdges({ data }: { data: ProcessedSiteData }) {
 function CornerPosts({ data }: { data: ProcessedSiteData }) {
   const posts = useMemo(() => {
     const { refPoint, vertices3D, stats } = data;
-    const minElev = stats.minElevation;
+    const minElev = stats?.minElevation ?? 0;
 
     return vertices3D.map((v) => {
-      const [x, z] = geoToLocal3D(v.lng, v.lat, refPoint.lng, refPoint.lat);
+      const [x, z] = geoToLocal3D(v.lng, v.lat, refPoint?.lng ?? 0, refPoint?.lat ?? 0);
       const y = (v.elevation - minElev) * VERTICAL_SCALE;
       return { x, y, z, elevation: v.elevation };
     });
@@ -283,10 +283,10 @@ function SurroundingGround() {
 
 function CameraSetup({ data }: { data: ProcessedSiteData }) {
   const { vertices3D, refPoint, stats } = data;
-  const minElev = stats.minElevation;
+  const minElev = stats?.minElevation ?? 0;
 
   const positions = vertices3D.map((v) => {
-    const [x, z] = geoToLocal3D(v.lng, v.lat, refPoint.lng, refPoint.lat);
+    const [x, z] = geoToLocal3D(v.lng, v.lat, refPoint?.lng ?? 0, refPoint?.lat ?? 0);
     return { x, z };
   });
 
@@ -296,7 +296,7 @@ function CameraSetup({ data }: { data: ProcessedSiteData }) {
   ) || 20;
 
   const dist = maxDim * 2.5;
-  const elevCenter = ((stats.maxElevation - minElev) * VERTICAL_SCALE) / 2;
+  const elevCenter = (((stats?.maxElevation ?? 0) - minElev) * VERTICAL_SCALE) / 2;
 
   return (
     <OrbitControls
@@ -324,7 +324,7 @@ export default function RealTerrain3D({ data, className }: RealTerrain3DProps) {
   // Calculate initial camera position based on terrain bounds
   const cameraConfig = useMemo(() => {
     const positions = data.vertices3D.map((v) => {
-      const [x, z] = geoToLocal3D(v.lng, v.lat, data.refPoint.lng, data.refPoint.lat);
+      const [x, z] = geoToLocal3D(v.lng, v.lat, data.refPoint?.lng ?? 0, data.refPoint?.lat ?? 0);
       return { x, z };
     });
 
@@ -335,7 +335,7 @@ export default function RealTerrain3D({ data, className }: RealTerrain3DProps) {
 
     const dist = maxDim * 2;
     const elevCenter =
-      ((data.stats.maxElevation - data.stats.minElevation) * VERTICAL_SCALE) / 2;
+      (((data.stats?.maxElevation ?? 0) - (data.stats?.minElevation ?? 0)) * VERTICAL_SCALE) / 2;
 
     return {
       position: [dist * 0.7, dist * 0.5 + elevCenter, dist * 0.7] as [number, number, number],

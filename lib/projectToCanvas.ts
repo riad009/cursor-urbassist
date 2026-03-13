@@ -159,10 +159,13 @@ export function projectToCanvas(
   const { lng: refLng, lat: refLat } = refPoint;
 
   // ── Project globalBoundary ────────────────────────────────────────────────
-  const boundaryGeom = data.globalBoundary.geometry;
+  const boundaryGeom = data.globalBoundary?.geometry;
   let boundaryPoly: ProjectedPolygon;
 
-  if (boundaryGeom.type === "Polygon") {
+  if (!boundaryGeom) {
+    // No boundary geometry available — use empty polygon at center
+    boundaryPoly = { points: [], left: centerCanvasX, top: centerCanvasY };
+  } else if (boundaryGeom.type === "Polygon") {
     boundaryPoly = projectRing(
       boundaryGeom.coordinates[0],
       refLng, refLat, centerCanvasX, centerCanvasY, pixelsPerMeter
@@ -190,7 +193,7 @@ export function projectToCanvas(
   }
 
   // ── Project individual parcels ────────────────────────────────────────────
-  const projectedParcels: ProjectedParcel[] = data.parcels.map((parcel) => {
+  const projectedParcels: ProjectedParcel[] = (data.parcels || []).filter((p) => p.coordinates?.length > 0).map((parcel) => {
     const outerRing = parcel.coordinates[0]; // First ring = outer
     const projected = projectRing(
       outerRing,
@@ -206,7 +209,7 @@ export function projectToCanvas(
   });
 
   // ── Project edge measurement labels ───────────────────────────────────────
-  const edgeLabels: ProjectedEdgeLabel[] = data.edges.map((edge) => {
+  const edgeLabels: ProjectedEdgeLabel[] = (data.edges || []).filter((edge) => edge.from && edge.to && typeof edge.from.lng === "number").map((edge) => {
     const fromCanvas = lngLatToCanvas(
       edge.from.lng, edge.from.lat,
       refLng, refLat, centerCanvasX, centerCanvasY, pixelsPerMeter
@@ -244,7 +247,7 @@ export function projectToCanvas(
   });
 
   // ── Project vertex elevation labels ───────────────────────────────────────
-  const vertexLabels: ProjectedVertexLabel[] = data.vertices3D
+  const vertexLabels: ProjectedVertexLabel[] = (data.vertices3D || [])
     .filter((v) => v.elevation > 0) // Skip vertices without elevation data
     .map((vertex) => {
       const canvasPos = lngLatToCanvas(

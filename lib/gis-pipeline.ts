@@ -48,12 +48,17 @@ export interface ProcessedSiteData {
   edges: Edge[];
   mergedBoundary: Feature<Polygon | MultiPolygon>;
   parcels: ParcelInput[];
+  /** Master anchor = bbox center of merged boundary */
+  refPoint: { lng: number; lat: number };
+  /** Dense elevation grid inside the boundary for realistic 3D terrain */
+  topographyGrid: Vertex3D[];
   stats: {
     minElevation: number;
     maxElevation: number;
     avgElevation: number;
     totalArea: number;
     isContiguous: boolean;
+    slopePercent: number | null;
   };
 }
 
@@ -100,6 +105,71 @@ async function fetchElevations(
   return allElevations;
 }
 
+// ─── Dense Topography Grid ──────────────────────────────────────────────────
+
+/**
+ * Generate a dense grid of elevation points inside the boundary polygon.
+ *
+ * Creates a regular ~spacingM-spaced grid, filters to points inside the
+ * boundary, and fetches IGN RGE Alti elevations for all grid points.
+ *
+ * @param boundary - The merged boundary polygon
+ * @param spacingM - Grid spacing in meters (default: 5m)
+ * @returns Array of Vertex3D with real elevations
+ */
+async function generateTopographyGrid(
+  boundary: Feature<Polygon | MultiPolygon>,
+  spacingM: number = 5
+): Promise<Vertex3D[]> {
+  try {
+    const bbox = turf.bbox(boundary); // [minLng, minLat, maxLng, maxLat]
+
+    // Convert spacing from meters to approximate degrees
+    const centerLat = (bbox[1] + bbox[3]) / 2;
+    const METERS_PER_DEG_LAT = 111320;
+    const METERS_PER_DEG_LNG = METERS_PER_DEG_LAT * Math.cos(centerLat * Math.PI / 180);
+    const dLng = spacingM / METERS_PER_DEG_LNG;
+    const dLat = spacingM / METERS_PER_DEG_LAT;
+
+    // Generate regular grid points within bbox
+    const gridPoints: [number, number][] = [];
+    for (let lng = bbox[0]; lng <= bbox[2]; lng += dLng) {
+      for (let lat = bbox[1]; lat <= bbox[3]; lat += dLat) {
+        // Only include points inside the boundary
+        const pt = turf.point([lng, lat]);
+        if (turf.booleanPointInPolygon(pt, boundary)) {
+          gridPoints.push([lng, lat]);
+        }
+      }
+    }
+
+    // Cap at ~500 points to stay within API limits (6-7 requests at 80/chunk)
+    let sampledPoints = gridPoints;
+    if (gridPoints.length > 500) {
+      // Increase spacing and regenerate
+      const factor = Math.sqrt(gridPoints.length / 500);
+      const newSpacing = spacingM * factor;
+      return generateTopographyGrid(boundary, newSpacing);
+    }
+
+    if (sampledPoints.length === 0) return [];
+
+    console.log(`[gis-pipeline] Fetching elevations for ${sampledPoints.length} grid points (~${spacingM}m spacing)`);
+
+    // Fetch elevations for all grid points
+    const elevations = await fetchElevations(sampledPoints);
+
+    return sampledPoints.map((coord, i) => ({
+      lng: coord[0],
+      lat: coord[1],
+      elevation: elevations[i] ?? 0,
+    }));
+  } catch (err) {
+    console.warn("[gis-pipeline] topography grid generation failed:", err);
+    return [];
+  }
+}
+
 // ─── Core Pipeline ──────────────────────────────────────────────────────────
 
 /**
@@ -111,7 +181,8 @@ async function fetchElevations(
  *  3. Extract boundary vertices
  *  4. Fetch IGN elevations for all vertices
  *  5. Classify boundary edges (front/side/rear)
- *  6. Return the assembled ProcessedSiteData
+ *  6. Generate dense topography grid (NEW)
+ *  7. Return the assembled ProcessedSiteData
  *
  * Returns null if no valid geometries could be processed.
  */
@@ -186,14 +257,46 @@ export async function processParcelGeometries(
     });
   }
 
-  // ── Step 6: Compute stats ──
-  const validElevations = elevations.filter((e) => e !== 0 && Number.isFinite(e));
-  const minE = validElevations.length > 0 ? Math.min(...validElevations) : 0;
-  const maxE = validElevations.length > 0 ? Math.max(...validElevations) : 0;
+  // ── Step 6: Generate dense topography grid ──
+  const topographyGrid = await generateTopographyGrid(merged);
+
+  // ── Step 7: Compute refPoint from bbox center ──
+  const bboxArr = turf.bbox(merged);
+  const refPoint = {
+    lng: (bboxArr[0] + bboxArr[2]) / 2,
+    lat: (bboxArr[1] + bboxArr[3]) / 2,
+  };
+
+  // ── Step 8: Compute stats ──
+  const allElevations = [
+    ...elevations,
+    ...topographyGrid.map((v) => v.elevation),
+  ].filter((e) => e !== 0 && Number.isFinite(e));
+
+  const minE = allElevations.length > 0 ? Math.min(...allElevations) : 0;
+  const maxE = allElevations.length > 0 ? Math.max(...allElevations) : 0;
   const avgE =
-    validElevations.length > 0
-      ? validElevations.reduce((a, b) => a + b, 0) / validElevations.length
+    allElevations.length > 0
+      ? allElevations.reduce((a, b) => a + b, 0) / allElevations.length
       : 0;
+
+  // Slope: rise/run as percentage
+  let slopePercent: number | null = null;
+  if (maxE > 0 && minE > 0) {
+    const rise = maxE - minE;
+    const bboxWidthM = turf.distance(
+      turf.point([bboxArr[0], bboxArr[1]]),
+      turf.point([bboxArr[2], bboxArr[1]]),
+      { units: "meters" }
+    );
+    const bboxHeightM = turf.distance(
+      turf.point([bboxArr[0], bboxArr[1]]),
+      turf.point([bboxArr[0], bboxArr[3]]),
+      { units: "meters" }
+    );
+    const run = Math.sqrt(bboxWidthM ** 2 + bboxHeightM ** 2);
+    if (run > 0) slopePercent = Math.round((rise / run) * 100 * 100) / 100;
+  }
 
   const totalArea = turf.area(merged);
 
@@ -202,12 +305,15 @@ export async function processParcelGeometries(
     edges,
     mergedBoundary: merged,
     parcels,
+    refPoint,
+    topographyGrid,
     stats: {
       minElevation: Math.round(minE * 100) / 100,
       maxElevation: Math.round(maxE * 100) / 100,
       avgElevation: Math.round(avgE * 100) / 100,
       totalArea: Math.round(totalArea),
       isContiguous: merged.properties?.isContiguous ?? true,
+      slopePercent,
     },
   };
 

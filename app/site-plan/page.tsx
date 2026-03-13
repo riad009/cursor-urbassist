@@ -73,6 +73,7 @@ import { getNextStep, getPrevStep } from "@/lib/step-flow";
 import dynamic from "next/dynamic";
 
 const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
+const Terrain3DViewer = dynamic(() => import("@/components/three/Terrain3DViewer"), { ssr: false });
 import {
   BuildingDetailPanel,
   createDefaultBuilding,
@@ -87,8 +88,9 @@ import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel"
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
 // parcelGeometryToShapes REMOVED — compute shift: all data comes pre-processed from DB
-import { renderProcessedSite, clearProcessedLayers } from "@/lib/renderProcessedSite";
+import { renderProcessedSite, clearProcessedLayers, type SetbackConfig } from "@/lib/renderProcessedSite";
 import type { ProcessedSiteData } from "@/types/processed-site-data";
+import { findNearestSetbackSnap, type SetbackSegment } from "@/lib/setback-snap";
 import {
   drawOverhangOverlay,
   drawInteriorLayout,
@@ -310,6 +312,7 @@ function SitePlanContent() {
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
   const [showDataModal, setShowDataModal] = useState(false);
+  const setbackSegmentsRef = useRef<SetbackSegment[]>([]);
   const [scene3dVersion, setScene3dVersion] = useState(0);
   const [zoom, setZoom] = useState(95);
   const [activeColor, setActiveColor] = useState("#3b82f6");
@@ -1055,14 +1058,16 @@ function SitePlanContent() {
     parcelsDrawnFromGeometryRef.current = currentProjectId;
     setLoadingParcelsGeoJSON(true);
 
+    const pd = projectData; // capture for TS narrowing
+
     // ── Check for pre-computed data first (instant load) ─────────────────
     // When the project was created, the process-geometry pipeline runs and
     // saves ProcessedSiteData to the DB. Use it directly to skip the 2-3s API call.
     let siteData: ProcessedSiteData | null = null;
 
-    if (projectData.precomputedSiteData) {
+    if (pd?.precomputedSiteData) {
       try {
-        siteData = projectData.precomputedSiteData as ProcessedSiteData;
+        siteData = pd.precomputedSiteData as ProcessedSiteData;
         console.log("[site-plan] Using pre-computed ProcessedSiteData from DB (instant load)");
       } catch {
         console.warn("[site-plan] Failed to parse pre-computed site data, falling back to API");
@@ -1071,7 +1076,7 @@ function SitePlanContent() {
 
     // ── Fallback: call process-geometry API if no pre-computed data ──────
     if (!siteData) {
-      const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
+      const geoSource = pd?.parcelsGeoJSON || pd?.parcelGeometry;
 
       let parcelFeatures: any[] = [];
       try {
@@ -1126,9 +1131,68 @@ function SitePlanContent() {
     // ── Render with ProcessedSiteData (from DB or API) ───────────────────
     try {
       if (siteData) {
+        // ── Normalize: bridge gis-pipeline format → rendering pipeline format ──
+        // The gis-pipeline returns { mergedBoundary, edges: [{from: idx, to: idx}] }
+        // but the rendering pipeline expects { globalBoundary, edges: [{from: Vertex3D, to: Vertex3D}] }
+        const normalized = siteData as any;
+        if (normalized.mergedBoundary && !normalized.globalBoundary) {
+          normalized.globalBoundary = normalized.mergedBoundary;
+        }
+        // Normalize refPoint if missing (compute from globalBoundary bbox center)
+        if (!normalized.refPoint && normalized.globalBoundary?.geometry) {
+          const geom = normalized.globalBoundary.geometry;
+          const coords = geom.type === "Polygon" ? geom.coordinates[0] : geom.coordinates.flatMap((p: any) => p[0]);
+          if (coords.length > 0) {
+            let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+            for (const [lng, lat] of coords) {
+              if (lng < minLng) minLng = lng;
+              if (lng > maxLng) maxLng = lng;
+              if (lat < minLat) minLat = lat;
+              if (lat > maxLat) maxLat = lat;
+            }
+            normalized.refPoint = { lng: (minLng + maxLng) / 2, lat: (minLat + maxLat) / 2 };
+          }
+        }
+        // Normalize edges: if they use index-based { from: number, to: number, length },
+        // convert to vertex-based { from: Vertex3D, to: Vertex3D, lengthMeters }
+        if (normalized.edges?.length > 0 && typeof normalized.edges[0].from === "number") {
+          const verts = normalized.vertices3D || [];
+          normalized.edges = normalized.edges.map((e: any) => ({
+            from: verts[e.from] || { lng: 0, lat: 0, elevation: 0 },
+            to: verts[e.to] || { lng: 0, lat: 0, elevation: 0 },
+            lengthMeters: e.length || e.lengthMeters || 0,
+          }));
+        }
+        // Normalize parcels: if parcels are in ParcelInput format (raw GeoJSON features),
+        // convert to ProcessedParcel format with coordinates array
+        if (normalized.parcels?.length > 0 && normalized.parcels[0].geometry && !normalized.parcels[0].coordinates) {
+          normalized.parcels = normalized.parcels.map((p: any) => ({
+            id: p.properties?.id || p.id || "unknown",
+            section: p.properties?.section || p.section || "",
+            number: p.properties?.number || p.number || "",
+            area: p.properties?.area || p.area || 0,
+            coordinates: p.geometry?.coordinates || [],
+          }));
+        }
+        // Ensure topographyGrid and stats have expected fields
+        if (!normalized.topographyGrid) normalized.topographyGrid = [];
+        if (normalized.stats && !("meanElevation" in normalized.stats)) {
+          normalized.stats.meanElevation = normalized.stats.avgElevation ?? 0;
+        }
+        if (normalized.stats && !("slopePercent" in normalized.stats)) {
+          normalized.stats.slopePercent = null;
+        }
+
+        siteData = normalized as ProcessedSiteData;
         setProcessedSiteData(siteData);
 
-        // ── Render using the full pipeline (boundary + parcels + edge labels + NGF labels) ──
+        // ── Build setback config from PLU data ──
+        const pluSb = (projectData as any)?.pluSetbacks || {};
+        const sbConfig: SetbackConfig | undefined = (pluSb.front || pluSb.side || pluSb.rear)
+          ? { front: pluSb.front ?? 5, side: pluSb.side ?? 3, rear: pluSb.rear ?? 4 }
+          : { front: 5, side: 3, rear: 4 }; // Default UC zone setbacks for demo
+
+        // ── Render using the full pipeline (boundary + parcels + setbacks + edge labels + NGF labels) ──
         const projected = renderProcessedSite(
           fabric as any,
           canvas as any,
@@ -1137,23 +1201,23 @@ function SitePlanContent() {
             canvasWidth: canvasSize.width,
             canvasHeight: canvasSize.height,
             pixelsPerMeter: currentScale.pixelsPerMeter,
-          }
+          },
+          sbConfig
         );
 
-        // Also set elevation points from the processed data for the terrain store
-        if (siteData.vertices3D && siteData.vertices3D.length > 0) {
-          const pts = siteData.vertices3D
-            .filter(v => v.elevation > 0)
-            .map((v, i) => {
-              const canvasPos = projected.vertexLabels[i]?.position;
-              return canvasPos ? {
-                id: `ngf-${i}`,
-                x: canvasPos.x,
-                y: canvasPos.y,
-                value: v.elevation,
-              } : null;
-            })
-            .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
+        // Store setback segments for the snap engine
+        setbackSegmentsRef.current = projected.setbackSegments || [];
+
+        // Also set elevation points from the projected data for the terrain store
+        if (projected.vertexLabels && projected.vertexLabels.length > 0) {
+          const pts = projected.vertexLabels
+            .map((label, i) => ({
+              id: `ngf-${i}`,
+              x: label.position.x,
+              y: label.position.y,
+              value: parseFloat(label.text.replace(/[^0-9.]/g, "")) || 0,
+            }))
+            .filter(p => p.value > 0);
           if (pts.length > 0) setElevationPoints(pts);
         }
 
@@ -1194,63 +1258,8 @@ function SitePlanContent() {
           }
         }
       } else {
-        // Fallback to old pipeline if both pre-computed data and API failed
-        console.warn("[site-plan] No ProcessedSiteData available, falling back to parcelGeometryToShapes");
-        const geoSource = projectData.parcelsGeoJSON || projectData.parcelGeometry;
-        const shapes = parcelGeometryToShapes(geoSource, {
-          canvasWidth: canvasSize.width,
-          canvasHeight: canvasSize.height,
-          pixelsPerMeter: currentScale.pixelsPerMeter,
-        }
-      );
-
-      // Set elevation points from the processed data for 3D terrain
-      if (siteData.vertices3D && siteData.vertices3D.length > 0) {
-        const pts = siteData.vertices3D
-          .filter(v => v.elevation > 0)
-          .map((v, i) => {
-            const canvasPos = projected.vertexLabels[i]?.position;
-            return canvasPos ? {
-              id: `ngf-${i}`,
-              x: canvasPos.x,
-              y: canvasPos.y,
-              value: v.elevation,
-            } : null;
-          })
-          .filter(Boolean) as { id: string; x: number; y: number; value: number }[];
-        if (pts.length > 0) setElevationPoints(pts);
-      }
-
-      // ── Auto-zoom-to-fit the projected boundary ────────────────────────
-      const boundary = projected.boundary;
-      if (boundary && boundary.points.length > 0) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        boundary.points.forEach((p) => {
-          const px = boundary.left + p.x;
-          const py = boundary.top + p.y;
-          minX = Math.min(minX, px);
-          minY = Math.min(minY, py);
-          maxX = Math.max(maxX, px);
-          maxY = Math.max(maxY, py);
-        });
-        shapes.forEach((shape, idx) => {
-          const poly = new fabric.Polygon(shape.points, {
-            left: shape.left,
-            top: shape.top,
-            originX: "center",
-            originY: "center",
-            fill: "rgba(34, 197, 94, 0.15)",
-            stroke: "#16a34a",
-            strokeWidth: 2.5,
-            strokeLineJoin: "round",
-          });
-          (poly as any).id = `parcel-geo-${currentProjectId}-${idx}`;
-          (poly as any).elementName = `Parcel ${idx + 1}`;
-          (poly as any).isParcel = true;
-          (poly as any).excludeFromExport = false;
-          canvas.add(poly);
-          canvas.sendObjectToBack(poly);
-        });
+        // No ProcessedSiteData available and API fallback failed — nothing to render
+        console.warn("[site-plan] No ProcessedSiteData available, skipping parcel rendering");
       }
     } catch (err) {
       console.error("[site-plan] Error in drawParcelsFromProjectData:", err);
@@ -1718,19 +1727,65 @@ function SitePlanContent() {
     canvas.on("selection:created", (e) => { if (e.selected?.[0]) setSelectedObject(e.selected[0]); });
     canvas.on("selection:updated", (e) => { if (e.selected?.[0]) setSelectedObject(e.selected[0]); });
     canvas.on("selection:cleared", () => setSelectedObject(null));
-    canvas.on("object:modified", (e) => { setIsDirty(true); if (e.target) updateObjectMeasurements(e.target); runComplianceCheck(); pushUndoState(); });
+    canvas.on("object:modified", (e) => {
+      setIsDirty(true);
+      if (e.target) updateObjectMeasurements(e.target);
+      // Clean up snap highlight lines
+      const snapLines = canvas.getObjects().filter((o: any) => o._snapHighlight);
+      if (snapLines.length) canvas.remove(...snapLines);
+      runComplianceCheck();
+      pushUndoState();
+    });
     canvas.on("object:scaling", (e) => { if (e.target) updateObjectMeasurements(e.target); runComplianceCheck(); });
     canvas.on("object:moving", (e) => {
       if (!e.target) return;
-      // Snap to grid when snap is enabled
+      const obj = e.target;
+
+      // ── Grid snap ──
       if (snapEnabledRef.current) {
         const gridSize = currentScale.pixelsPerMeter;
-        const obj = e.target;
         const left = obj.left ?? 0;
         const top = obj.top ?? 0;
         obj.set({ left: Math.round(left / gridSize) * gridSize, top: Math.round(top / gridSize) * gridSize });
         obj.setCoords();
       }
+
+      // ── Magnetic setback snap ──
+      if (setbackSegmentsRef.current.length > 0 && (obj as any).isBuilding) {
+        const bbox = {
+          cx: obj.left ?? 0,
+          cy: obj.top ?? 0,
+          width: (obj.width ?? 0) * (obj.scaleX ?? 1),
+          height: (obj.height ?? 0) * (obj.scaleY ?? 1),
+          angle: obj.angle ?? 0,
+        };
+
+        const snap = findNearestSetbackSnap(bbox, setbackSegmentsRef.current, 15);
+
+        // Remove old snap highlight
+        const old = canvas.getObjects().filter((o: any) => o._snapHighlight);
+        if (old.length) canvas.remove(...old);
+
+        if (snap) {
+          obj.set({ left: snap.snapLeft, top: snap.snapTop, angle: snap.angle });
+          obj.setCoords();
+
+          // Draw snap highlight line
+          const line = new fabric.Line(
+            [snap.segment.p1.x, snap.segment.p1.y, snap.segment.p2.x, snap.segment.p2.y],
+            {
+              stroke: "#06b6d4",
+              strokeWidth: 3,
+              strokeDashArray: [4, 2],
+              selectable: false,
+              evented: false,
+              _snapHighlight: true,
+            } as any
+          );
+          canvas.add(line);
+        }
+      }
+
       updateObjectMeasurements(e.target);
       runComplianceCheck();
     });
@@ -3655,62 +3710,10 @@ function SitePlanContent() {
           {/* === 3D Viewer Layer (conditionally rendered — rebuilds scene from data each mount) === */}
           {viewMode === "3d" && (
             <div className="absolute inset-0 bg-white">
-              <Inline3DViewer
-                key={`3d-scene-v${scene3dVersion}`}
-                buildings={buildingDetails.map((b) => {
-                  // Read positions fresh from the live canvas (always available since canvas persists)
-                  const canvas = fabricRef.current;
-                  let canvasX: number | undefined;
-                  let canvasY: number | undefined;
-                  let canvasAngle = 0;
-
-                  if (canvas) {
-                    // Match by ID regardless of shape type (rect, polygon, circle, etc.)
-                    const obj = canvas.getObjects().find((o: any) =>
-                      (o.id === b.id || o.buildingDetailId === b.id)
-                    );
-                    if (obj) {
-                      // Manually compute center — getCenterPoint can be unreliable with transforms
-                      const l = obj.left ?? 0;
-                      const t = obj.top ?? 0;
-                      const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
-                      const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
-                      canvasX = l + w / 2;
-                      canvasY = t + h / 2;
-                      canvasAngle = obj.angle || 0;
-                    }
-                  }
-
-                  // Fallback to cached positions if canvas read failed
-                  if (canvasX === undefined) {
-                    const cached = buildingPositionsRef.current[b.id];
-                    if (cached) {
-                      canvasX = cached.x;
-                      canvasY = cached.y;
-                      canvasAngle = cached.angle;
-                    }
-                  }
-
-                  // Ensure wallHeights has safe defaults for 3D rendering
-                  const safeWallHeights = {
-                    ground: b.wallHeights?.ground ?? 3,
-                    first: b.wallHeights?.first ?? 0,
-                    second: b.wallHeights?.second ?? 0,
-                  };
-
-                  return { ...b, wallHeights: safeWallHeights, canvasX, canvasY, canvasAngle } as any;
-                }).filter((b: any) => b.canvasX !== undefined && b.canvasY !== undefined)}
-                elevationPoints={elevationPoints}
-                pixelsPerMeter={currentScale.pixelsPerMeter}
-                canvasWidth={canvasSize.width}
-                canvasHeight={canvasSize.height}
-                selectedBuildingId={selectedBuildingId3d}
-                onBuildingSelect={(id) => {
-                  setSelectedBuildingId3d(id ?? null);
-                  if (id) setRightTab("buildings");
-                }}
-                parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
+              <Terrain3DViewer
+                key={`3d-terrain-v${scene3dVersion}`}
                 processedSiteData={processedSiteData}
+                parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
               />
               <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
                 <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
@@ -4147,7 +4150,7 @@ function Inline3DViewer({
             if (!parcel.coordinates || parcel.coordinates.length === 0) continue;
             const outerRing = parcel.coordinates[0]; // First ring is outer boundary
             const projected = outerRing.map(([lng, lat]: number[]) =>
-              geoToCanvas(lng, lat, processedSiteData.refPoint, projOpts)
+              geoToCanvas(lng, lat, processedSiteData.refPoint!, projOpts)
             );
             // Compute bounding box for shape positioning
             let shapeMinX = Infinity, shapeMinY = Infinity;
@@ -4272,8 +4275,11 @@ function Inline3DViewer({
         if (processedSiteData && processedSiteData.vertices3D && processedSiteData.vertices3D.length >= 3) {
           // Build a sloped terrain mesh from real NGF elevation data
           const verts3D = processedSiteData.vertices3D;
-          const refPoint = processedSiteData.refPoint;
+          const refPoint = processedSiteData.refPoint || (verts3D.length > 0
+            ? { lng: verts3D[0].lng, lat: verts3D[0].lat }
+            : null);
 
+          if (refPoint) {
           // Project vertices to 3D scene space (same coordinate system as buildings)
           const METERS_PER_DEG = 111320;
           const cosLat = Math.cos(refPoint.lat * Math.PI / 180);
@@ -4400,6 +4406,7 @@ function Inline3DViewer({
             scene.add(boundaryLine);
           }
 
+          } // end if (refPoint)
         } else {
           // Fallback: flat green ground
           const groundGeom = new THREE.PlaneGeometry(groundSize, groundSize, 32, 32);
@@ -5256,7 +5263,7 @@ function Inline3DViewer({
           outerRings.forEach((ring: number[][]) => {
             // Project to 3D world coords using SAME pipeline as parcel slabs
             const gbWorld = ring.map(([lng, lat]: number[]) => {
-              const cp = geo2c(lng, lat, processedSiteData.refPoint, projOpts);
+              const cp = geo2c(lng, lat, processedSiteData.refPoint!, projOpts);
               return {
                 x: (cp.x - centerX) / pixelsPerMeter,
                 z: (cp.y - centerY) / pixelsPerMeter,
@@ -5307,8 +5314,8 @@ function Inline3DViewer({
             // ── Edge measurement labels along the global boundary ──
             if (processedSiteData.edges && processedSiteData.edges.length > 0) {
               processedSiteData.edges.forEach((edge: any) => {
-                const fromCP = geo2c(edge.from.lng, edge.from.lat, processedSiteData.refPoint, projOpts);
-                const toCP = geo2c(edge.to.lng, edge.to.lat, processedSiteData.refPoint, projOpts);
+                const fromCP = geo2c(edge.from.lng, edge.from.lat, processedSiteData.refPoint!, projOpts);
+                const toCP = geo2c(edge.to.lng, edge.to.lat, processedSiteData.refPoint!, projOpts);
                 const fromW = { x: (fromCP.x - centerX) / pixelsPerMeter, z: (fromCP.y - centerY) / pixelsPerMeter };
                 const toW = { x: (toCP.x - centerX) / pixelsPerMeter, z: (toCP.y - centerY) / pixelsPerMeter };
                 const midX = (fromW.x + toW.x) / 2;
@@ -5373,7 +5380,7 @@ function Inline3DViewer({
             const flatCoords: number[] = []; // for earcut (2D triangulation)
 
             outerRing.forEach(([lng, lat]: number[], idx: number) => {
-              const cp = geo2c(lng, lat, processedSiteData.refPoint, projOpts);
+              const cp = geo2c(lng, lat, processedSiteData.refPoint!, projOpts);
               const wx = (cp.x - centerX) / pixelsPerMeter;
               const wz = (cp.y - centerY) / pixelsPerMeter;
 
@@ -5595,8 +5602,7 @@ function Inline3DViewer({
         <div className="absolute inset-0 flex items-center justify-center bg-white/95 text-red-600 text-sm">{error}</div>
       )}
 
-      {/* Data Debug Modal */}
-      <DataDebugModal open={showDataModal} onClose={() => setShowDataModal(false)} />
+
     </div>
   );
 }
