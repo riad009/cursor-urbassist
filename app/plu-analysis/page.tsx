@@ -21,6 +21,9 @@ import { useAuth } from "@/lib/auth-context";
 import { getNextStep, getPrevStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { jsPDF } from "jspdf";
+import RegulatoryContextGate, {
+  type RegulatoryDocumentBundle,
+} from "@/components/analysis/RegulatoryContextGate";
 
 type RegulatoryAnalysis = {
   zoneType?: string | null;
@@ -65,6 +68,14 @@ function PluAnalysisPageContent() {
     checks?: Array<{ rule: string; status: string; message: string; details?: string; suggestion?: string }>;
     summary?: { violations: number; warnings: number; compliant: number; isCompliant: boolean };
   } | null>(null);
+
+  // ── Document Management Gate state ──────────────────────────────────
+  const [docBundle, setDocBundle] = useState<RegulatoryDocumentBundle | null>(null);
+  const handleDocumentsReady = useCallback((bundle: RegulatoryDocumentBundle) => {
+    setDocBundle(bundle);
+  }, []);
+  /** Gate is passed when the user has confirmed documents */
+  const isGatePassed = docBundle?.isReady ?? false;
 
   const loadProject = useCallback(() => {
     if (!projectId || !user) {
@@ -293,6 +304,19 @@ function PluAnalysisPageContent() {
 
         {!project.regulatoryAnalysis && (
           <>
+            {/* ── DOCUMENT MANAGEMENT GATE ────────────────────────────── */}
+            <div className="mb-6">
+              <RegulatoryContextGate
+                zoneName={zoneLabel ?? null}
+                zoneLabel={zoneLabel}
+                pdfUrl={null}
+                documentType={null}
+                isLoading={false}
+                onDocumentsReady={handleDocumentsReady}
+                disabled={runningDetection}
+              />
+            </div>
+
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -305,8 +329,9 @@ function PluAnalysisPageContent() {
               </div>
               <button
                 onClick={() => setShowLaunchConfirm(true)}
-                disabled={runningDetection || !project.coordinates}
+                disabled={runningDetection || !project.coordinates || !isGatePassed}
                 className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-100 text-amber-700 font-medium hover:bg-amber-200 disabled:opacity-50"
+                title={!isGatePassed ? "Validez les documents réglementaires ci-dessus pour continuer" : ""}
               >
                 {runningDetection ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
                 {runningDetection ? "Running…" : "Launch PLU analysis"}
@@ -324,6 +349,19 @@ function PluAnalysisPageContent() {
                       ? `This is a relaunch. The updated analysis will cost ${pluRelaunchCreditCost} credit${pluRelaunchCreditCost > 1 ? "s" : ""}.`
                       : `The first PLU analysis will cost ${pluFirstCreditCost} credits. Any additional analysis after modifications will cost ${pluRelaunchCreditCost} credit.`}
                   </p>
+                  {docBundle && docBundle.documents.length > 0 && (
+                    <div className="mb-4 p-3 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-800">
+                      <p className="font-semibold mb-1">Documents à analyser :</p>
+                      <ul className="list-disc list-inside space-y-0.5">
+                        {docBundle.documents.map((d) => (
+                          <li key={d.id}>{d.name}</li>
+                        ))}
+                      </ul>
+                      {docBundle.wasOverridden && (
+                        <p className="mt-1 text-amber-700 font-medium">⚠ Règlement officiel remplacé par votre document</p>
+                      )}
+                    </div>
+                  )}
                   <div className="flex gap-3 justify-end">
                     <button
                       onClick={() => setShowLaunchConfirm(false)}
@@ -348,6 +386,18 @@ function PluAnalysisPageContent() {
 
         {project.regulatoryAnalysis && (
           <>
+            {/* ── DOCUMENT MANAGEMENT GATE (post-analysis: for relaunch) ── */}
+            <div className="mb-6">
+              <RegulatoryContextGate
+                zoneName={(project.regulatoryAnalysis?.zoneType as string) ?? null}
+                zoneLabel={zoneLabel}
+                pdfUrl={project.regulatoryAnalysis?.pdfUrl ?? null}
+                documentType={null}
+                isLoading={false}
+                onDocumentsReady={handleDocumentsReady}
+                disabled={runningDetection}
+              />
+            </div>
             {/* Building footprint */}
             <section className="mb-8">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Building footprint</h2>

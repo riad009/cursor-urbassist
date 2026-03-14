@@ -281,10 +281,46 @@ export default function ProjectDescriptionPage({
                 if (d.project?.name) setProjectName(d.project.name);
                 if (d.project?.address) setProjectAddress(d.project.address);
                 if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
-                if (d.project?.regulatoryAnalysis?.pdfUrl) setPluDocUrl(d.project.regulatoryAnalysis.pdfUrl);
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
                 if (d.project?.authorizationType) setAuthorizationType(d.project.authorizationType);
+
+                // ── PLU PDF URL — strict fallback chain ──────────────────
+                // Priority 1: Direct PDF URL from regulatoryAnalysis (stored by GPU API)
+                const storedPdfUrl = d.project?.regulatoryAnalysis?.pdfUrl;
+                if (storedPdfUrl) {
+                    setPluDocUrl(storedPdfUrl);
+                }
+                // Priority 2: If zone detected but no pdfUrl → live re-fetch via plu-detection
+                // This handles cases where the DB record was created before the fallback was added
+                else if (d.project?.regulatoryAnalysis?.zoneType && d.project?.coordinates) {
+                    try {
+                        const coords = JSON.parse(d.project.coordinates);
+                        const coordArray = Array.isArray(coords) ? coords : [coords.lng ?? coords.longitude, coords.lat ?? coords.latitude];
+                        if (coordArray.length >= 2 && (coordArray[0] !== 0 || coordArray[1] !== 0)) {
+                            fetch("/api/plu-detection", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ coordinates: coordArray }),
+                            })
+                                .then(r => r.ok ? r.json() : null)
+                                .then(data => {
+                                    if (data?.plu?.pdfUrl) {
+                                        setPluDocUrl(data.plu.pdfUrl);
+                                    }
+                                })
+                                .catch(() => { /* silent - fallback below will handle */ });
+                        }
+                    } catch { /* malformed coordinates - use municipality fallback */ }
+
+                    // Priority 3: Géoportail commune page as immediate fallback
+                    // (while plu-detection fetches in background)
+                    if (d.project.municipality) {
+                        // Construct Géoportail de l'Urbanisme search URL for the commune
+                        const commune = encodeURIComponent(d.project.municipality);
+                        setPluDocUrl(`https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=2&lat=47&zoom=6&mlon=2&mlat=47&typedoc=PLU,PLUi,CC&commune=${commune}`);
+                    }
+                }
 
                 // ── Pre-populate jobs from authorization data ──────────────
                 const desc = d.project?.projectDescription;
@@ -774,31 +810,93 @@ export default function ProjectDescriptionPage({
         }, 500);
 
         try {
-            // ── Build FormData with PDF(s) + context ──────────────────────
-            const formData = new FormData();
-            if (pluFile) {
-                formData.append("pdfFile", pluFile);
-            } else if (useAutoDoc && pluDocUrl) {
-                formData.append("pdfUrl", pluDocUrl);
-            }
-            if (lotissementFile) {
-                formData.append("pdfFile2", lotissementFile);
-            }
-            formData.append("pluZone", projectZoneType || "non spécifiée");
-            formData.append("isABFZone", String(projectProtectedAreas.length > 0));
-            formData.append("parcelAddress", projectAddress || "non précisée");
+            // ── Determine if the autoFetched URL is a direct PDF or a web page ──
+            const isDirectPdfUrl = pluDocUrl && (
+                pluDocUrl.toLowerCase().endsWith(".pdf") ||
+                pluDocUrl.toLowerCase().includes(".pdf?") ||
+                pluDocUrl.toLowerCase().includes("/pdf/")
+            );
 
-            const res = await fetch("/api/analyze-plu", {
-                method: "POST",
-                body: formData, // No Content-Type header — browser sets multipart boundary
-            });
+            let data: Record<string, unknown>;
+
+            if (pluFile || (useAutoDoc && isDirectPdfUrl)) {
+                // ── PATH A: User uploaded a file OR we have a direct PDF URL ──
+                // → Send straight to /api/analyze-plu which accepts files + PDF URLs
+                const formData = new FormData();
+                if (pluFile) {
+                    formData.append("pdfFile", pluFile);
+                } else if (useAutoDoc && pluDocUrl) {
+                    formData.append("pdfUrl", pluDocUrl);
+                }
+                if (lotissementFile) {
+                    formData.append("pdfFile2", lotissementFile);
+                }
+                formData.append("pluZone", projectZoneType || "non spécifiée");
+                formData.append("isABFZone", String(projectProtectedAreas.length > 0));
+                formData.append("parcelAddress", projectAddress || "non précisée");
+
+                const res = await fetch("/api/analyze-plu", {
+                    method: "POST",
+                    body: formData,
+                });
+                data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error as string || "L'analyse du document a échoué.");
+                }
+            } else {
+                // ── PATH B: Auto URL is a web page (Géoportail), not a direct PDF ──
+                // → Use /api/projects/[id]/regulatory/auto which does its own PLU
+                //   detection from coordinates, fetches the actual PDF via the GPU
+                //   pipeline, and runs Gemini analysis.
+                const bodyPayload: Record<string, unknown> = {};
+                if (lotissementFile) {
+                    // If lotissement file also needs to go, read it as text
+                    // (regulatory/auto accepts documentContent)
+                    const reader = new FileReader();
+                    const lotText = await new Promise<string>((resolve) => {
+                        reader.onload = () => resolve(reader.result as string);
+                        reader.readAsText(lotissementFile);
+                    });
+                    bodyPayload.lotissementContent = lotText;
+                }
+                if (projectIntent.trim()) {
+                    bodyPayload.projectIntent = projectIntent.trim();
+                }
+
+                const res = await fetch(`/api/projects/${projectId}/regulatory/auto`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload),
+                });
+                const rawData = await res.json();
+
+                if (!res.ok) {
+                    // If auto analysis fails because it can't find a PDF,
+                    // guide the user to upload manually
+                    const errMsg = (rawData.error as string) || "L'analyse automatique a échoué.";
+                    if (rawData.code === "ZONE_OR_DOC_NOT_FOUND") {
+                        throw new Error(
+                            "Le règlement PLU n'a pas pu être récupéré automatiquement. " +
+                            "Veuillez utiliser le bouton « Remplacer » pour importer votre document PLU en PDF."
+                        );
+                    }
+                    throw new Error(errMsg);
+                }
+
+                // Reshape response to match analyze-plu response format
+                data = {
+                    success: true,
+                    analysis: rawData.analysis,
+                    pluRules: rawData.pluRules || {},
+                    source: rawData.source || "auto",
+                };
+            }
 
             clearInterval(interval);
-            const data = await res.json();
 
-            if (res.ok && data.success) {
+            if (data.success) {
                 // Store the full PLU analysis result for step 6 display
-                setPluAnalysisResult({ analysis: data.analysis, pluRules: data.pluRules });
+                setPluAnalysisResult({ analysis: data.analysis as object, pluRules: data.pluRules as object });
                 setGenerationCount(prev => prev + 1);
                 setAnalysisProgress(95);
 
@@ -815,7 +913,7 @@ export default function ProjectDescriptionPage({
                     const feasFormData = new FormData();
                     if (pluFile) {
                         feasFormData.append("pdfFile", pluFile);
-                    } else if (useAutoDoc && pluDocUrl) {
+                    } else if (useAutoDoc && pluDocUrl && isDirectPdfUrl) {
                         feasFormData.append("pdfUrl", pluDocUrl);
                     }
                     feasFormData.append("pluZone", projectZoneType || "non spécifiée");
@@ -842,14 +940,14 @@ export default function ProjectDescriptionPage({
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             } else {
-                setGenerationError(data.error || "L'analyse du document a échoué.");
+                setGenerationError((data.error as string) || "L'analyse du document a échoué.");
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             }
         } catch (err) {
             clearInterval(interval);
             console.error("PLU Analysis failed:", err);
-            setGenerationError("Erreur de connexion. Veuillez réessayer.");
+            setGenerationError(err instanceof Error ? err.message : "Erreur de connexion. Veuillez réessayer.");
             setAnalysisProgress(100);
             setAnalysisComplete(true);
         }
