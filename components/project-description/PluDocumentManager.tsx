@@ -124,6 +124,8 @@ export default function PluDocumentManager({
   const [lotError, setLotError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showLotDropzone, setShowLotDropzone] = useState(false);
+  const [urlValidating, setUrlValidating] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   // ── State machine ──────────────────────────────────────────────────────
   const hasAutoDoc = !!autoFetchedUrl?.trim();
@@ -156,10 +158,36 @@ export default function PluDocumentManager({
   }, [isReady, onDocumentReady]);
 
   // ── Handlers ──────────────────────────────────────────────────────────
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
+    if (!autoFetchedUrl?.trim()) {
+      setDecision("confirmed");
+      onUseAutoDocChange(true);
+      return;
+    }
+
+    // Quick pre-validation via our server-side proxy HEAD endpoint
+    setUrlValidating(true);
+    setUrlError(null);
+    try {
+      const proxyUrl = `/api/plu-proxy-pdf?url=${encodeURIComponent(autoFetchedUrl)}`;
+      const res = await fetch(proxyUrl, { method: "HEAD", signal: AbortSignal.timeout(20_000) });
+      if (!res.ok) {
+        // Don't try .json() — response could be HTML error page
+        setUrlError(
+          `Le document n'est pas accessible (HTTP ${res.status}). Veuillez importer manuellement le règlement PLU.`
+        );
+        setUrlValidating(false);
+        return;
+      }
+    } catch (e) {
+      // Network timeout / proxy not ready — don't block the user
+      console.warn("[PluDocumentManager] URL validation skipped:", (e as Error).message);
+    }
+    // Confirm regardless — the backend will handle real PDF validation during analysis
     setDecision("confirmed");
     onUseAutoDocChange(true);
-  }, [onUseAutoDocChange]);
+    setUrlValidating(false);
+  }, [autoFetchedUrl, onUseAutoDocChange]);
 
   const handleStartReplace = useCallback(() => {
     setDecision("replacing");
@@ -196,8 +224,15 @@ export default function PluDocumentManager({
 
   const handleDownload = useCallback(() => {
     if (!autoFetchedUrl?.trim()) return;
-    // Use window.open as primary — cross-origin PDFs block the <a download> attribute
-    window.open(autoFetchedUrl, "_blank", "noopener,noreferrer");
+    // Use our server-side proxy to avoid CORS/TLS issues with geoportail servers
+    const proxyUrl = `/api/plu-proxy-pdf?url=${encodeURIComponent(autoFetchedUrl)}`;
+    const a = document.createElement("a");
+    a.href = proxyUrl;
+    a.download = extractFilename(autoFetchedUrl);
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }, [autoFetchedUrl]);
 
   const handleLotissementUpload = useCallback((f: File) => {
@@ -340,14 +375,44 @@ export default function PluDocumentManager({
                   <button
                     type="button"
                     onClick={handleConfirm}
-                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl
-                               bg-sky-600 border-2 border-sky-600 text-xs font-bold text-white
-                               hover:bg-sky-700 hover:border-sky-700 transition-all shadow-sm shadow-sky-200"
+                    disabled={urlValidating}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl
+                               border-2 text-xs font-bold transition-all shadow-sm ${
+                                 urlValidating
+                                   ? "bg-sky-400 border-sky-400 text-white cursor-wait"
+                                   : "bg-sky-600 border-sky-600 text-white hover:bg-sky-700 hover:border-sky-700 shadow-sky-200"
+                               }`}
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    {isEn ? "Confirm" : "Confirmer"}
+                    {urlValidating ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        {isEn ? "Checking…" : "Vérification…"}
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        {isEn ? "Confirm" : "Confirmer"}
+                      </>
+                    )}
                   </button>
                 </div>
+
+                {/* URL validation error */}
+                {urlError && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-50 border border-red-200">
+                    <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-red-700 font-medium">{urlError}</p>
+                      <button
+                        type="button"
+                        onClick={handleStartReplace}
+                        className="text-[10px] font-bold text-red-600 underline hover:text-red-800 mt-1"
+                      >
+                        {isEn ? "→ Upload regulation manually" : "→ Importer le règlement manuellement"}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Warning */}
                 <p className="text-[10px] text-amber-600 font-medium flex items-start gap-1.5">

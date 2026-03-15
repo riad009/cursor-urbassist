@@ -38,23 +38,29 @@ function MapController({
   const map = useMap();
 
   useEffect(() => {
-    if (center) {
-      map.setView([center.lat, center.lng], 18);
-    } else {
-      map.setView(FRANCE_CENTER, 6);
-    }
+    try {
+      if (!map || !map.getContainer()) return;
+      if (center) {
+        map.setView([center.lat, center.lng], 18);
+      } else {
+        map.setView(FRANCE_CENTER, 6);
+      }
+    } catch { /* map container destroyed — safe to ignore */ }
   }, [center, map]);
 
   useEffect(() => {
-    const scale = L.control.scale({ imperial: false });
-    scale.addTo(map);
-    return () => {
-      scale.remove();
-    };
+    try {
+      if (!map || !map.getContainer()) return;
+      const scale = L.control.scale({ imperial: false });
+      scale.addTo(map);
+      return () => {
+        try { scale.remove(); } catch { /* already removed */ }
+      };
+    } catch { /* map container destroyed */ }
   }, [map]);
 
   useMapEvents({
-    zoomend: () => onZoomChange(map.getZoom()),
+    zoomend: () => { try { onZoomChange(map.getZoom()); } catch { /* destroyed */ } },
   });
 
   return null;

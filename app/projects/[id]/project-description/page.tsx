@@ -823,102 +823,67 @@ export default function ProjectDescriptionPage({
         }, 500);
 
         try {
-            // ── Determine if the autoFetched URL is a direct PDF or a web page ──
-            const isDirectPdfUrl = pluDocUrl && (
-                pluDocUrl.toLowerCase().endsWith(".pdf") ||
-                pluDocUrl.toLowerCase().includes(".pdf?") ||
-                pluDocUrl.toLowerCase().includes("/pdf/")
-            );
+            // ── Build a single unified FormData payload ──────────────────
+            const formData = new FormData();
 
-            let data: Record<string, unknown>;
+            // a) PLU document: user-uploaded file takes priority over auto-detected URL
+            if (pluFile) {
+                formData.append("pluPdfFile", pluFile);
+            } else if (useAutoDoc && pluDocUrl) {
+                formData.append("pluPdfUrl", pluDocUrl);
+            }
 
-            if (pluFile || (useAutoDoc && isDirectPdfUrl)) {
-                // ── PATH A: User uploaded a file OR we have a direct PDF URL ──
-                // → Send straight to /api/analyze-plu which accepts files + PDF URLs
-                const formData = new FormData();
-                if (pluFile) {
-                    formData.append("pdfFile", pluFile);
-                } else if (useAutoDoc && pluDocUrl) {
-                    formData.append("pdfUrl", pluDocUrl);
-                }
-                if (lotissementFile) {
-                    formData.append("pdfFile2", lotissementFile);
-                }
-                formData.append("pluZone", projectZoneType || "non spécifiée");
-                formData.append("isABFZone", String(projectProtectedAreas.length > 0));
-                formData.append("parcelAddress", projectAddress || "non précisée");
+            // b) Optional lotissement (subdivision rules) file
+            if (lotissementFile) {
+                formData.append("lotissementFile", lotissementFile);
+            }
 
-                const res = await fetch("/api/analyze-plu", {
-                    method: "POST",
-                    body: formData,
-                });
-                data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error as string || "L'analyse du document a échoué.");
-                }
-            } else {
-                // ── PATH B: Auto URL is a web page (Géoportail), not a direct PDF ──
-                // → Use /api/projects/[id]/regulatory/auto which does its own PLU
-                //   detection from coordinates, fetches the actual PDF via the GPU
-                //   pipeline, and runs Gemini analysis.
-                const bodyPayload: Record<string, unknown> = {};
-                if (lotissementFile) {
-                    // If lotissement file also needs to go, read it as text
-                    // (regulatory/auto accepts documentContent)
-                    const reader = new FileReader();
-                    const lotText = await new Promise<string>((resolve) => {
-                        reader.onload = () => resolve(reader.result as string);
-                        reader.readAsText(lotissementFile);
-                    });
-                    bodyPayload.lotissementContent = lotText;
-                }
-                if (projectIntent.trim() || userNotes.trim()) {
-                    const fullIntent = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n");
-                    bodyPayload.projectIntent = fullIntent;
-                }
+            // c) Project brief: the auto-compiled + user-edited text from the textarea
+            const fullBrief = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n");
+            if (fullBrief) {
+                formData.append("projectBrief", fullBrief);
+            }
 
-                const res = await fetch(`/api/projects/${projectId}/regulatory/auto`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(bodyPayload),
-                });
-                const rawData = await res.json();
+            // d) Context metadata
+            formData.append("pluZone", projectZoneType || "non spécifiée");
+            formData.append("isABFZone", String(projectProtectedAreas.length > 0));
+            formData.append("parcelAddress", projectAddress || "non précisée");
 
-                if (!res.ok) {
-                    // If auto analysis fails because it can't find a PDF,
-                    // guide the user to upload manually
-                    const errMsg = (rawData.error as string) || "L'analyse automatique a échoué.";
-                    if (rawData.code === "ZONE_OR_DOC_NOT_FOUND") {
-                        throw new Error(
-                            "Le règlement PLU n'a pas pu être récupéré automatiquement. " +
-                            "Veuillez utiliser le bouton « Remplacer » pour importer votre document PLU en PDF."
-                        );
-                    }
-                    throw new Error(errMsg);
-                }
+            // ── Single request to the unified analyze-plu endpoint ───────
+            const res = await fetch("/api/analyze-plu", {
+                method: "POST",
+                body: formData,
+            });
+            // Safe JSON parsing — backend might return HTML on crash
+            const contentType = res.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error("Le serveur d'analyse a rencontré une erreur interne. Veuillez réessayer dans quelques instants.");
+            }
+            const data: Record<string, unknown> = await res.json();
 
-                // Reshape response to match analyze-plu response format
-                data = {
-                    success: true,
-                    analysis: rawData.analysis,
-                    pluRules: rawData.pluRules || {},
-                    source: rawData.source || "auto",
-                };
+            if (!res.ok) {
+                throw new Error((data.error as string) || "L'analyse du document a échoué.");
             }
 
             clearInterval(interval);
 
             if (data.success) {
-                // Store the full PLU analysis result for step 6 display
+                console.log(`[PLU] Analysis complete — source: ${data.source}, pluRules confidence: ${(data.pluRules as Record<string, unknown>)?.extractionConfidence}`);
+
+                const isFallbackSource = data.source === "fallback";
+
+                // Always store the PLU analysis result (even fallback) so Step 6 can render
                 setPluAnalysisResult({ analysis: data.analysis as object, pluRules: data.pluRules as object });
                 setGenerationCount(prev => prev + 1);
-                setAnalysisProgress(95);
+                setAnalysisProgress(isFallbackSource ? 50 : 95);
 
                 // ── Chain feasibility matrix generation ──────────────────
+                // CRITICAL: Always run this regardless of analyze-plu source.
+                // Even with fallback PluRules, the feasibility analysis can
+                // independently extract regulations from the PDF.
                 try {
                     setFeasibilityLoading(true);
-                    // Use the auto-compiled brief + user notes
-                    const intent = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n")
+                    const intent = fullBrief
                         || jobs.map(j => {
                             const label = j.displayLabel || j.nature;
                             const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
@@ -928,7 +893,7 @@ export default function ProjectDescriptionPage({
                     const feasFormData = new FormData();
                     if (pluFile) {
                         feasFormData.append("pdfFile", pluFile);
-                    } else if (useAutoDoc && pluDocUrl && isDirectPdfUrl) {
+                    } else if (useAutoDoc && pluDocUrl) {
                         feasFormData.append("pdfUrl", pluDocUrl);
                     }
                     feasFormData.append("pluZone", projectZoneType || "non spécifiée");
@@ -938,16 +903,32 @@ export default function ProjectDescriptionPage({
                         method: "POST",
                         body: feasFormData,
                     });
-                    const feasData = await feasRes.json();
 
-                    if (feasRes.ok && feasData.success && feasData.report) {
-                        setFeasibilityReport(feasData.report);
-                        setFeasibilitySource(feasData.source || "gemini");
+                    // Safe JSON parsing — backend might return HTML on crash
+                    const feasContentType = feasRes.headers.get("content-type") || "";
+                    if (feasContentType.includes("application/json")) {
+                        const feasData = await feasRes.json();
+                        if (feasRes.ok && feasData.success && feasData.report) {
+                            setFeasibilityReport(feasData.report);
+                            setFeasibilitySource(feasData.source || "gemini");
+                        } else {
+                            console.warn("Feasibility analysis failed:", feasData.error);
+                            // Set fallback source so UI shows warning badge
+                            if (isFallbackSource) {
+                                setFeasibilitySource("fallback");
+                            }
+                        }
                     } else {
-                        console.warn("Feasibility analysis failed:", feasData.error);
+                        console.warn("Feasibility API returned non-JSON response");
+                        if (isFallbackSource) {
+                            setFeasibilitySource("fallback");
+                        }
                     }
                 } catch (feasErr) {
                     console.warn("Feasibility analysis error:", feasErr);
+                    if (isFallbackSource) {
+                        setFeasibilitySource("fallback");
+                    }
                 } finally {
                     setFeasibilityLoading(false);
                 }

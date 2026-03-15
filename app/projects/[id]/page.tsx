@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
-import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 import { cn } from "@/lib/utils";
 import { processProtections } from "@/lib/sup-classification";
@@ -277,7 +276,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
-                href={`/plu-analysis?project=${project.id}`}
+                href={`/projects/${project.id}/project-description`}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 border border-slate-200 transition-colors"
               >
                 <Download className="w-4 h-4" />
@@ -459,32 +458,20 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
           </Link>
         </div>
 
-        {/* ── Next step / Export bar ── */}
+        {/* ── Back to Dashboard ── */}
         <div className="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm">
           <div>
             <h3 className="font-medium text-slate-900 mb-2">{t("overview.nextStep")}</h3>
-            <p className="text-slate-500 text-sm">
-              {getNextStep(`/projects/${project.id}`, project.id)
-                ? t("overview.continueNext")
-                : t("overview.exportWhenDone")}
-            </p>
+            <p className="text-slate-500 text-sm">{t("overview.exportWhenDone")}</p>
           </div>
           <div className="shrink-0">
-            {getNextStep(`/projects/${project.id}`, project.id) ? (
-              <NextStepButton
-                canProceed={true}
-                nextHref={getNextStep(`/projects/${project.id}`, project.id)!.href}
-                nextLabel={`${t("overview.nextStep")}: ${getNextStep(`/projects/${project.id}`, project.id)!.label}`}
-              />
-            ) : (
-              <Link
-                href={`/export?project=${project.id}`}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 transition-colors shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                {t("overview.goToExport")}
-              </Link>
-            )}
+            <Link
+              href={`/projects/${project.id}/dashboard`}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              <ArrowRight className="w-4 h-4" />
+              {isEn ? "Go to Dashboard" : "Tableau de bord"}
+            </Link>
           </div>
         </div>
       </div>

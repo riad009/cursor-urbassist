@@ -6,24 +6,17 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
-  FileCheck,
   FolderKanban,
-  PenTool,
-  Image,
-  Calculator,
-  Download,
   Menu,
-  MapPin,
   X,
   Sparkles,
   ChevronRight,
   Building2,
-  Box,
   User,
   Settings,
   Bell,
   LogOut,
-  Plus,
+  Home,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import dynamic from "next/dynamic";
@@ -31,23 +24,9 @@ import dynamic from "next/dynamic";
 const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/ui/LanguageToggle";
-import { PLANNING_STEPS, getStepIndex, getProjectIdFromRoute, getPhaseSteps, getStepPhase } from "@/lib/step-flow";
-import type { StepPhase } from "@/lib/step-flow";
+import { getProjectIdFromRoute } from "@/lib/step-flow";
 import { useProject } from "@/lib/hooks/use-project";
 
-const stepIcons = [
-  Plus,
-  LayoutDashboard,
-  FileCheck,
-  FolderKanban,
-  MapPin,
-  PenTool,
-  Building2,
-  Box,
-  Image,
-  Calculator,
-  Download,
-] as const;
 
 // Top menu: only Dashboard and Project.
 const navItems = [
@@ -65,7 +44,6 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
   const isNewProjectPage = pathname === "/projects/new";
   const showStepBar = !!projectId || isNewProjectPage;
-  const currentStepIndex = showStepBar ? getStepIndex(pathname) : -1;
 
   // Deduplicated project fetch — shares cache with all other useProject() consumers
   const { project: projectData } = useProject(projectId);
@@ -195,19 +173,24 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Planning application steps bar */}
+        {/* Project breadcrumb bar — clean, minimal */}
         {showStepBar && (
           <div className="border-t border-slate-200 bg-slate-50/90 px-4 py-2.5">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3">
               {projectId && (
-                <Link
-                  href={`/projects/${projectId}`}
-                  className="flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-slate-900 shrink-0"
-                >
-                  <FolderKanban className="w-4 h-4 text-blue-500" />
-                  <span className="hidden sm:inline">{projectName || "Project"}</span>
-                  <span className="text-slate-400 text-xs font-normal">(steps)</span>
-                </Link>
+                <>
+                  <Link
+                    href={`/projects/${projectId}/dashboard`}
+                    className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors shrink-0"
+                  >
+                    <Home className="w-4 h-4" />
+                    <span className="hidden sm:inline">Dashboard</span>
+                  </Link>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                  <span className="text-sm font-semibold text-slate-800 truncate">
+                    {projectName || "Project"}
+                  </span>
+                </>
               )}
               {!projectId && isNewProjectPage && (
                 <span className="flex items-center gap-2 text-sm font-medium text-slate-700 shrink-0">
@@ -215,45 +198,6 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
                   <span className="hidden sm:inline">{t("nav.newProject")}</span>
                 </span>
               )}
-              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
-                {(() => {
-                  // Don't render until we know paid status (avoids phase-1 flash)
-                  if (projectId && projectPaid === null) return null;
-                  const currentPhase: StepPhase = projectPaid ? 2 : 1;
-                  const phaseSteps = getPhaseSteps(currentPhase);
-                  return phaseSteps.map((step) => {
-                    const globalIdx = PLANNING_STEPS.findIndex((s) => s.step === step.step);
-                    const isActive = globalIdx === currentStepIndex;
-                    const isPast = globalIdx < currentStepIndex;
-                    const href = projectId ? step.href(projectId) : (step.step === 1 ? "/projects/new" : "#");
-                    const Icon = stepIcons[globalIdx] ?? LayoutDashboard;
-                    const phaseIdx = phaseSteps.indexOf(step);
-                    return (
-                      <Link
-                        key={step.step}
-                        href={href}
-                        className={cn(
-                          "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all",
-                          isActive && "bg-blue-500 text-white shadow-md shadow-blue-500/25",
-                          isPast && !isActive && "text-slate-500 hover:text-slate-700 hover:bg-slate-100",
-                          !isActive && !isPast && "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
-                            isActive ? "bg-blue-400/90 text-white" : "bg-slate-200 text-slate-500"
-                          )}
-                        >
-                          {phaseIdx + 1}
-                        </span>
-                        <Icon className="w-4 h-4 shrink-0" />
-                        <span className="hidden md:inline">{step.label}</span>
-                      </Link>
-                    );
-                  });
-                })()}
-              </div>
             </div>
           </div>
         )}

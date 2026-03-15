@@ -85,21 +85,25 @@ function MapController({
   const map = useMap();
   const lastCenterRef = React.useRef<{ lat: number; lng: number } | null>(null);
   useEffect(() => {
-    if (center) {
-      const latLng = `${center.lat},${center.lng}`;
-      const lastLatLng = lastCenterRef.current ? `${lastCenterRef.current.lat},${lastCenterRef.current.lng}` : null;
-      // Only set view when address changes; do not reset zoom on parcel selection (parent re-renders)
-      if (latLng !== lastLatLng) {
-        lastCenterRef.current = { lat: center.lat, lng: center.lng };
-        map.setView([center.lat, center.lng], 18);
+    try {
+      // Guard: map container may be destroyed during React transitions
+      if (!map || !map.getContainer()) return;
+      if (center) {
+        const latLng = `${center.lat},${center.lng}`;
+        const lastLatLng = lastCenterRef.current ? `${lastCenterRef.current.lat},${lastCenterRef.current.lng}` : null;
+        // Only set view when address changes; do not reset zoom on parcel selection (parent re-renders)
+        if (latLng !== lastLatLng) {
+          lastCenterRef.current = { lat: center.lat, lng: center.lng };
+          map.setView([center.lat, center.lng], 18);
+        }
+      } else {
+        lastCenterRef.current = null;
+        map.setView(FRANCE_CENTER, zoom);
       }
-    } else {
-      lastCenterRef.current = null;
-      map.setView(FRANCE_CENTER, zoom);
-    }
+    } catch { /* map container destroyed — safe to ignore */ }
   }, [center?.lat, center?.lng, map, zoom]);
   useMapEvents({
-    zoomend: () => onZoomChange(map.getZoom()),
+    zoomend: () => { try { onZoomChange(map.getZoom()); } catch { /* destroyed */ } },
   });
   return null;
 }
@@ -189,6 +193,8 @@ function ViewportParcelsLoader({
 
   const fetchForBounds = useCallback(() => {
     try {
+      // Guard: map container may be destroyed during React transitions
+      if (!map || !map.getContainer()) return;
       const zoom = map.getZoom();
       if (zoom < VIEWPORT_MIN_ZOOM) return;
 
@@ -222,7 +228,7 @@ function ViewportParcelsLoader({
           if (newParcels.length > 0) onLoadedRef.current(newParcels);
         })
         .catch(() => { });
-    } catch { /* map container not ready yet — retry on next event */ }
+    } catch { /* map container not ready or destroyed — safe to ignore */ }
   }, [map]); // Only depends on map — stable across renders
 
   const debouncedFetch = useCallback(() => {
