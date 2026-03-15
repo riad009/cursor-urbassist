@@ -126,6 +126,7 @@ export default function PluDocumentManager({
   const [showLotDropzone, setShowLotDropzone] = useState(false);
   const [urlValidating, setUrlValidating] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [placeholderUrl, setPlaceholderUrl] = useState<string | null>(null);
 
   // ── State machine ──────────────────────────────────────────────────────
   const hasAutoDoc = !!autoFetchedUrl?.trim();
@@ -168,11 +169,26 @@ export default function PluDocumentManager({
     // Quick pre-validation via our server-side proxy HEAD endpoint
     setUrlValidating(true);
     setUrlError(null);
+    setPlaceholderUrl(null);
     try {
+      // Use GET instead of HEAD so the proxy can detect placeholder PDFs
       const proxyUrl = `/api/plu-proxy-pdf?url=${encodeURIComponent(autoFetchedUrl)}`;
-      const res = await fetch(proxyUrl, { method: "HEAD", signal: AbortSignal.timeout(20_000) });
+      const res = await fetch(proxyUrl, { method: "GET", signal: AbortSignal.timeout(30_000) });
       if (!res.ok) {
-        // Don't try .json() — response could be HTML error page
+        // Check if it's a placeholder detection response
+        try {
+          const errData = await res.json();
+          if (errData.isPlaceholder && errData.suggestedUrl) {
+            setPlaceholderUrl(errData.suggestedUrl);
+            setUrlError(
+              isEn
+                ? "The auto-detected document is a placeholder (not the real regulation). Please download the actual document from the link below and upload it manually."
+                : "Le document auto-détecté est un placeholder (pas le vrai règlement). Veuillez télécharger le document réel depuis le lien ci-dessous et l'importer manuellement."
+            );
+            setUrlValidating(false);
+            return;
+          }
+        } catch { /* not JSON — fall through to generic error */ }
         setUrlError(
           `Le document n'est pas accessible (HTTP ${res.status}). Veuillez importer manuellement le règlement PLU.`
         );
@@ -187,7 +203,7 @@ export default function PluDocumentManager({
     setDecision("confirmed");
     onUseAutoDocChange(true);
     setUrlValidating(false);
-  }, [autoFetchedUrl, onUseAutoDocChange]);
+  }, [autoFetchedUrl, onUseAutoDocChange, isEn]);
 
   const handleStartReplace = useCallback(() => {
     setDecision("replacing");
@@ -222,18 +238,51 @@ export default function PluDocumentManager({
     }
   }, [hasManualFile, hasAutoDoc, onPluFileChange, onUseAutoDocChange]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!autoFetchedUrl?.trim()) return;
     // Use our server-side proxy to avoid CORS/TLS issues with geoportail servers
     const proxyUrl = `/api/plu-proxy-pdf?url=${encodeURIComponent(autoFetchedUrl)}`;
-    const a = document.createElement("a");
-    a.href = proxyUrl;
-    a.download = extractFilename(autoFetchedUrl);
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }, [autoFetchedUrl]);
+    try {
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) {
+        // Check if it's a placeholder detection response
+        try {
+          const errData = await res.json();
+          if (errData.isPlaceholder && errData.suggestedUrl) {
+            setPlaceholderUrl(errData.suggestedUrl);
+            setUrlError(
+              isEn
+                ? "The auto-detected file is a redirect placeholder, not the actual PLU regulation."
+                : "Le fichier auto-détecté est un placeholder de redirection, pas le vrai règlement PLU."
+            );
+            return;
+          }
+        } catch { /* not JSON */ }
+        setUrlError(
+          isEn
+            ? `Download failed (HTTP ${res.status}). Please upload the regulation manually.`
+            : `Échec du téléchargement (HTTP ${res.status}). Veuillez importer le règlement manuellement.`
+        );
+        return;
+      }
+      // Download succeeded — trigger browser download
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = extractFilename(autoFetchedUrl);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch {
+      setUrlError(
+        isEn
+          ? "Download failed (network error). Please try again."
+          : "Échec du téléchargement (erreur réseau). Veuillez réessayer."
+      );
+    }
+  }, [autoFetchedUrl, isEn]);
 
   const handleLotissementUpload = useCallback((f: File) => {
     const err = validateFile(f);
@@ -403,10 +452,21 @@ export default function PluDocumentManager({
                     <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] text-red-700 font-medium">{urlError}</p>
+                      {placeholderUrl && (
+                        <a
+                          href={placeholderUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-600 underline hover:text-sky-800 mt-1.5"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {isEn ? "Open real documents portal →" : "Ouvrir le portail des documents réels →"}
+                        </a>
+                      )}
                       <button
                         type="button"
                         onClick={handleStartReplace}
-                        className="text-[10px] font-bold text-red-600 underline hover:text-red-800 mt-1"
+                        className="block text-[10px] font-bold text-red-600 underline hover:text-red-800 mt-1"
                       >
                         {isEn ? "→ Upload regulation manually" : "→ Importer le règlement manuellement"}
                       </button>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { detectPlaceholderPdf } from "@/lib/pdf-placeholder-detector";
 
 /**
  * PLU PDF Proxy — Server-side download proxy for geoportail-urbanisme PDFs.
@@ -9,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
  *   1. Downloads the PDF server-side using the same multi-strategy approach as analyze-plu
  *   2. Streams the PDF back to the browser for viewing/download
  *   3. Validates the response is actually a PDF (not HTML error page)
+ *   4. Detects placeholder/redirect PDFs that contain no actual regulation
  *
  * USAGE:
  *   GET /api/plu-proxy-pdf?url=<encoded-gpu-url>
@@ -66,6 +68,23 @@ export async function GET(request: NextRequest) {
       console.warn(`[plu-proxy-pdf] Upstream returned non-PDF content (${buf.byteLength} bytes, starts: "${first4}")`);
       return NextResponse.json(
         { error: "Le fichier téléchargé n'est pas un PDF valide. Il s'agit peut-être d'une page d'erreur du serveur GPU." },
+        { status: 502 }
+      );
+    }
+
+    // Detect placeholder/redirect PDFs (small PDFs that just say "visit our website")
+    const placeholderCheck = await detectPlaceholderPdf(buf);
+    if (placeholderCheck.isPlaceholder) {
+      console.warn(`[plu-proxy-pdf] ⚠ Placeholder PDF detected: ${placeholderCheck.reason}`);
+      return NextResponse.json(
+        {
+          error: "Ce fichier est un document d'orientation (placeholder) et non le règlement PLU complet. " +
+            (placeholderCheck.suggestedUrl
+              ? `Les documents sont disponibles sur : ${placeholderCheck.suggestedUrl}`
+              : "Veuillez télécharger le règlement directement depuis le site de votre collectivité."),
+          isPlaceholder: true,
+          suggestedUrl: placeholderCheck.suggestedUrl,
+        },
         { status: 502 }
       );
     }

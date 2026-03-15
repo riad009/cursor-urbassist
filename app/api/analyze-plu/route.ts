@@ -14,6 +14,7 @@ import {
   createFallbackPluRules,
 } from "@/lib/plu-rules";
 import { extractZonePages, extractZoneText } from "@/lib/pdf-zone-extractor";
+import { detectPlaceholderPdf } from "@/lib/pdf-placeholder-detector";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +177,20 @@ export async function POST(request: NextRequest) {
           }
         } catch (e) {
           console.warn(`[analyze-plu] ✗ Node.js fetch failed:`, (e as Error).message?.slice(0, 200));
+        }
+      }
+
+      // ── Detect placeholder/redirect PDFs ────────────────────────────
+      // Some municipalities upload a tiny placeholder PDF that says
+      // "visit our website to download the real documents".
+      // These pass %PDF validation but have no useful regulatory content.
+      if (rawPdfBuffer) {
+        const phCheck = await detectPlaceholderPdf(rawPdfBuffer);
+        if (phCheck.isPlaceholder) {
+          console.warn(`[analyze-plu] ⚠ Placeholder PDF detected from URL — discarding. ${phCheck.reason}`);
+          rawPdfBuffer = null; // Force pipeline to fall through to text-only / manual upload
+          // Store info so we can return it in the response
+          (request as unknown as Record<string, unknown>).__placeholderInfo = phCheck;
         }
       }
     } else {
@@ -392,12 +407,20 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 9. Return combined result ──────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const placeholderInfo = (request as any).__placeholderInfo as { isPlaceholder: boolean; suggestedUrl: string | null; reason: string | null } | undefined;
+
     return NextResponse.json({
       success: true,
       analysis,
       pluRules,
       source,
       documentsAnalyzed: hasMultipleDocs ? 2 : 1,
+      ...(placeholderInfo?.isPlaceholder ? {
+        placeholderDetected: true,
+        suggestedUrl: placeholderInfo.suggestedUrl,
+        placeholderReason: placeholderInfo.reason,
+      } : {}),
     });
   } catch (error) {
     console.error("PLU Analysis error:", error);

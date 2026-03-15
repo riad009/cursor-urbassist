@@ -872,10 +872,22 @@ export default function ProjectDescriptionPage({
 
                 const isFallbackSource = data.source === "fallback";
 
+                // Warn user if the auto-detected PDF was a placeholder
+                if (data.placeholderDetected) {
+                    const sugUrl = data.suggestedUrl as string | undefined;
+                    setGenerationError(
+                        `⚠ Le document auto-détecté est un placeholder (pas le vrai règlement). ` +
+                        (sugUrl
+                            ? `Les vrais documents sont disponibles ici : ${sugUrl}. Téléchargez le règlement depuis ce lien et importez-le manuellement.`
+                            : `Veuillez télécharger le règlement depuis le site de votre collectivité et l'importer manuellement.`)
+                    );
+                }
+
                 // Always store the PLU analysis result (even fallback) so Step 6 can render
                 setPluAnalysisResult({ analysis: data.analysis as object, pluRules: data.pluRules as object });
                 setGenerationCount(prev => prev + 1);
                 setAnalysisProgress(isFallbackSource ? 50 : 95);
+
 
                 // ── Chain feasibility matrix generation ──────────────────
                 // CRITICAL: Always run this regardless of analyze-plu source.
