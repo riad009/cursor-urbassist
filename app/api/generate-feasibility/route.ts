@@ -8,13 +8,19 @@ import {
   FEASIBILITY_REPORT_SCHEMA,
   createFallbackFeasibilityReport,
 } from "@/lib/feasibility-matrix";
+import { execSync } from "child_process";
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { extractZonePages, extractZoneText } from "@/lib/pdf-zone-extractor";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-2.5-flash";
-const MAX_PDF_SIZE_BYTES = 30 * 1024 * 1024; // 30 MB
-const API_TIMEOUT_MS = 180_000; // 3 min — feasibility analysis is heavier
+const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB — smart splitting handles large files
+const GEMINI_INLINE_LIMIT = 15 * 1024 * 1024; // ~15 MB raw
+const API_TIMEOUT_MS = 180_000; // 3 min
 
 // ─── POST handler ────────────────────────────────────────────────────────────
 
@@ -22,31 +28,31 @@ export async function POST(request: NextRequest) {
   try {
     // ── 1. Parse multipart/form-data ─────────────────────────────────────
     const formData = await request.formData();
-    const pdfFile = formData.get("pdfFile") as File | null;
+    // Accept both legacy and unified field names
+    const pdfFile = (formData.get("pluPdfFile") as File | null) || (formData.get("pdfFile") as File | null);
+    const pdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";
     const pluZone = (formData.get("pluZone") as string)?.trim() || "non spécifiée";
     const projectIntent =
       (formData.get("projectIntent") as string)?.trim() || "";
 
+    console.log(`[generate-feasibility] ▶ Request — pdfFile: ${pdfFile ? `${pdfFile.name} (${pdfFile.size}b)` : "none"}, pdfUrl: ${pdfUrl || "none"}, zone: ${pluZone}, intent: ${projectIntent.slice(0, 80)}...`);
+
     // ── 2. Validate inputs ───────────────────────────────────────────────
-    if (!pdfFile || pdfFile.size === 0) {
+    const hasPdfFile = pdfFile && pdfFile.size > 0;
+    const hasPdfUrl = pdfUrl.length > 10;
+
+    if (!hasPdfFile && !hasPdfUrl) {
       return NextResponse.json(
-        { error: "Un fichier PDF du règlement PLU est requis." },
+        { error: "Un fichier PDF ou une URL du règlement PLU est requis." },
         { status: 400 }
       );
     }
 
-    if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
+    if (hasPdfFile && pdfFile!.size > MAX_PDF_SIZE_BYTES) {
       return NextResponse.json(
         {
           error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.`,
         },
-        { status: 400 }
-      );
-    }
-
-    if (!pdfFile.type.includes("pdf") && !pdfFile.name.endsWith(".pdf")) {
-      return NextResponse.json(
-        { error: "Seuls les fichiers PDF sont acceptés." },
         { status: 400 }
       );
     }
@@ -73,22 +79,155 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── 4. Read PDF as base64 ────────────────────────────────────────────
-    const pdfArrayBuffer = await pdfFile.arrayBuffer();
-    const pdfBase64 = Buffer.from(pdfArrayBuffer).toString("base64");
+    // ── 4. Resolve raw PDF buffer ────────────────────────────────────────
+    let rawPdfBuffer: Buffer | null = null;
 
-    // ── 5. Initialize Gemini ─────────────────────────────────────────────
+    if (hasPdfFile) {
+      rawPdfBuffer = Buffer.from(await pdfFile!.arrayBuffer());
+      console.log(`[generate-feasibility] ✓ Loaded uploaded file: ${rawPdfBuffer.byteLength} bytes`);
+    } else if (hasPdfUrl) {
+      // Multi-strategy download (same as analyze-plu)
+      console.log(`[generate-feasibility] Fetching PDF via multi-strategy download: ${pdfUrl}`);
+      const tmpDir = join(tmpdir(), "urbassist-feas");
+      try { mkdirSync(tmpDir, { recursive: true }); } catch { /* exists */ }
+      const tmpFile = join(tmpDir, `feas_${Date.now()}.pdf`);
+      const sanitizedUrl = pdfUrl.replace(/"/g, '').replace(/'/g, '');
+
+      const curlStrategies = [
+        `curl -sS -L --max-time 120 --retry 3 --retry-delay 3 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 120 --retry 2 --retry-delay 5 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
+        `curl -sS -L -k --max-time 120 -o "${tmpFile}" "${sanitizedUrl}"`,
+      ];
+
+      for (let i = 0; i < curlStrategies.length; i++) {
+        try {
+          try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
+          console.log(`[generate-feasibility] ➤ Strategy ${i + 1}/${curlStrategies.length}...`);
+          execSync(curlStrategies[i], { timeout: 130_000, stdio: ['pipe', 'pipe', 'pipe'] });
+
+          if (existsSync(tmpFile)) {
+            const buf = readFileSync(tmpFile);
+            const first4 = buf.slice(0, 4).toString();
+            if (first4 === "%PDF" && buf.byteLength >= 100) {
+              rawPdfBuffer = buf;
+              console.log(`[generate-feasibility] ✓ Strategy ${i + 1} succeeded: ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB), valid PDF`);
+              break;
+            } else {
+              console.warn(`[generate-feasibility] ✗ Strategy ${i + 1}: Not a valid PDF (${buf.byteLength} bytes)`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[generate-feasibility] ✗ Strategy ${i + 1} failed:`, (e as Error).message?.slice(0, 200));
+        }
+      }
+      try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
+
+      // Final fallback: Node.js fetch
+      if (!rawPdfBuffer) {
+        try {
+          console.log(`[generate-feasibility] ➤ Fallback: Node.js fetch...`);
+          const fetchRes = await fetch(sanitizedUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/pdf,*/*" },
+            redirect: "follow",
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (fetchRes.ok) {
+            const nodeBuf = Buffer.from(await fetchRes.arrayBuffer());
+            if (nodeBuf.slice(0, 4).toString() === "%PDF" && nodeBuf.byteLength >= 100) {
+              rawPdfBuffer = nodeBuf;
+              console.log(`[generate-feasibility] ✓ Node.js fetch succeeded: ${nodeBuf.byteLength} bytes`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[generate-feasibility] ✗ Node.js fetch failed:`, (e as Error).message?.slice(0, 200));
+        }
+      }
+    }
+
+    if (!rawPdfBuffer) {
+      // CRIT-2 FIX: Return a fallback report instead of a blocking 400 error.
+      // The user should still see a report, just with default data.
+      console.warn(`[generate-feasibility] ✗ All download strategies failed — returning fallback report`);
+      return NextResponse.json({
+        success: true,
+        report: createFallbackFeasibilityReport(pluZone, projectIntent),
+        source: "fallback" as const,
+      });
+    }
+
+    // ── 5. Smart Zone Splitting (same pipeline as analyze-plu) ───────────
+    let pdfBase64: string | null = null;
+    let degradedModeText: string | null = null;
+
+    if (rawPdfBuffer.byteLength <= GEMINI_INLINE_LIMIT) {
+      pdfBase64 = rawPdfBuffer.toString("base64");
+      console.log(`[generate-feasibility] ✓ PDF small enough for inline (${(rawPdfBuffer.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+    } else {
+      console.log(`[generate-feasibility] ▶ PDF is ${(rawPdfBuffer.byteLength / 1024 / 1024).toFixed(1)}MB — running smart zone extraction for "${pluZone}"...`);
+      try {
+        const extraction = await extractZonePages(rawPdfBuffer, pluZone);
+        if (extraction.zoneFound && extraction.extractedPageCount > 0) {
+          if (extraction.buffer.byteLength <= GEMINI_INLINE_LIMIT) {
+            pdfBase64 = extraction.buffer.toString("base64");
+            console.log(`[generate-feasibility] ✓ ${extraction.summary}`);
+          } else {
+            console.warn(`[generate-feasibility] ⚠ Split PDF still ${(extraction.buffer.byteLength / 1024 / 1024).toFixed(1)}MB — falling back to text extraction`);
+            const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+            if (textResult.text.length > 100) {
+              degradedModeText = textResult.text;
+              console.log(`[generate-feasibility] ✓ Text extracted: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+            }
+          }
+        } else {
+          console.warn(`[generate-feasibility] ⚠ Zone "${pluZone}" not found in PDF — trying text extraction`);
+          const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+          if (textResult.text.length > 100) {
+            degradedModeText = textResult.text;
+            console.log(`[generate-feasibility] ✓ Text extracted: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[generate-feasibility] ✗ Zone extraction failed:`, (err as Error).message);
+        try {
+          const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+          if (textResult.text.length > 100) {
+            degradedModeText = textResult.text;
+            console.log(`[generate-feasibility] ✓ Text fallback: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+          }
+        } catch { /* truly degraded */ }
+      }
+    }
+
+    // If no usable data at all, return fallback
+    if (!pdfBase64 && !degradedModeText) {
+      console.warn(`[generate-feasibility] ✗ All PDF processing failed — returning fallback`);
+      return NextResponse.json({
+        success: true,
+        report: createFallbackFeasibilityReport(pluZone, projectIntent),
+        source: "fallback" as const,
+      });
+    }
+
+    // ── 6. Initialize Gemini ─────────────────────────────────────────────
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
     const systemPrompt = buildVirtualArchitectSystemPrompt(
       pluZone,
       projectIntent
     );
-    const userPrompt = buildUserPrompt(pluZone, projectIntent);
+    let userPrompt = buildUserPrompt(pluZone, projectIntent);
 
-    const pdfPart = {
-      inlineData: { data: pdfBase64, mimeType: "application/pdf" },
-    };
+    // If degraded text mode, inject extracted text into user prompt
+    if (degradedModeText && !pdfBase64) {
+      userPrompt += `\n\n--- CONTENU EXTRAIT DU RÈGLEMENT PLU (ZONE ${pluZone.toUpperCase()}) ---\n${degradedModeText}\n--- FIN DU CONTENU EXTRAIT ---\n\nATTENTION: Le document PDF complet n'a pas pu être traité. Les extraits ci-dessus proviennent des pages les plus pertinentes pour la zone ${pluZone.toUpperCase()}. Analysez ces extraits en détail.`;
+      console.log(`[generate-feasibility] ✓ Injected ${degradedModeText.length} chars of extracted text into prompt`);
+    }
+
+    // Build PDF parts array (empty in degraded mode)
+    const pdfParts: { inlineData: { data: string; mimeType: string } }[] = [];
+    if (pdfBase64) {
+      pdfParts.push({ inlineData: { data: pdfBase64, mimeType: "application/pdf" } });
+    }
 
     const generationConfig: GenerationConfig = {
       temperature: 0.1,
@@ -97,32 +236,61 @@ export async function POST(request: NextRequest) {
       responseSchema: FEASIBILITY_REPORT_SCHEMA,
     };
 
-    // ── 6. Call Gemini ───────────────────────────────────────────────────
+    // ── 7. Call Gemini ───────────────────────────────────────────────────
     const model = genAI.getGenerativeModel({
       model: MODEL_NAME,
       systemInstruction: systemPrompt,
       generationConfig,
     });
 
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), API_TIMEOUT_MS);
-
     let rawText: string | null = null;
     try {
-      const result = await model.generateContent({
-        contents: [
-          {
-            role: "user",
-            parts: [pdfPart, { text: userPrompt }],
-          },
-        ],
+      // Attempt 1: with PDF parts
+      try {
+        const result = await model.generateContent({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                ...pdfParts,
+                { text: userPrompt },
+              ],
+            },
+          ],
+        });
+        rawText = result.response.text();
+      } catch (firstErr) {
+        const errMsg = (firstErr as Error).message || "";
+        const is400 = errMsg.includes("400") || errMsg.includes("Bad Request") || errMsg.includes("invalid argument");
+
+        // If 400 with PDF, retry without PDF (text-only)
+        if (is400 && pdfParts.length > 0) {
+          console.warn(`[generate-feasibility] ⚠ Gemini 400 with PDF — retrying text-only`);
+          const retryResult = await model.generateContent({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: `[NOTE: Le document PDF n'a pas pu être analysé directement. Réponds en te basant sur les informations textuelles.]\n\n${userPrompt}` },
+                ],
+              },
+            ],
+          });
+          rawText = retryResult.response.text();
+        } else {
+          throw firstErr;
+        }
+      }
+    } catch (geminiErr) {
+      console.error(`[generate-feasibility] ✗ Gemini call failed:`, (geminiErr as Error).message?.slice(0, 300));
+      return NextResponse.json({
+        success: true,
+        report: createFallbackFeasibilityReport(pluZone, projectIntent),
+        source: "fallback" as const,
       });
-      rawText = result.response.text();
-    } finally {
-      clearTimeout(timeout);
     }
 
-    // ── 7. Parse response ────────────────────────────────────────────────
+    // ── 8. Parse response ────────────────────────────────────────────────
     if (!rawText) {
       console.error("Gemini returned empty response");
       return NextResponse.json({
@@ -150,7 +318,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── 8. Sanitize / validate structure ─────────────────────────────────
+    // ── 9. Sanitize / validate structure ─────────────────────────────────
     report = sanitizeFeasibilityReport(report, pluZone, projectIntent);
 
     return NextResponse.json({
@@ -347,50 +515,60 @@ function sanitizeFeasibilityReport(
 }
 
 /**
- * Attempt to parse potentially malformed JSON.
- * Handles markdown code fences and trailing commas.
+ * Robust JSON parser for potentially malformed Gemini output.
+ * Handles: markdown fences, JS comments, trailing commas, single-quoted
+ * strings, unquoted property names, and STRING-AWARE brace matching.
+ * (Upgraded from naive version to match analyze-plu's implementation)
  */
 function parseLooseJson<T>(text: string): T | null {
   if (!text) return null;
 
-  // Strip markdown code fences
-  const cleaned = text
-    .replace(/```(?:json)?[\s\n]*/gi, "")
-    .replace(/```\s*/g, "")
-    .trim();
+  // 1. Strip markdown code fences
+  let cleaned = text.replace(/```(?:json)?[\s\n]*/gi, "").replace(/```\s*/g, "").trim();
 
-  // Try direct parse
+  // 2. Try direct parse first (fast path)
   try {
     return JSON.parse(cleaned) as T;
-  } catch {
-    /* continue */
-  }
+  } catch { /* continue */ }
 
-  // Try extracting the first JSON object
+  // 3. Remove trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+
+  // 4. Try parse after cleanup
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch { /* continue */ }
+
+  // 5. Extract the first balanced JSON object with STRING-AWARE matching
   const start = cleaned.indexOf("{");
   if (start < 0) return null;
 
   let depth = 0;
-  let end = start;
+  let inString = false;
+  let escape = false;
+
   for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") depth++;
-    else if (cleaned[i] === "}") {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === '{') depth++;
+    else if (ch === '}') {
       depth--;
       if (depth === 0) {
-        end = i;
+        const block = cleaned.slice(start, i + 1).replace(/,\s*([}\]])/g, "$1");
+        try {
+          return JSON.parse(block) as T;
+        } catch { /* continue */ }
+        // Nuclear option: fix unquoted keys
+        const fixedKeys = block.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+        try {
+          return JSON.parse(fixedKeys) as T;
+        } catch { /* give up */ }
         break;
       }
-    }
-  }
-
-  if (end > start) {
-    try {
-      const block = cleaned
-        .slice(start, end + 1)
-        .replace(/,\s*([}\]])/g, "$1");
-      return JSON.parse(block) as T;
-    } catch {
-      /* give up */
     }
   }
 

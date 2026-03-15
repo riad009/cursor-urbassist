@@ -40,6 +40,7 @@ import MaterialsStep from "@/components/project-description/MaterialsStep";
 import PluDocumentManager from "@/components/project-description/PluDocumentManager";
 import FeasibilityMatrix, { FeasibilityMatrixSkeleton } from "@/components/feasibility/FeasibilityMatrix";
 import type { FeasibilityReport } from "@/lib/feasibility-matrix";
+import { compileProjectBrief } from "@/lib/prompt-compiler";
 import { cn } from "@/lib/utils";
 import {
     calculateDpPc,
@@ -264,6 +265,8 @@ export default function ProjectDescriptionPage({
     const [pluAnalysisResult, setPluAnalysisResult] = useState<{ analysis: any; pluRules: any } | null>(null);
     // Feasibility matrix state
     const [projectIntent, setProjectIntent] = useState("");
+    const [userNotes, setUserNotes] = useState("");
+    const [briefAutoCompiled, setBriefAutoCompiled] = useState(false);
     const [feasibilityReport, setFeasibilityReport] = useState<FeasibilityReport | null>(null);
     const [feasibilitySource, setFeasibilitySource] = useState<"gemini" | "fallback" | null>(null);
     const [feasibilityLoading, setFeasibilityLoading] = useState(false);
@@ -273,6 +276,21 @@ export default function ProjectDescriptionPage({
     const [projectZoneType, setProjectZoneType] = useState<string>("");
     const [projectProtectedAreas, setProjectProtectedAreas] = useState<{ type: string; name: string }[]>([]);
 
+    // ── Auto-compile brief when entering Step 5 (Regulation Analysis) ──────
+    useEffect(() => {
+        if (step === 5 && !projectIntent.trim() && jobs.length > 0) {
+            const compiled = compileProjectBrief(jobs, jobMaterials, {
+                zone: projectZoneType,
+                address: projectAddress,
+                authType: authorizationType,
+                isEn,
+            });
+            setProjectIntent(compiled);
+            setBriefAutoCompiled(true);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step]);
+
     useEffect(() => {
         setInitialLoading(true);
         fetch(`/api/projects/${projectId}`)
@@ -281,10 +299,41 @@ export default function ProjectDescriptionPage({
                 if (d.project?.name) setProjectName(d.project.name);
                 if (d.project?.address) setProjectAddress(d.project.address);
                 if (d.project?.regulatoryAnalysis?.zoneType) setProjectZoneType(d.project.regulatoryAnalysis.zoneType);
-                if (d.project?.regulatoryAnalysis?.pdfUrl) setPluDocUrl(d.project.regulatoryAnalysis.pdfUrl);
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
                 if (d.project?.authorizationType) setAuthorizationType(d.project.authorizationType);
+
+                // ── PLU PDF URL — strict fallback chain ──────────────────
+                // Priority 1: Direct PDF URL from regulatoryAnalysis (stored by GPU API)
+                const storedPdfUrl = d.project?.regulatoryAnalysis?.pdfUrl;
+                if (storedPdfUrl) {
+                    setPluDocUrl(storedPdfUrl);
+                }
+                // Priority 2: If zone detected but no pdfUrl → live re-fetch via plu-detection
+                // This handles cases where the DB record was created before the fix was added
+                else if (d.project?.regulatoryAnalysis?.zoneType && d.project?.coordinates) {
+                    try {
+                        const coords = JSON.parse(d.project.coordinates);
+                        const coordArray = Array.isArray(coords) ? coords : [coords.lng ?? coords.longitude, coords.lat ?? coords.latitude];
+                        if (coordArray.length >= 2 && (coordArray[0] !== 0 || coordArray[1] !== 0)) {
+                            fetch("/api/plu-detection", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ coordinates: coordArray }),
+                            })
+                                .then(r => r.ok ? r.json() : null)
+                                .then(data => {
+                                    if (data?.plu?.pdfUrl) {
+                                        setPluDocUrl(data.plu.pdfUrl);
+                                    }
+                                    // If API returns null pdfUrl → leave pluDocUrl as null.
+                                    // PluDocumentManager handles this: shows "No downloadable regulation"
+                                    // and forces the user to upload manually.
+                                })
+                                .catch(() => { /* silent - PluDocumentManager handles null */ });
+                        }
+                    } catch { /* malformed coordinates - pluDocUrl stays null, user uploads manually */ }
+                }
 
                 // ── Pre-populate jobs from authorization data ──────────────
                 const desc = d.project?.projectDescription;
@@ -774,43 +823,84 @@ export default function ProjectDescriptionPage({
         }, 500);
 
         try {
-            // ── Build FormData with PDF(s) + context ──────────────────────
+            // ── Build a single unified FormData payload ──────────────────
             const formData = new FormData();
+
+            // a) PLU document: user-uploaded file takes priority over auto-detected URL
             if (pluFile) {
-                formData.append("pdfFile", pluFile);
+                formData.append("pluPdfFile", pluFile);
             } else if (useAutoDoc && pluDocUrl) {
-                formData.append("pdfUrl", pluDocUrl);
+                formData.append("pluPdfUrl", pluDocUrl);
             }
+
+            // b) Optional lotissement (subdivision rules) file
             if (lotissementFile) {
-                formData.append("pdfFile2", lotissementFile);
+                formData.append("lotissementFile", lotissementFile);
             }
+
+            // c) Project brief: the auto-compiled + user-edited text from the textarea
+            const fullBrief = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n");
+            if (fullBrief) {
+                formData.append("projectBrief", fullBrief);
+            }
+
+            // d) Context metadata
             formData.append("pluZone", projectZoneType || "non spécifiée");
             formData.append("isABFZone", String(projectProtectedAreas.length > 0));
             formData.append("parcelAddress", projectAddress || "non précisée");
 
+            // ── Single request to the unified analyze-plu endpoint ───────
             const res = await fetch("/api/analyze-plu", {
                 method: "POST",
-                body: formData, // No Content-Type header — browser sets multipart boundary
+                body: formData,
             });
+            // Safe JSON parsing — backend might return HTML on crash
+            const contentType = res.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error("Le serveur d'analyse a rencontré une erreur interne. Veuillez réessayer dans quelques instants.");
+            }
+            const data: Record<string, unknown> = await res.json();
+
+            if (!res.ok) {
+                throw new Error((data.error as string) || "L'analyse du document a échoué.");
+            }
 
             clearInterval(interval);
-            const data = await res.json();
 
-            if (res.ok && data.success) {
-                // Store the full PLU analysis result for step 6 display
-                setPluAnalysisResult({ analysis: data.analysis, pluRules: data.pluRules });
+            if (data.success) {
+                console.log(`[PLU] Analysis complete — source: ${data.source}, pluRules confidence: ${(data.pluRules as Record<string, unknown>)?.extractionConfidence}`);
+
+                const isFallbackSource = data.source === "fallback";
+
+                // Warn user if the auto-detected PDF was a placeholder
+                if (data.placeholderDetected) {
+                    const sugUrl = data.suggestedUrl as string | undefined;
+                    setGenerationError(
+                        `⚠ Le document auto-détecté est un placeholder (pas le vrai règlement). ` +
+                        (sugUrl
+                            ? `Les vrais documents sont disponibles ici : ${sugUrl}. Téléchargez le règlement depuis ce lien et importez-le manuellement.`
+                            : `Veuillez télécharger le règlement depuis le site de votre collectivité et l'importer manuellement.`)
+                    );
+                }
+
+                // Always store the PLU analysis result (even fallback) so Step 6 can render
+                setPluAnalysisResult({ analysis: data.analysis as object, pluRules: data.pluRules as object });
                 setGenerationCount(prev => prev + 1);
-                setAnalysisProgress(95);
+                setAnalysisProgress(isFallbackSource ? 50 : 95);
+
 
                 // ── Chain feasibility matrix generation ──────────────────
+                // CRITICAL: Always run this regardless of analyze-plu source.
+                // Even with fallback PluRules, the feasibility analysis can
+                // independently extract regulations from the PDF.
                 try {
                     setFeasibilityLoading(true);
-                    // Auto-build project intent from jobs if user left it empty
-                    const intent = projectIntent.trim() || jobs.map(j => {
-                        const label = j.displayLabel || j.nature;
-                        const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
-                        return `${label}${area}`;
-                    }).join(", ") || "Projet de construction";
+                    const intent = fullBrief
+                        || jobs.map(j => {
+                            const label = j.displayLabel || j.nature;
+                            const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
+                            return `${label}${area}`;
+                        }).join(", ") || "Projet de construction";
 
                     const feasFormData = new FormData();
                     if (pluFile) {
@@ -825,16 +915,32 @@ export default function ProjectDescriptionPage({
                         method: "POST",
                         body: feasFormData,
                     });
-                    const feasData = await feasRes.json();
 
-                    if (feasRes.ok && feasData.success && feasData.report) {
-                        setFeasibilityReport(feasData.report);
-                        setFeasibilitySource(feasData.source || "gemini");
+                    // Safe JSON parsing — backend might return HTML on crash
+                    const feasContentType = feasRes.headers.get("content-type") || "";
+                    if (feasContentType.includes("application/json")) {
+                        const feasData = await feasRes.json();
+                        if (feasRes.ok && feasData.success && feasData.report) {
+                            setFeasibilityReport(feasData.report);
+                            setFeasibilitySource(feasData.source || "gemini");
+                        } else {
+                            console.warn("Feasibility analysis failed:", feasData.error);
+                            // Set fallback source so UI shows warning badge
+                            if (isFallbackSource) {
+                                setFeasibilitySource("fallback");
+                            }
+                        }
                     } else {
-                        console.warn("Feasibility analysis failed:", feasData.error);
+                        console.warn("Feasibility API returned non-JSON response");
+                        if (isFallbackSource) {
+                            setFeasibilitySource("fallback");
+                        }
                     }
                 } catch (feasErr) {
                     console.warn("Feasibility analysis error:", feasErr);
+                    if (isFallbackSource) {
+                        setFeasibilitySource("fallback");
+                    }
                 } finally {
                     setFeasibilityLoading(false);
                 }
@@ -842,14 +948,14 @@ export default function ProjectDescriptionPage({
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             } else {
-                setGenerationError(data.error || "L'analyse du document a échoué.");
+                setGenerationError((data.error as string) || "L'analyse du document a échoué.");
                 setAnalysisProgress(100);
                 setAnalysisComplete(true);
             }
         } catch (err) {
             clearInterval(interval);
             console.error("PLU Analysis failed:", err);
-            setGenerationError("Erreur de connexion. Veuillez réessayer.");
+            setGenerationError(err instanceof Error ? err.message : "Erreur de connexion. Veuillez réessayer.");
             setAnalysisProgress(100);
             setAnalysisComplete(true);
         }
@@ -2013,25 +2119,69 @@ export default function ProjectDescriptionPage({
                                             isEn={isEn}
                                         />
 
-                                        {/* Project Intent (for feasibility matrix) */}
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                                        {/* Project Intent — Auto-Compiled Brief */}
+                                        <div className="space-y-3">
+                                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                                                 <Pencil className="w-4 h-4 text-emerald-500" />
-                                                {isEn ? "Project Intent (Recommended)" : "Intention du Projet (Recommandé)"}
+                                                {isEn ? "Project Brief for AI Analysis" : "Brief Projet pour l'Analyse IA"}
+                                                {briefAutoCompiled && (
+                                                    <span className="text-[10px] font-medium bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                                                        {isEn ? "Auto-generated from Step 1" : "Auto-généré depuis l'Étape 1"}
+                                                    </span>
+                                                )}
                                             </h3>
-                                            <textarea
-                                                value={projectIntent}
-                                                onChange={(e) => setProjectIntent(e.target.value)}
-                                                rows={3}
-                                                placeholder={isEn
-                                                    ? "Describe your project for a detailed compliance analysis. E.g.: Construction of a 15m² garden shed, 2.5m height, on property boundary, 2-pitch tile roof..."
-                                                    : "Décrivez votre projet pour une analyse de conformité détaillée. Ex : Construction d'un abri de jardin de 15m², hauteur 2.5m, en limite séparative, toiture 2 pentes en tuile..."}
-                                                className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-none"
-                                            />
-                                            <p className="text-[10px] text-slate-400 mt-1">
+
+                                            {/* Auto-compiled brief preview */}
+                                            <div className="relative">
+                                                <textarea
+                                                    value={projectIntent}
+                                                    onChange={(e) => {
+                                                        setProjectIntent(e.target.value);
+                                                        setBriefAutoCompiled(false);
+                                                    }}
+                                                    rows={8}
+                                                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 text-xs font-mono leading-relaxed placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-y"
+                                                />
+                                                {briefAutoCompiled && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const compiled = compileProjectBrief(jobs, jobMaterials, {
+                                                                zone: projectZoneType,
+                                                                address: projectAddress,
+                                                                authType: authorizationType,
+                                                                isEn,
+                                                            });
+                                                            setProjectIntent(compiled);
+                                                            setBriefAutoCompiled(true);
+                                                        }}
+                                                        className="absolute top-2 right-2 text-[10px] font-medium text-indigo-600 hover:text-indigo-800 bg-white/80 backdrop-blur-sm border border-indigo-200 px-2 py-1 rounded-lg transition-colors"
+                                                    >
+                                                        ↻ {isEn ? "Recompile" : "Recompiler"}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Additional notes */}
+                                            <div>
+                                                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                                    {isEn ? "Additional notes (optional)" : "Notes supplémentaires (optionnel)"}
+                                                </label>
+                                                <textarea
+                                                    value={userNotes}
+                                                    onChange={(e) => setUserNotes(e.target.value)}
+                                                    rows={2}
+                                                    placeholder={isEn
+                                                        ? "Add any extra context for the AI analysis: specific concerns, neighbor constraints, materials that must match..."
+                                                        : "Ajoutez tout contexte supplémentaire pour l'analyse IA : contraintes voisinage, matériaux imposés, préoccupations spécifiques..."}
+                                                    className="w-full mt-1 px-4 py-2.5 rounded-xl bg-white border border-dashed border-slate-300 text-slate-800 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-none"
+                                                />
+                                            </div>
+
+                                            <p className="text-[10px] text-slate-400">
                                                 {isEn
-                                                    ? "The more detailed your description, the more precise the analysis will be. If left empty, job descriptions will be used."
-                                                    : "Plus votre description est détaillée, plus l'analyse sera précise. Si vide, les descriptions des travaux seront utilisées."}
+                                                    ? "This brief is auto-compiled from your works and materials. Edit freely — your changes are preserved."
+                                                    : "Ce brief est compilé automatiquement depuis vos travaux et matériaux. Modifiez librement — vos changements sont préservés."}
                                             </p>
                                         </div>
 

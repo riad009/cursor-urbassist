@@ -69,7 +69,6 @@ import {
   Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getNextStep, getPrevStep } from "@/lib/step-flow";
 import dynamic from "next/dynamic";
 
 const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
@@ -3266,19 +3265,19 @@ function SitePlanContent() {
       <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {(() => {
-            const prevStep = getPrevStep(pathname, currentProjectId);
+            const backHref = currentProjectId ? `/projects/${currentProjectId}/dashboard` : "/projects";
             return (
               <button
                 type="button"
                 onClick={async () => {
                   if (isDirty && currentProjectId) await saveSitePlan();
-                  router.push(prevStep ? prevStep.href : "/projects");
+                  router.push(backHref);
                 }}
                 className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors shrink-0"
               >
                 <ArrowLeft className="w-5 h-5" />
                 <span className="text-sm font-medium hidden sm:block">
-                  {prevStep ? `Back to ${prevStep.label}` : "Back"}
+                  Back to Dashboard
                 </span>
               </button>
             );
@@ -3419,9 +3418,8 @@ function SitePlanContent() {
                 </span>
               )}
               {(() => {
-                const next = getNextStep("/site-plan", currentProjectId);
-                const nextHref = next?.href ?? `/terrain?project=${currentProjectId}`;
-                const nextLabel = next?.label ?? "Next: Terrain";
+                const nextHref = `/terrain?project=${currentProjectId}`;
+                const nextLabel = "Next: Terrain";
                 if (editorCanProceed) {
                   return (
                     <button

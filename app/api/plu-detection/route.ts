@@ -253,7 +253,23 @@ export async function POST(request: NextRequest) {
         const idurba = (zone.idurba ?? zone.IDURBA ?? zone.du_type) as string | undefined;
         pluInfo.pluType = idurba ? (String(idurba).includes("PLUi") ? "PLUi" : "PLU") : null;
         pluInfo.pluStatus = (zone.etat as string) ?? "detected";
-        console.log(`[PLU] Zone detected: ${pluInfo.zoneType} — ${pluInfo.zoneName} (source: ${zoneSource})`);
+
+        // ── Extract PDF URL from zone properties ──────────────────────
+        // Strategy: gpu_doc_id + nomfic → real GPU download endpoint
+        const gpuDocId = (zone.gpu_doc_id ?? zone.GPU_DOC_ID) as string | undefined;
+        const nomfic = (zone.nomfic ?? zone.NOMFIC) as string | undefined;
+        if (gpuDocId && nomfic && gpuDocId.trim() && nomfic.trim()) {
+          pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document/${gpuDocId.trim()}/files/${encodeURIComponent(nomfic.trim())}`;
+        }
+        // Fallback: check urlfic/url_fichier direct links
+        if (!pluInfo.pdfUrl) {
+          const urlfic = (zone.urlfic ?? zone.URLFIC ?? zone.url_fichier ?? zone.URL_FICHIER) as string | undefined;
+          if (urlfic && typeof urlfic === "string" && urlfic.trim().startsWith("http")) {
+            pluInfo.pdfUrl = urlfic.trim();
+          }
+        }
+
+        console.log(`[PLU] Zone detected: ${pluInfo.zoneType} — ${pluInfo.zoneName} (source: ${zoneSource}), PDF: ${pluInfo.pdfUrl ? "✓" : "✗"}`);
       }
     }
 
@@ -263,12 +279,33 @@ export async function POST(request: NextRequest) {
       if (doc) {
         pluInfo.pluStatus = pluInfo.pluStatus ?? (doc.etat as string) ?? null;
         pluInfo.pluType = pluInfo.pluType ?? (doc.typedoc as string) ?? null;
-        const docUrl = (doc.lien ?? doc.url ?? doc.document_url ?? doc.pdf_url) as string | undefined;
-        if (docUrl && typeof docUrl === "string") pluInfo.pdfUrl = docUrl;
+
+        // If zone-urba didn't yield a PDF URL, try construction from document layer
+        if (!pluInfo.pdfUrl) {
+          // Strategy 1: gpu_doc_id + nomfic from zone features (already have gpu_doc_id in doc layer too)
+          const docGpuId = (doc.gpu_doc_id ?? doc.GPU_DOC_ID ?? doc.id) as string | undefined;
+          // nomfic comes from the zone, not the document layer, but we can try the zone again
+          const bestZone = pickBestZone(zoneFeatures as Array<{ properties?: Record<string, unknown> }>);
+          const zoneNomfic = (bestZone?.nomfic ?? bestZone?.NOMFIC) as string | undefined;
+          if (docGpuId && zoneNomfic && docGpuId.trim() && zoneNomfic.trim()) {
+            pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document/${docGpuId.trim()}/files/${encodeURIComponent(zoneNomfic.trim())}`;
+          }
+
+          // Strategy 2: direct URL fields from document layer
+          if (!pluInfo.pdfUrl) {
+            const docUrl = (doc.lien ?? doc.url ?? doc.document_url ?? doc.pdf_url ?? doc.urlfic) as string | undefined;
+            if (docUrl && typeof docUrl === "string" && docUrl.trim().startsWith("http")) {
+              pluInfo.pdfUrl = docUrl.trim();
+            }
+          }
+        }
       }
     }
-    if (!pluInfo.pdfUrl && communeCode) {
-      pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/document/commune/${communeCode}`;
+    // No fake fallback — if no PDF is available, pdfUrl stays null.
+    // The frontend PluDocumentManager handles null correctly by showing
+    // "No downloadable regulation" and forcing manual upload.
+    if (!pluInfo.pdfUrl) {
+      console.log(`[PLU] No PDF URL available — user must upload regulation manually.`);
     }
 
     // Carte Communale sector fallback

@@ -21,7 +21,6 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { LocationMap } from "@/components/location-plan/LocationMap";
-import { getNextStep } from "@/lib/step-flow";
 import { NextStepButton } from "@/components/NextStepButton";
 
 function LocationPlanPageContent() {
@@ -284,7 +283,7 @@ function LocationPlanPageContent() {
                     <NextStepButton
                       canProceed={!!selectedCoords}
                       nextHref={`/site-plan?project=${selectedProjectId}`}
-                      nextLabel={getNextStep("/location-plan", selectedProjectId)?.label ?? "Next: Site Plan"}
+                      nextLabel={"Next: Site Plan"}
                       disabledMessage="Select a location (address or map) to continue"
                     />
                   </div>

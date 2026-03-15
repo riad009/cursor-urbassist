@@ -11,7 +11,6 @@ export async function GET() {
   return NextResponse.json({
     pluAnalysisCredits: isNaN(PLU_ANALYSIS_CREDITS) ? 3 : PLU_ANALYSIS_CREDITS,
 
-    // Backward-compat: used by /plu-analysis page
     pluFirstAnalysisPriceEur: CREDIT_COSTS.DP_FIRST_EUR,
     pluRelaunchPriceEur: CREDIT_COSTS.DP_RELAUNCH_EUR,
 

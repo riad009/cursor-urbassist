@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { execSync } from "child_process";
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import {
   GoogleGenerativeAI,
   SchemaType,
@@ -9,12 +13,15 @@ import {
   type DeepPluAnalysis,
   createFallbackPluRules,
 } from "@/lib/plu-rules";
+import { extractZonePages, extractZoneText } from "@/lib/pdf-zone-extractor";
+import { detectPlaceholderPdf } from "@/lib/pdf-placeholder-detector";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-2.5-flash";
-const MAX_PDF_SIZE_BYTES = 30 * 1024 * 1024; // 30 MB hard limit
+const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB — smart splitting handles large files
+const GEMINI_INLINE_LIMIT = 15 * 1024 * 1024; // ~15 MB raw = ~20 MB base64 (Gemini inline limit)
 const API_TIMEOUT_MS = 120_000; // 2 min — large PDFs can take time
 
 // ─── Gemini responseSchema for PluRules ──────────────────────────────────────
@@ -77,64 +84,175 @@ export async function POST(request: NextRequest) {
   try {
     // ── 1. Parse multipart/form-data ───────────────────────────────────────
     const formData = await request.formData();
-    const pdfFile = formData.get("pdfFile") as File | null;
-    const pdfFile2 = formData.get("pdfFile2") as File | null; // Optional lotissement supplement
-    const pdfUrl = (formData.get("pdfUrl") as string) || "";   // Auto-fetched GPU URL
+    // Accept both legacy field names and new unified field names
+    const pdfFile = (formData.get("pluPdfFile") as File | null) || (formData.get("pdfFile") as File | null);
+    const pdfFile2 = (formData.get("lotissementFile") as File | null) || (formData.get("pdfFile2") as File | null); // Optional lotissement supplement
+    const pdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";   // Auto-fetched GPU URL
     const pluZone = (formData.get("pluZone") as string) || "non spécifiée";
     const isABFZone = (formData.get("isABFZone") as string) === "true";
     const parcelAddress = (formData.get("parcelAddress") as string) || "non précisée";
+    const projectBrief = (formData.get("projectBrief") as string) || "";
 
-    // ── 2. Resolve primary PDF (file upload takes priority over URL) ──────
+    // ── 2. Resolve primary PDF — 3-LAYER PIPELINE ────────────────────────
+    // Layer 1: Download → Smart Zone Split → inline to Gemini
+    // Layer 2: (reserved for Gemini File API — future)
+    // Layer 3: Text-only extraction → degraded mode
     let primaryPdfBase64: string | null = null;
+    let degradedModeText: string | null = null; // Layer 3 fallback text
+
+    console.log(`[analyze-plu] ▶ Request received — pdfFile: ${pdfFile ? `${pdfFile.name} (${pdfFile.size}b)` : "none"}, pdfUrl: ${pdfUrl || "none"}, zone: ${pluZone}, ABF: ${isABFZone}, projectBrief: ${projectBrief ? `${projectBrief.length} chars` : "none"}`);
+
+    // ── Download or read the raw PDF buffer ──────────────────────────────
+    let rawPdfBuffer: Buffer | null = null;
 
     if (pdfFile && pdfFile.size > 0) {
-      // Validate uploaded file
-      if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
-        return NextResponse.json(
-          { error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.` },
-          { status: 400 }
-        );
-      }
       if (!pdfFile.type.includes("pdf") && !pdfFile.name.endsWith(".pdf")) {
         return NextResponse.json(
           { error: "Seuls les fichiers PDF sont acceptés." },
           { status: 400 }
         );
       }
-      const buf = await pdfFile.arrayBuffer();
-      primaryPdfBase64 = Buffer.from(buf).toString("base64");
+      if (pdfFile.size > MAX_PDF_SIZE_BYTES) {
+        return NextResponse.json(
+          { error: `Le fichier PDF dépasse la limite de ${MAX_PDF_SIZE_BYTES / 1024 / 1024} Mo.` },
+          { status: 400 }
+        );
+      }
+      rawPdfBuffer = Buffer.from(await pdfFile.arrayBuffer());
+      console.log(`[analyze-plu] ✓ Loaded uploaded file: ${rawPdfBuffer.byteLength} bytes`);
     } else if (pdfUrl.trim()) {
-      // Fetch PDF from auto-detected GPU URL
-      console.log(`[analyze-plu] Fetching PDF from URL: ${pdfUrl}`);
-      try {
-        const res = await fetch(pdfUrl, {
-          signal: AbortSignal.timeout(30_000),
-          headers: { "User-Agent": "UrbAssist/1.0" },
-        });
-        if (res.ok) {
-          const contentType = res.headers.get("content-type") || "";
-          if (contentType.includes("pdf") || pdfUrl.endsWith(".pdf")) {
-            const buf = await res.arrayBuffer();
-            if (buf.byteLength > MAX_PDF_SIZE_BYTES) {
-              console.warn(`[analyze-plu] URL PDF too large: ${buf.byteLength} bytes`);
+      // Multi-strategy download from geoportail-urbanisme.gouv.fr
+      console.log(`[analyze-plu] Fetching PDF via multi-strategy download: ${pdfUrl}`);
+      const tmpDir = join(tmpdir(), "urbassist-plu");
+      try { mkdirSync(tmpDir, { recursive: true }); } catch { /* exists */ }
+      const tmpFile = join(tmpDir, `plu_${Date.now()}.pdf`);
+      const sanitizedUrl = pdfUrl.replace(/"/g, '').replace(/'/g, '');
+
+      const curlStrategies = [
+        `curl -sS -L --max-time 120 --retry 3 --retry-delay 3 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 120 --retry 2 --retry-delay 5 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
+        `curl -sS -L -k --max-time 120 -o "${tmpFile}" "${sanitizedUrl}"`,
+      ];
+
+      for (let i = 0; i < curlStrategies.length; i++) {
+        try {
+          try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
+          console.log(`[analyze-plu] ➤ Strategy ${i + 1}/${curlStrategies.length}...`);
+          execSync(curlStrategies[i], { timeout: 130_000, stdio: ['pipe', 'pipe', 'pipe'] });
+
+          if (existsSync(tmpFile)) {
+            const buf = readFileSync(tmpFile);
+            const first4 = buf.slice(0, 4).toString();
+            if (first4 === "%PDF" && buf.byteLength >= 100) {
+              rawPdfBuffer = buf;
+              console.log(`[analyze-plu] ✓ Strategy ${i + 1} succeeded: ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB), valid PDF`);
+              break;
             } else {
-              primaryPdfBase64 = Buffer.from(buf).toString("base64");
-              console.log(`[analyze-plu] Fetched ${buf.byteLength} bytes from URL`);
+              console.warn(`[analyze-plu] ✗ Strategy ${i + 1}: Not a valid PDF (${buf.byteLength} bytes)`);
             }
           } else {
-            console.warn(`[analyze-plu] URL is not a PDF (content-type: ${contentType})`);
+            console.warn(`[analyze-plu] ✗ Strategy ${i + 1}: No output file created`);
           }
-        } else {
-          console.warn(`[analyze-plu] URL fetch failed: ${res.status}`);
+        } catch (e) {
+          console.warn(`[analyze-plu] ✗ Strategy ${i + 1} failed:`, (e as Error).message?.slice(0, 200));
         }
-      } catch (e) {
-        console.warn(`[analyze-plu] URL fetch error:`, (e as Error).message);
+      }
+      try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
+
+      // Fallback: Node.js fetch
+      if (!rawPdfBuffer) {
+        try {
+          console.log(`[analyze-plu] ➤ Fallback: Node.js fetch...`);
+          const fetchRes = await fetch(sanitizedUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/pdf,*/*" },
+            redirect: "follow",
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (fetchRes.ok) {
+            const nodeBuf = Buffer.from(await fetchRes.arrayBuffer());
+            if (nodeBuf.slice(0, 4).toString() === "%PDF" && nodeBuf.byteLength >= 100) {
+              rawPdfBuffer = nodeBuf;
+              console.log(`[analyze-plu] ✓ Node.js fetch succeeded: ${nodeBuf.byteLength} bytes (${(nodeBuf.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[analyze-plu] ✗ Node.js fetch failed:`, (e as Error).message?.slice(0, 200));
+        }
+      }
+
+      // ── Detect placeholder/redirect PDFs ────────────────────────────
+      // Some municipalities upload a tiny placeholder PDF that says
+      // "visit our website to download the real documents".
+      // These pass %PDF validation but have no useful regulatory content.
+      if (rawPdfBuffer) {
+        const phCheck = await detectPlaceholderPdf(rawPdfBuffer);
+        if (phCheck.isPlaceholder) {
+          console.warn(`[analyze-plu] ⚠ Placeholder PDF detected from URL — discarding. ${phCheck.reason}`);
+          rawPdfBuffer = null; // Force pipeline to fall through to text-only / manual upload
+          // Store info so we can return it in the response
+          (request as unknown as Record<string, unknown>).__placeholderInfo = phCheck;
+        }
+      }
+    } else {
+      console.warn(`[analyze-plu] ✗ No PDF source provided (no file, no URL)`);
+    }
+
+    // ── LAYER 1: Smart Zone Splitting ────────────────────────────────────
+    // If we have a raw PDF, try to extract only zone-relevant pages
+    if (rawPdfBuffer) {
+      if (rawPdfBuffer.byteLength <= GEMINI_INLINE_LIMIT) {
+        // Small enough for Gemini inline — no splitting needed
+        primaryPdfBase64 = rawPdfBuffer.toString("base64");
+        console.log(`[analyze-plu] ✓ PDF small enough for inline (${(rawPdfBuffer.byteLength / 1024 / 1024).toFixed(1)}MB) — no splitting needed`);
+      } else {
+        // Large PDF — need smart zone splitting
+        console.log(`[analyze-plu] ▶ PDF is ${(rawPdfBuffer.byteLength / 1024 / 1024).toFixed(1)}MB — running smart zone extraction for "${pluZone}"...`);
+        try {
+          const extraction = await extractZonePages(rawPdfBuffer, pluZone);
+          if (extraction.zoneFound && extraction.extractedPageCount > 0) {
+            // Check if the extracted PDF fits inline
+            if (extraction.buffer.byteLength <= GEMINI_INLINE_LIMIT) {
+              primaryPdfBase64 = extraction.buffer.toString("base64");
+              console.log(`[analyze-plu] ✓ ${extraction.summary}`);
+            } else {
+              // Still too large even after splitting — try text extraction
+              console.warn(`[analyze-plu] ⚠ Split PDF still ${(extraction.buffer.byteLength / 1024 / 1024).toFixed(1)}MB — falling back to text extraction`);
+              const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+              if (textResult.text.length > 100) {
+                degradedModeText = textResult.text;
+                console.log(`[analyze-plu] ✓ Text extracted: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+              }
+            }
+          } else {
+            // Zone not found in PDF — use text extraction fallback
+            console.warn(`[analyze-plu] ⚠ Zone "${pluZone}" not found in PDF — trying text extraction`);
+            const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+            if (textResult.text.length > 100) {
+              degradedModeText = textResult.text;
+              console.log(`[analyze-plu] ✓ Text extracted: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[analyze-plu] ✗ Zone extraction failed:`, (err as Error).message);
+          // Last resort: try text extraction
+          try {
+            const textResult = await extractZoneText(rawPdfBuffer, pluZone);
+            if (textResult.text.length > 100) {
+              degradedModeText = textResult.text;
+              console.log(`[analyze-plu] ✓ Text fallback: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+            }
+          } catch { /* truly degraded */ }
+        }
       }
     }
 
-    if (!primaryPdfBase64) {
+    // ── Check if we have any usable data ─────────────────────────────────
+    if (!primaryPdfBase64 && !degradedModeText && pdfUrl.trim()) {
+      console.warn(`[analyze-plu] ⚠ All PDF processing strategies failed — running text-only qualitative analysis`);
+    }
+    if (!primaryPdfBase64 && !degradedModeText && !pdfUrl.trim()) {
       return NextResponse.json(
-        { error: "Un fichier PDF du règlement PLU est requis. Uploadez un fichier ou vérifiez l'URL automatique." },
+        { error: "Aucune source de document PLU trouvée. Veuillez uploader un fichier PDF ou vérifier que l'URL automatique est disponible." },
         { status: 400 }
       );
     }
@@ -168,17 +286,29 @@ export async function POST(request: NextRequest) {
 
     // ── 4. Initialize Gemini ───────────────────────────────────────────────
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const hasPdf = !!primaryPdfBase64;
+    const hasContent = hasPdf || !!degradedModeText; // Either PDF or extracted text
+    console.log(`[analyze-plu] ▶ Calling Gemini (model: ${MODEL_NAME}, PDF: ${hasPdf ? `${primaryPdfBase64!.length} base64 chars` : 'NONE'}, text: ${degradedModeText ? `${degradedModeText.length} chars` : 'NONE'})`);
 
     // ── 5. Build prompts ───────────────────────────────────────────────────
-    const qualitativeSystemPrompt = buildQualitativeSystemPrompt(pluZone, isABFZone, hasMultipleDocs);
-    const qualitativeUserPrompt = buildQualitativeUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs);
-    const extractionSystemPrompt = buildExtractionSystemPrompt(pluZone, isABFZone, hasMultipleDocs);
-    const extractionUserPrompt = buildExtractionUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs);
+    const qualitativeSystemPrompt = buildQualitativeSystemPrompt(pluZone, isABFZone, hasMultipleDocs, projectBrief);
+    let qualitativeUserPrompt = buildQualitativeUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs, projectBrief);
+    const extractionSystemPrompt = buildExtractionSystemPrompt(pluZone, isABFZone, hasMultipleDocs, projectBrief);
+    let extractionUserPrompt = buildExtractionUserPrompt(pluZone, isABFZone, parcelAddress, hasMultipleDocs, projectBrief);
 
-    // ── 6. Build PDF parts array ──────────────────────────────────────────
-    const pdfParts: { inlineData: { data: string; mimeType: string } }[] = [
-      { inlineData: { data: primaryPdfBase64, mimeType: "application/pdf" } },
-    ];
+    // If we have extracted text (Layer 3), inject it into the user prompts
+    if (degradedModeText && !hasPdf) {
+      const textBlock = `\n\n--- CONTENU EXTRAIT DU RÈGLEMENT PLU (ZONE ${pluZone.toUpperCase()}) ---\n${degradedModeText}\n--- FIN DU CONTENU EXTRAIT ---\n\nATTENTION: Le document PDF complet n'a pas pu être traité. Les extraits ci-dessus proviennent des pages les plus pertinentes pour la zone ${pluZone.toUpperCase()}. Analysez ces extraits en détail pour extraire les règles applicables.`;
+      qualitativeUserPrompt += textBlock;
+      extractionUserPrompt += textBlock;
+      console.log(`[analyze-plu] ✓ Injected ${degradedModeText.length} chars of extracted text into prompts`);
+    }
+
+    // ── 6. Build PDF parts array (empty in degraded mode) ─────────────────
+    const pdfParts: { inlineData: { data: string; mimeType: string } }[] = [];
+    if (primaryPdfBase64) {
+      pdfParts.push({ inlineData: { data: primaryPdfBase64, mimeType: "application/pdf" } });
+    }
     if (secondPdfBase64) {
       pdfParts.push({ inlineData: { data: secondPdfBase64, mimeType: "application/pdf" } });
     }
@@ -196,21 +326,42 @@ export async function POST(request: NextRequest) {
       responseSchema: PLU_RULES_SCHEMA,
     };
 
-    const [qualResult, extractResult] = await Promise.allSettled([
+    const t0 = Date.now();
+    // Run both calls — extraction runs if we have PDF OR extracted text
+    const geminiCalls: [Promise<string | null>, Promise<string | null>] = [
       callGeminiWithPdfs(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, pdfParts, qualitativeConfig),
-      callGeminiWithPdfs(genAI, extractionSystemPrompt, extractionUserPrompt, pdfParts, extractionConfig),
-    ]);
+      hasContent
+        ? callGeminiWithPdfs(genAI, extractionSystemPrompt, extractionUserPrompt, pdfParts, extractionConfig)
+        : Promise.resolve(null),
+    ];
+    const [qualResult, extractResult] = await Promise.allSettled(geminiCalls);
+    console.log(`[analyze-plu] Gemini calls completed in ${Date.now() - t0}ms — qualitative: ${qualResult.status}, extraction: ${hasContent ? extractResult.status : 'SKIPPED (no content)'}`);
+
 
     // ── 7. Parse responses ─────────────────────────────────────────────────
+    let qualOk = false;
+    let extractOk = false;
     let analysis: DeepPluAnalysis = generateFallbackAnalysis(pluZone);
     if (qualResult.status === "fulfilled" && qualResult.value) {
       try {
         analysis = JSON.parse(qualResult.value) as DeepPluAnalysis;
-      } catch {
-        analysis = parseLooseJson<DeepPluAnalysis>(qualResult.value) ?? generateFallbackAnalysis(pluZone);
+        qualOk = true;
+        console.log(`[analyze-plu] ✓ Qualitative analysis parsed (keys: ${Object.keys(analysis).join(", ")})`);
+      } catch (e) {
+        console.warn(`[analyze-plu] ⚠ Qualitative JSON parse failed, trying loose parse:`, (e as Error).message);
+        const looseParsed = parseLooseJson<DeepPluAnalysis>(qualResult.value);
+        if (looseParsed) {
+          analysis = looseParsed;
+          qualOk = true;
+          console.log(`[analyze-plu] ✓ Qualitative loose-parsed successfully`);
+        } else {
+          console.warn(`[analyze-plu] ✗ Qualitative loose parse also failed. Raw output (first 500 chars): ${qualResult.value.slice(0, 500)}`);
+        }
       }
     } else if (qualResult.status === "rejected") {
-      console.error("Qualitative Gemini call failed:", qualResult.reason);
+      console.error("[analyze-plu] ✗ Qualitative Gemini call REJECTED:", qualResult.reason);
+    } else {
+      console.warn(`[analyze-plu] ✗ Qualitative Gemini returned null/empty`);
     }
 
     let pluRules: PluRules = createFallbackPluRules();
@@ -218,21 +369,58 @@ export async function POST(request: NextRequest) {
       try {
         const raw = JSON.parse(extractResult.value);
         pluRules = sanitizePluRules(raw);
-      } catch {
+        extractOk = true;
+        console.log(`[analyze-plu] ✓ PluRules extracted (confidence: ${pluRules.extractionConfidence}, maxHeight: ${pluRules.maxHeight}, CES: ${pluRules.maxCoverageRatio})`);
+      } catch (e) {
+        console.warn(`[analyze-plu] ⚠ Extraction JSON parse failed, trying loose:`, (e as Error).message);
         const parsed = parseLooseJson<Partial<PluRules>>(extractResult.value);
-        if (parsed) pluRules = sanitizePluRules(parsed);
+        if (parsed) {
+          pluRules = sanitizePluRules(parsed);
+          extractOk = true;
+          console.log(`[analyze-plu] ✓ PluRules loose-parsed (confidence: ${pluRules.extractionConfidence})`);
+        } else {
+          console.warn(`[analyze-plu] ✗ Extraction loose parse also failed. Trying regex extraction...`);
+          // Last-resort: regex extraction of key values from raw text
+          const regexRules = regexExtractPluRules(extractResult.value);
+          if (regexRules) {
+            pluRules = sanitizePluRules(regexRules);
+            pluRules.extractionConfidence = "low";
+            extractOk = true;
+            console.log(`[analyze-plu] ✓ PluRules regex-extracted (maxHeight: ${pluRules.maxHeight}, CES: ${pluRules.maxCoverageRatio})`);
+          } else {
+            console.warn(`[analyze-plu] ✗ All extraction methods failed. Raw (first 500): ${extractResult.value.slice(0, 500)}`);
+          }
+        }
       }
     } else if (extractResult.status === "rejected") {
-      console.error("Extraction Gemini call failed:", extractResult.reason);
+      console.error("[analyze-plu] ✗ Extraction Gemini call REJECTED:", extractResult.reason);
+    } else {
+      console.warn(`[analyze-plu] ✗ Extraction Gemini returned null/empty`);
     }
 
-    // ── 8. Return combined result ──────────────────────────────────────────
+    // ── 8. Determine source quality ───────────────────────────────────────
+    const source = (qualOk || extractOk) ? "gemini" : "fallback";
+    if (source === "fallback") {
+      console.error(`[analyze-plu] ✗✗ BOTH Gemini calls failed — returning fallback data. This means the AI analysis did NOT work.`);
+    } else {
+      console.log(`[analyze-plu] ✓ Returning ${source} data (qualitative: ${qualOk ? "OK" : "fallback"}, extraction: ${extractOk ? "OK" : "fallback"})`);
+    }
+
+    // ── 9. Return combined result ──────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const placeholderInfo = (request as any).__placeholderInfo as { isPlaceholder: boolean; suggestedUrl: string | null; reason: string | null } | undefined;
+
     return NextResponse.json({
       success: true,
       analysis,
       pluRules,
-      source: "gemini",
+      source,
       documentsAnalyzed: hasMultipleDocs ? 2 : 1,
+      ...(placeholderInfo?.isPlaceholder ? {
+        placeholderDetected: true,
+        suggestedUrl: placeholderInfo.suggestedUrl,
+        placeholderReason: placeholderInfo.reason,
+      } : {}),
     });
   } catch (error) {
     console.error("PLU Analysis error:", error);
@@ -259,20 +447,43 @@ async function callGeminiWithPdfs(
   const timeout = setTimeout(() => {}, API_TIMEOUT_MS);
 
   try {
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            ...pdfParts,
-            { text: userPrompt },
-          ],
-        },
-      ],
-    });
+    // Attempt 1: with PDF parts
+    try {
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              ...pdfParts,
+              { text: userPrompt },
+            ],
+          },
+        ],
+      });
+      return result.response.text();
+    } catch (firstErr) {
+      const errMsg = (firstErr as Error).message || "";
+      const is400 = errMsg.includes("400") || errMsg.includes("Bad Request") || errMsg.includes("invalid argument");
 
-    const response = result.response;
-    return response.text();
+      // If the error is a 400 and we had PDF parts, retry WITHOUT PDF (degraded text-only)
+      if (is400 && pdfParts.length > 0) {
+        console.warn(`[analyze-plu] ⚠ Gemini 400 with PDF — retrying text-only (PDF may be unprocessable: corrupted, scanned, or too complex)`);
+        const retryResult = await model.generateContent({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: `[NOTE: Le document PDF n'a pas pu être analysé directement. Réponds en te basant UNIQUEMENT sur les informations textuelles fournies dans le prompt système et ci-dessous. Indique clairement dans tes réponses que l'analyse est basée sur les informations du projet et non sur le document PLU.]\n\n${userPrompt}` },
+              ],
+            },
+          ],
+        });
+        return retryResult.response.text();
+      }
+
+      // Not a 400 or no PDF parts — rethrow
+      throw firstErr;
+    }
   } finally {
     clearTimeout(timeout);
   }
@@ -282,9 +493,12 @@ async function callGeminiWithPdfs(
 // MASTER SYSTEM PROMPTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function buildExtractionSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false): string {
+function buildExtractionSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false, projectBrief = ""): string {
   const multiDocNote = hasMultipleDocs
     ? `\n\n9. MULTIPLE DOCUMENTS: You are given TWO PDF documents. The FIRST is the main PLU regulation. The SECOND is a subdivision regulation (règlement de lotissement) that may override or supplement the PLU. When both documents address the same rule, the LOTISSEMENT regulation takes precedence. Extract values from BOTH documents, clearly noting in the "notes" field when a lotissement rule overrides the PLU.`
+    : "";
+  const briefNote = projectBrief.trim()
+    ? `\n\n10. PROJECT CONTEXT: The applicant has provided the following project brief. Use this to understand the project scope and focus your extraction on the rules most relevant to this specific project:\n\n--- PROJECT BRIEF ---\n${projectBrief.trim()}\n--- END PROJECT BRIEF ---`
     : "";
   return `You are an expert-level French urban planning regulation parser (urbaniste confirmé).
 Your SOLE mission is to extract PRECISE, machine-readable regulatory values from a PLU (Plan Local d'Urbanisme) document.
@@ -316,12 +530,15 @@ ${isABFZone ? `6. ABF / HERITAGE ZONE: This parcel is in a PROTECTED HERITAGE ZO
    - "medium": You found the zone but some values were ambiguous or the document structure was unusual.
    - "low": You could not clearly identify the zone or the document was poorly structured.
 
-8. OUTPUT: Respond with a SINGLE valid JSON object matching the required schema. No markdown, no comments, no text outside the JSON.${multiDocNote}`;
+8. OUTPUT: Respond with a SINGLE valid JSON object matching the required schema. No markdown, no comments, no text outside the JSON.${multiDocNote}${briefNote}`;
 }
 
-function buildExtractionUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false): string {
+function buildExtractionUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false, projectBrief = ""): string {
   const multiDocInstr = hasMultipleDocs
     ? `\n6. TWO DOCUMENTS ARE ATTACHED: The first PDF is the PLU regulation; the second is a subdivision (lotissement) regulation. Analyze both. Lotissement rules override PLU where they conflict.`
+    : "";
+  const briefInstr = projectBrief.trim()
+    ? `\n7. PROJECT BRIEF PROVIDED: The applicant's project involves the following. Pay close attention to rules about dimensions, materials, and uses that apply to this specific project:\n${projectBrief.trim()}`
     : "";
   return `Analyze the attached PLU regulation PDF document.
 
@@ -336,14 +553,17 @@ Instructions:
 2. Extract ALL numeric and qualitative regulatory values for this zone.
 3. For each field, if the value is not explicitly stated in the document for this zone, use null.
 4. For setback formulas like "H/2", keep the formula as a string.
-5. Return the structured JSON as specified.${multiDocInstr}
+5. Return the structured JSON as specified.${multiDocInstr}${briefInstr}
 
 CRITICAL REMINDER: Do NOT invent values. Only extract what is WRITTEN in the document.`;
 }
 
-function buildQualitativeSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false): string {
+function buildQualitativeSystemPrompt(pluZone: string, isABFZone: boolean, hasMultipleDocs = false, projectBrief = ""): string {
   const multiDocNote = hasMultipleDocs
     ? "\n\nMULTIPLE DOCUMENTS: You are given TWO PDF documents. The first is the main PLU regulation, the second is a subdivision (lotissement) regulation. Analyze BOTH documents. When the lotissement has rules that override or supplement the PLU, note this clearly in the relevant item's reglementation field."
+    : "";
+  const briefNote = projectBrief.trim()
+    ? `\n\nPROJECT BRIEF: The applicant has provided the following description of their project. Use this to assess compliance (conformité) of the planned works against each regulation point. Where you have enough information from the brief, set conformité to "Conforme", "Non conforme", or "A VÉRIFIER". Focus on dimensions, materials, and building types mentioned in the brief:\n\n--- PROJECT BRIEF ---\n${projectBrief.trim()}\n--- END PROJECT BRIEF ---`
     : "";
   return `You are a strict French urban planning regulation parser (urbaniste confirmé).
 You ONLY extract factual information from provided PLU documents.
@@ -351,12 +571,15 @@ You NEVER invent, hallucinate, or assume values not explicitly stated in the sou
 When a value is not found, you use "Non réglementé" in the reglementation field and "Non concerné" in the conformite field.
 
 ZONE FOCUS: Only extract rules for zone "${pluZone}". Ignore all other zones.
-${isABFZone ? "ABF ZONE: This project is in a heritage protection zone. Pay special attention to Articles 6, 7, 10, 11 and any ABF-specific requirements." : ""}${multiDocNote}
+${isABFZone ? "ABF ZONE: This project is in a heritage protection zone. Pay special attention to Articles 6, 7, 10, 11 and any ABF-specific requirements." : ""}${multiDocNote}${briefNote}
 
 Output a SINGLE valid JSON object matching the required structure. No text outside JSON.`;
 }
 
-function buildQualitativeUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false): string {
+function buildQualitativeUserPrompt(pluZone: string, isABFZone: boolean, parcelAddress: string, hasMultipleDocs = false, projectBrief = ""): string {
+  const briefContext = projectBrief.trim()
+    ? `\n\n**Applicant's Project Brief:**\n${projectBrief.trim()}\n\nUse the above project brief to assess conformité where you have enough data (e.g., if the brief mentions a 9m ridge height and the PLU caps it at 10m, mark that as "Conforme").`
+    : "";
   return `Analyze the attached PLU regulation document${hasMultipleDocs ? "s" : ""} for a construction project and produce a structured compliance analysis in JSON format.
 
 **Project Context:**
@@ -439,7 +662,7 @@ Section: RESEAUX ET DESSERTE (key: reseauxVrd)
   "reseauxVrd": { "sectionTitle": "RESEAUX ET DESSERTE (VRD)", "items": [...] },
   "autresReglementations": { "sectionTitle": "AUTRES RÉGLEMENTATIONS", "items": [] },
   "conclusion": { "resume": "...", "typeDossier": "..." }
-}`;
+}${briefContext}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -516,43 +739,178 @@ function sanitizePluRules(raw: Partial<PluRules>): PluRules {
   };
 }
 
-/**
- * Attempt to parse a potentially malformed JSON string.
- * Handles markdown code fences and trailing commas.
- */
+// Robust JSON parser for potentially malformed Gemini output.
+// Handles: markdown fences, JS comments, trailing commas, single-quoted
+// strings, unquoted property names, and string-aware brace matching.
 function parseLooseJson<T>(text: string): T | null {
   if (!text) return null;
 
-  // Strip markdown code fences
+  // 1. Strip markdown code fences
   let cleaned = text.replace(/```(?:json)?[\s\n]*/gi, "").replace(/```\s*/g, "").trim();
 
-  // Try direct parse
+  // 2. Try direct parse first (fast path)
   try {
     return JSON.parse(cleaned) as T;
   } catch { /* continue */ }
 
-  // Try extracting the first JSON object
-  const start = cleaned.indexOf("{");
-  if (start < 0) return null;
+  // 3. Aggressive cleanup: strip JS comments, fix common issues
+  cleaned = stripJsComments(cleaned);
+  // Remove trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+  // Convert single-quoted strings to double-quoted
+  cleaned = cleaned.replace(/([:,\[\s{]\s*)'([^']*?)'/g, '$1"$2"');
 
-  let depth = 0;
-  let end = start;
-  for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") depth++;
-    else if (cleaned[i] === "}") {
-      depth--;
-      if (depth === 0) { end = i; break; }
-    }
-  }
+  // 4. Try parse after cleanup
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch { /* continue */ }
 
-  if (end > start) {
+  // 5. Extract the first balanced JSON object with string-aware matching
+  const jsonBlock = extractBalancedJson(cleaned);
+  if (jsonBlock) {
+    // One more cleanup pass on the extracted block
+    const finalBlock = jsonBlock.replace(/,\s*([}\]])/g, "$1");
     try {
-      const block = cleaned.slice(start, end + 1).replace(/,\s*([}\]])/g, "$1");
-      return JSON.parse(block) as T;
-    } catch { /* give up */ }
+      return JSON.parse(finalBlock) as T;
+    } catch { /* continue */ }
+
+    // 6. Nuclear option: fix unquoted keys
+    const fixedKeys = finalBlock.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    try {
+      return JSON.parse(fixedKeys) as T;
+    } catch { /* continue */ }
   }
 
   return null;
+}
+
+// Strip line comments (//) and block comments from a string, respecting quoted strings.
+function stripJsComments(text: string): string {
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    // Skip double-quoted strings
+    if (text[i] === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') {
+        if (text[j] === '\\') j++; // skip escaped char
+        j++;
+      }
+      result += text.slice(i, j + 1);
+      i = j + 1;
+    }
+    // Line comment: //
+    else if (text[i] === '/' && text[i + 1] === '/') {
+      // Skip to end of line
+      const eol = text.indexOf('\n', i);
+      i = eol < 0 ? text.length : eol + 1;
+    }
+    // Block comment: /* */
+    else if (text[i] === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+    }
+    else {
+      result += text[i];
+      i++;
+    }
+  }
+  return result;
+}
+
+/** Extract the first balanced { ... } block, aware of quoted strings. */
+function extractBalancedJson(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  // If we never balanced, return everything from start to the last }
+  const lastBrace = text.lastIndexOf("}");
+  if (lastBrace > start) return text.slice(start, lastBrace + 1);
+
+  return null;
+}
+
+// Last-resort regex-based extraction from raw Gemini output text
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function regexExtractPluRules(raw: string): Record<string, any> | null {
+  if (!raw || raw.length < 20) return null;
+
+  const extractNum = (key: string): number | null => {
+    // Match patterns like "maxHeight": 15.0 or "maxHeight": 15
+    const m = raw.match(new RegExp(`"${key}"\\s*:\\s*([\\d.]+)`));
+    if (m) return parseFloat(m[1]);
+    return null;
+  };
+
+  const extractStr = (key: string): string | null => {
+    const m = raw.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
+    return m ? m[1] : null;
+  };
+
+  const extractStrArray = (key: string): string[] => {
+    // Match "key": ["val1", "val2", ...]
+    const m = raw.match(new RegExp(`"${key}"\\s*:\\s*\\[([^\\]]*?)\\]`));
+    if (!m) return [];
+    const items = m[1].match(/"([^"]+)"/g);
+    return items ? items.map(s => s.replace(/"/g, "")) : [];
+  };
+
+  const maxHeight = extractNum("maxHeight");
+  const maxRidgeHeight = extractNum("maxRidgeHeight");
+  const maxCoverageRatio = extractNum("maxCoverageRatio");
+  const greenSpaceMinPercent = extractNum("greenSpaceMinPercent");
+  const maxFenceHeight = extractNum("maxFenceHeight");
+  const frontSetback = extractNum("front");
+  const sideSetback = extractNum("side");
+  const rearSetback = extractNum("rear");
+  const roofSlopeRange = extractStr("roofSlopeRange");
+  const parkingRequirements = extractStr("parkingRequirements");
+  const allowedRoofTypes = extractStrArray("allowedRoofTypes");
+  const allowedFacadeMaterials = extractStrArray("allowedFacadeMaterials");
+  const forbiddenFacadeMaterials = extractStrArray("forbiddenFacadeMaterials");
+  const allowedRoofMaterials = extractStrArray("allowedRoofMaterials");
+  const forbiddenRoofMaterials = extractStrArray("forbiddenRoofMaterials");
+
+  // Only return if we got at least one meaningful value
+  const hasValues = maxHeight !== null || maxRidgeHeight !== null ||
+    maxCoverageRatio !== null || allowedRoofTypes.length > 0 ||
+    allowedFacadeMaterials.length > 0;
+
+  if (!hasValues) return null;
+
+  return {
+    maxHeight,
+    maxRidgeHeight,
+    maxCoverageRatio,
+    greenSpaceMinPercent,
+    maxFenceHeight,
+    setbacks: { front: frontSetback, side: sideSetback, rear: rearSetback },
+    roofSlopeRange,
+    parkingRequirements,
+    allowedRoofTypes,
+    allowedFacadeMaterials,
+    forbiddenFacadeMaterials,
+    allowedRoofMaterials,
+    forbiddenRoofMaterials,
+    extractionConfidence: "low",
+  };
 }
 
 // ─── Fallback analysis (when Gemini is unavailable) ──────────────────────────
