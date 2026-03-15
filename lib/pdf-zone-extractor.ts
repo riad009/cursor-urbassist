@@ -218,18 +218,143 @@ async function buildSubPdf(srcDoc: PDFDocument, pages: number[]): Promise<Buffer
 // ── Text Extraction Fallback ─────────────────────────────────────────────────
 
 /**
- * Text extraction fallback — returns empty since pdf-parse v2 doesn't work
- * in Node.js server environment (requires DOMMatrix).
+ * Text extraction fallback — extracts raw text content from PDF pages
+ * using pdf-lib's content stream parsing.
  *
- * The zone splitting via pdf-lib covers this use case instead.
+ * pdf-parse v2 requires DOMMatrix which crashes in Node.js server runtime,
+ * so we use pdf-lib directly to read page content streams and extract
+ * human-readable text via regex.
+ *
+ * This produces ROUGH text (not perfect formatting) but is good enough
+ * for Gemini to analyze regulatory content.
  */
 export async function extractZoneText(
-  _pdfBuffer: Buffer,
-  _zone: string,
+  pdfBuffer: Buffer,
+  zone: string,
 ): Promise<TextExtractionResult> {
-  // pdf-parse v2 requires DOMMatrix/@napi-rs/canvas which aren't available
-  // in the Next.js server runtime. Return empty — the caller will use
-  // qualitative-only analysis as the final fallback.
-  console.log(`[pdf-zone-extractor] Text extraction not available (pdf-parse v2 requires DOMMatrix)`);
-  return { text: "", pageCount: 0, totalPageCount: 0 };
+  const startTime = Date.now();
+  try {
+    const doc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const totalPages = doc.getPageCount();
+    const zoneUpper = zone.toUpperCase().trim();
+
+    // Select pages to extract text from (same strategy as zone splitting)
+    const pagesToExtract = totalPages <= 80
+      ? Array.from({ length: totalPages }, (_, i) => i)
+      : selectPagesForZone(totalPages, zone);
+
+    const textChunks: string[] = [];
+    let extractedPageCount = 0;
+    const MAX_TEXT_LENGTH = 120_000; // ~120K chars to stay within Gemini prompt limits
+
+    for (const pageIdx of pagesToExtract) {
+      if (pageIdx >= totalPages) continue;
+      try {
+        const page = doc.getPage(pageIdx);
+        // Get raw content stream bytes
+        const contents = page.node.Contents();
+        if (!contents) continue;
+
+        let streamText = "";
+
+        // Handle single stream or array of streams
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const contentsAny = contents as any;
+        const refs: unknown[] = typeof contentsAny.asArray === 'function'
+          ? contentsAny.asArray()
+          : [contents];
+
+        for (const ref of refs) {
+          try {
+            // Dereference PDFRef to get the actual stream object
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const refAny = ref as any;
+            const streamObj = refAny?.constructor?.name === 'PDFRef'
+              ? doc.context.lookup(refAny)
+              : refAny;
+
+            if (streamObj && typeof (streamObj as { getContents?: () => Uint8Array }).getContents === 'function') {
+              const bytes = (streamObj as { getContents: () => Uint8Array }).getContents();
+              const rawStr = new TextDecoder('latin1').decode(bytes);
+
+              // Extract text from PDF content stream operators:
+              // Tj = show text string, TJ = show text with kerning, ' = move to next line and show text
+              // BT...ET blocks contain text operations
+
+              // Match text inside parentheses after Tj, ', " operators and inside TJ arrays
+              const tjMatches = rawStr.matchAll(/\(([^)]*)\)\s*(?:Tj|'|")/g);
+              for (const m of tjMatches) {
+                streamText += decodeStreamText(m[1]) + " ";
+              }
+
+              // Match TJ arrays: [(text) kern (text) kern ...]
+              const tjArrayMatches = rawStr.matchAll(/\[((?:\([^)]*\)|[^[\]])*)\]\s*TJ/g);
+              for (const m of tjArrayMatches) {
+                const innerMatches = m[1].matchAll(/\(([^)]*)\)/g);
+                for (const inner of innerMatches) {
+                  streamText += decodeStreamText(inner[1]);
+                }
+                streamText += " ";
+              }
+            }
+          } catch { /* skip individual stream errors */ }
+        }
+
+        const cleaned = streamText
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (cleaned.length > 10) {
+          textChunks.push(`--- Page ${pageIdx + 1} ---\n${cleaned}`);
+          extractedPageCount++;
+        }
+
+        // Check total length
+        const totalLen = textChunks.reduce((s, c) => s + c.length, 0);
+        if (totalLen >= MAX_TEXT_LENGTH) break;
+      } catch {
+        // Skip pages that fail to extract
+        continue;
+      }
+    }
+
+    const fullText = textChunks.join("\n\n");
+
+    // If zone-specific content exists, try to prioritize it
+    if (zoneUpper && fullText.length > 0) {
+      // Check if zone name appears in extracted text
+      const zoneAppears = fullText.toUpperCase().includes(zoneUpper);
+      if (zoneAppears) {
+        console.log(`[pdf-zone-extractor] ✓ Zone "${zone}" found in extracted text`);
+      } else {
+        console.log(`[pdf-zone-extractor] ⚠ Zone "${zone}" NOT found in extracted text — sending all extracted text`);
+      }
+    }
+
+    console.log(`[pdf-zone-extractor] Text extraction: ${extractedPageCount}/${pagesToExtract.length} pages, ${fullText.length} chars in ${Date.now() - startTime}ms`);
+    return {
+      text: fullText,
+      pageCount: extractedPageCount,
+      totalPageCount: totalPages,
+    };
+  } catch (err) {
+    console.error(`[pdf-zone-extractor] Text extraction failed:`, (err as Error).message);
+    return { text: "", pageCount: 0, totalPageCount: 0 };
+  }
 }
+
+/**
+ * Decode PDF content stream text — handles basic PDF escape sequences.
+ * PDF uses octal escapes (\nnn), named escapes (\n, \r, \t), and hex.
+ */
+function decodeStreamText(raw: string): string {
+  return raw
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\(/g, '(')
+    .replace(/\\\)/g, ')')
+    .replace(/\\\\/g, '\\')
+    .replace(/\\(\d{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+}
+

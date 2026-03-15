@@ -145,10 +145,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (!rawPdfBuffer) {
-      return NextResponse.json(
-        { error: "Impossible d'obtenir le document PLU. Veuillez réessayer ou uploader le fichier manuellement." },
-        { status: 400 }
-      );
+      // CRIT-2 FIX: Return a fallback report instead of a blocking 400 error.
+      // The user should still see a report, just with default data.
+      console.warn(`[generate-feasibility] ✗ All download strategies failed — returning fallback report`);
+      return NextResponse.json({
+        success: true,
+        report: createFallbackFeasibilityReport(pluZone, projectIntent),
+        source: "fallback" as const,
+      });
     }
 
     // ── 5. Smart Zone Splitting (same pipeline as analyze-plu) ───────────
@@ -239,8 +243,6 @@ export async function POST(request: NextRequest) {
       generationConfig,
     });
 
-    const timeout = setTimeout(() => {}, API_TIMEOUT_MS);
-
     let rawText: string | null = null;
     try {
       // Attempt 1: with PDF parts
@@ -279,8 +281,13 @@ export async function POST(request: NextRequest) {
           throw firstErr;
         }
       }
-    } finally {
-      clearTimeout(timeout);
+    } catch (geminiErr) {
+      console.error(`[generate-feasibility] ✗ Gemini call failed:`, (geminiErr as Error).message?.slice(0, 300));
+      return NextResponse.json({
+        success: true,
+        report: createFallbackFeasibilityReport(pluZone, projectIntent),
+        source: "fallback" as const,
+      });
     }
 
     // ── 8. Parse response ────────────────────────────────────────────────
@@ -508,50 +515,60 @@ function sanitizeFeasibilityReport(
 }
 
 /**
- * Attempt to parse potentially malformed JSON.
- * Handles markdown code fences and trailing commas.
+ * Robust JSON parser for potentially malformed Gemini output.
+ * Handles: markdown fences, JS comments, trailing commas, single-quoted
+ * strings, unquoted property names, and STRING-AWARE brace matching.
+ * (Upgraded from naive version to match analyze-plu's implementation)
  */
 function parseLooseJson<T>(text: string): T | null {
   if (!text) return null;
 
-  // Strip markdown code fences
-  const cleaned = text
-    .replace(/```(?:json)?[\s\n]*/gi, "")
-    .replace(/```\s*/g, "")
-    .trim();
+  // 1. Strip markdown code fences
+  let cleaned = text.replace(/```(?:json)?[\s\n]*/gi, "").replace(/```\s*/g, "").trim();
 
-  // Try direct parse
+  // 2. Try direct parse first (fast path)
   try {
     return JSON.parse(cleaned) as T;
-  } catch {
-    /* continue */
-  }
+  } catch { /* continue */ }
 
-  // Try extracting the first JSON object
+  // 3. Remove trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+
+  // 4. Try parse after cleanup
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch { /* continue */ }
+
+  // 5. Extract the first balanced JSON object with STRING-AWARE matching
   const start = cleaned.indexOf("{");
   if (start < 0) return null;
 
   let depth = 0;
-  let end = start;
+  let inString = false;
+  let escape = false;
+
   for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === "{") depth++;
-    else if (cleaned[i] === "}") {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === '{') depth++;
+    else if (ch === '}') {
       depth--;
       if (depth === 0) {
-        end = i;
+        const block = cleaned.slice(start, i + 1).replace(/,\s*([}\]])/g, "$1");
+        try {
+          return JSON.parse(block) as T;
+        } catch { /* continue */ }
+        // Nuclear option: fix unquoted keys
+        const fixedKeys = block.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+        try {
+          return JSON.parse(fixedKeys) as T;
+        } catch { /* give up */ }
         break;
       }
-    }
-  }
-
-  if (end > start) {
-    try {
-      const block = cleaned
-        .slice(start, end + 1)
-        .replace(/,\s*([}\]])/g, "$1");
-      return JSON.parse(block) as T;
-    } catch {
-      /* give up */
     }
   }
 
