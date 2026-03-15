@@ -137,24 +137,47 @@ function extractLibelong(props: Record<string, unknown> | undefined): string | n
 /**
  * Extract the regulation PDF URL from GPU properties.
  *
- * GPU returns this in multiple possible fields depending on the document vintage:
- *   - urlfic / URLFIC         → most common (Fichier du règlement)
- *   - url_fichier             → newer documents
- *   - lien / url / pdf_url    → fallback
+ * Strategy (in priority order):
+ *   1. Direct URL from `urlfic` / `url_fichier` (rare — GPU usually leaves these empty)
+ *   2. Construct from `gpu_doc_id` + `nomfic` → real download endpoint:
+ *      https://www.geoportail-urbanisme.gouv.fr/api/document/{gpu_doc_id}/files/{nomfic}
+ *      (returns 302 → data.geopf.fr PDF)
+ *   3. Fallback fields: `lien`, `url`, `pdf_url`
  */
 function extractPdfUrl(props: Record<string, unknown> | undefined): string | null {
   if (!props) return null;
-  const candidates = [
+
+  // Strategy 1: Direct URL fields (rare but ideal)
+  const directCandidates = [
     props.urlfic,
     props.URLFIC,
     props.url_fichier,
     props.URL_FICHIER,
+  ];
+  for (const v of directCandidates) {
+    if (typeof v === "string" && v.trim().startsWith("http")) {
+      return v.trim();
+    }
+  }
+
+  // Strategy 2: Construct from gpu_doc_id + nomfic (the standard GPU pattern)
+  const gpuDocId = (props.gpu_doc_id ?? props.GPU_DOC_ID) as string | undefined;
+  const nomfic = (props.nomfic ?? props.NOMFIC) as string | undefined;
+  if (
+    gpuDocId && typeof gpuDocId === "string" && gpuDocId.trim() &&
+    nomfic && typeof nomfic === "string" && nomfic.trim()
+  ) {
+    return `https://www.geoportail-urbanisme.gouv.fr/api/document/${gpuDocId.trim()}/files/${encodeURIComponent(nomfic.trim())}`;
+  }
+
+  // Strategy 3: Other URL fields (generic fallback)
+  const fallbackCandidates = [
     props.lien,
     props.url,
     props.pdf_url,
     props.document_url,
   ];
-  for (const v of candidates) {
+  for (const v of fallbackCandidates) {
     if (typeof v === "string" && v.trim().startsWith("http")) {
       return v.trim();
     }
@@ -260,20 +283,11 @@ export async function fetchGpuRegulation(
     if (td) documentType = td;
   }
 
-  // ── Fallback PDF URL ─────────────────────────────────────────────────
-  // If GPU didn't return a direct PDF link but we have zone data,
-  // construct a Géoportail de l'Urbanisme URL so the user ALWAYS has
-  // a downloadable/viewable regulation link.
+  // ── Fallback: if no PDF URL from zone or document layer, leave null ──
+  // Previous code constructed fake Géoportail URLs that 404'd.
+  // An honest null lets the frontend show "No PDF found" and force upload.
   if (!pdfUrl && zoneName) {
-    // Try to extract commune info from idurba (format: COMMUNE_TIMESTAMP_TYPE)
-    const communeCode = idurba?.match(/^(\d{5})/)?.[1];
-    if (communeCode) {
-      pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/document/commune/${communeCode}`;
-    } else {
-      // Ultimate fallback: Géoportail search page
-      pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/`;
-    }
-    console.log(`[gpu-api] No direct PDF URL — fallback: ${pdfUrl}`);
+    console.log(`[gpu-api] No PDF URL available for zone ${zoneName} — user must upload manually.`);
   }
 
   const isSpecific = zoneName.length > 1 && !BROAD_ZONES.has(zoneName.toUpperCase());

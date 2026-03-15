@@ -194,6 +194,12 @@ export default function PluDocumentManager({
     }
   }, [hasManualFile, hasAutoDoc, onPluFileChange, onUseAutoDocChange]);
 
+  const handleDownload = useCallback(() => {
+    if (!autoFetchedUrl?.trim()) return;
+    // Use window.open as primary — cross-origin PDFs block the <a download> attribute
+    window.open(autoFetchedUrl, "_blank", "noopener,noreferrer");
+  }, [autoFetchedUrl]);
+
   const handleLotissementUpload = useCallback((f: File) => {
     const err = validateFile(f);
     if (err) { setLotError(err); return; }
@@ -311,17 +317,16 @@ export default function PluDocumentManager({
 
                 {/* Action buttons */}
                 <div className="grid grid-cols-3 gap-2">
-                  <a
-                    href={autoFetchedUrl!}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleDownload}
                     className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl
                                bg-white border-2 border-sky-200 text-xs font-semibold text-sky-700
                                hover:border-sky-400 hover:bg-sky-50/50 transition-all shadow-sm"
                   >
                     <FileDown className="w-4 h-4" />
                     {isEn ? "Download" : "Télécharger"}
-                  </a>
+                  </button>
                   <button
                     type="button"
                     onClick={handleStartReplace}
@@ -546,9 +551,10 @@ export default function PluDocumentManager({
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════════
-             SECTION 2: LOTISSEMENT — PRIVÉ (only visible after confirmed)
+             SECTION 2: LOTISSEMENT — PRIVÉ (always visible so user can
+             upload subdivision rules BEFORE or AFTER confirming the PLU)
            ═══════════════════════════════════════════════════════════════════ */}
-        {isReady && (
+        {(
           <div className="rounded-xl border border-dashed border-violet-300 bg-violet-50/30 overflow-hidden">
             <button
               type="button"

@@ -40,6 +40,7 @@ import MaterialsStep from "@/components/project-description/MaterialsStep";
 import PluDocumentManager from "@/components/project-description/PluDocumentManager";
 import FeasibilityMatrix, { FeasibilityMatrixSkeleton } from "@/components/feasibility/FeasibilityMatrix";
 import type { FeasibilityReport } from "@/lib/feasibility-matrix";
+import { compileProjectBrief } from "@/lib/prompt-compiler";
 import { cn } from "@/lib/utils";
 import {
     calculateDpPc,
@@ -264,6 +265,8 @@ export default function ProjectDescriptionPage({
     const [pluAnalysisResult, setPluAnalysisResult] = useState<{ analysis: any; pluRules: any } | null>(null);
     // Feasibility matrix state
     const [projectIntent, setProjectIntent] = useState("");
+    const [userNotes, setUserNotes] = useState("");
+    const [briefAutoCompiled, setBriefAutoCompiled] = useState(false);
     const [feasibilityReport, setFeasibilityReport] = useState<FeasibilityReport | null>(null);
     const [feasibilitySource, setFeasibilitySource] = useState<"gemini" | "fallback" | null>(null);
     const [feasibilityLoading, setFeasibilityLoading] = useState(false);
@@ -272,6 +275,21 @@ export default function ProjectDescriptionPage({
     const [projectName, setProjectName] = useState<string>("");
     const [projectZoneType, setProjectZoneType] = useState<string>("");
     const [projectProtectedAreas, setProjectProtectedAreas] = useState<{ type: string; name: string }[]>([]);
+
+    // ── Auto-compile brief when entering Step 5 (Regulation Analysis) ──────
+    useEffect(() => {
+        if (step === 5 && !projectIntent.trim() && jobs.length > 0) {
+            const compiled = compileProjectBrief(jobs, jobMaterials, {
+                zone: projectZoneType,
+                address: projectAddress,
+                authType: authorizationType,
+                isEn,
+            });
+            setProjectIntent(compiled);
+            setBriefAutoCompiled(true);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step]);
 
     useEffect(() => {
         setInitialLoading(true);
@@ -292,7 +310,7 @@ export default function ProjectDescriptionPage({
                     setPluDocUrl(storedPdfUrl);
                 }
                 // Priority 2: If zone detected but no pdfUrl → live re-fetch via plu-detection
-                // This handles cases where the DB record was created before the fallback was added
+                // This handles cases where the DB record was created before the fix was added
                 else if (d.project?.regulatoryAnalysis?.zoneType && d.project?.coordinates) {
                     try {
                         const coords = JSON.parse(d.project.coordinates);
@@ -308,18 +326,13 @@ export default function ProjectDescriptionPage({
                                     if (data?.plu?.pdfUrl) {
                                         setPluDocUrl(data.plu.pdfUrl);
                                     }
+                                    // If API returns null pdfUrl → leave pluDocUrl as null.
+                                    // PluDocumentManager handles this: shows "No downloadable regulation"
+                                    // and forces the user to upload manually.
                                 })
-                                .catch(() => { /* silent - fallback below will handle */ });
+                                .catch(() => { /* silent - PluDocumentManager handles null */ });
                         }
-                    } catch { /* malformed coordinates - use municipality fallback */ }
-
-                    // Priority 3: Géoportail commune page as immediate fallback
-                    // (while plu-detection fetches in background)
-                    if (d.project.municipality) {
-                        // Construct Géoportail de l'Urbanisme search URL for the commune
-                        const commune = encodeURIComponent(d.project.municipality);
-                        setPluDocUrl(`https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=2&lat=47&zoom=6&mlon=2&mlat=47&typedoc=PLU,PLUi,CC&commune=${commune}`);
-                    }
+                    } catch { /* malformed coordinates - pluDocUrl stays null, user uploads manually */ }
                 }
 
                 // ── Pre-populate jobs from authorization data ──────────────
@@ -859,8 +872,9 @@ export default function ProjectDescriptionPage({
                     });
                     bodyPayload.lotissementContent = lotText;
                 }
-                if (projectIntent.trim()) {
-                    bodyPayload.projectIntent = projectIntent.trim();
+                if (projectIntent.trim() || userNotes.trim()) {
+                    const fullIntent = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n");
+                    bodyPayload.projectIntent = fullIntent;
                 }
 
                 const res = await fetch(`/api/projects/${projectId}/regulatory/auto`, {
@@ -903,12 +917,13 @@ export default function ProjectDescriptionPage({
                 // ── Chain feasibility matrix generation ──────────────────
                 try {
                     setFeasibilityLoading(true);
-                    // Auto-build project intent from jobs if user left it empty
-                    const intent = projectIntent.trim() || jobs.map(j => {
-                        const label = j.displayLabel || j.nature;
-                        const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
-                        return `${label}${area}`;
-                    }).join(", ") || "Projet de construction";
+                    // Use the auto-compiled brief + user notes
+                    const intent = [projectIntent.trim(), userNotes.trim()].filter(Boolean).join("\n\n")
+                        || jobs.map(j => {
+                            const label = j.displayLabel || j.nature;
+                            const area = j.floorAreaEstimated > 0 ? ` de ${j.floorAreaEstimated}m²` : (j.footprint > 0 ? ` de ${j.footprint}m²` : "");
+                            return `${label}${area}`;
+                        }).join(", ") || "Projet de construction";
 
                     const feasFormData = new FormData();
                     if (pluFile) {
@@ -2111,25 +2126,69 @@ export default function ProjectDescriptionPage({
                                             isEn={isEn}
                                         />
 
-                                        {/* Project Intent (for feasibility matrix) */}
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2">
+                                        {/* Project Intent — Auto-Compiled Brief */}
+                                        <div className="space-y-3">
+                                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                                                 <Pencil className="w-4 h-4 text-emerald-500" />
-                                                {isEn ? "Project Intent (Recommended)" : "Intention du Projet (Recommandé)"}
+                                                {isEn ? "Project Brief for AI Analysis" : "Brief Projet pour l'Analyse IA"}
+                                                {briefAutoCompiled && (
+                                                    <span className="text-[10px] font-medium bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                                                        {isEn ? "Auto-generated from Step 1" : "Auto-généré depuis l'Étape 1"}
+                                                    </span>
+                                                )}
                                             </h3>
-                                            <textarea
-                                                value={projectIntent}
-                                                onChange={(e) => setProjectIntent(e.target.value)}
-                                                rows={3}
-                                                placeholder={isEn
-                                                    ? "Describe your project for a detailed compliance analysis. E.g.: Construction of a 15m² garden shed, 2.5m height, on property boundary, 2-pitch tile roof..."
-                                                    : "Décrivez votre projet pour une analyse de conformité détaillée. Ex : Construction d'un abri de jardin de 15m², hauteur 2.5m, en limite séparative, toiture 2 pentes en tuile..."}
-                                                className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-none"
-                                            />
-                                            <p className="text-[10px] text-slate-400 mt-1">
+
+                                            {/* Auto-compiled brief preview */}
+                                            <div className="relative">
+                                                <textarea
+                                                    value={projectIntent}
+                                                    onChange={(e) => {
+                                                        setProjectIntent(e.target.value);
+                                                        setBriefAutoCompiled(false);
+                                                    }}
+                                                    rows={8}
+                                                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 text-xs font-mono leading-relaxed placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-y"
+                                                />
+                                                {briefAutoCompiled && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const compiled = compileProjectBrief(jobs, jobMaterials, {
+                                                                zone: projectZoneType,
+                                                                address: projectAddress,
+                                                                authType: authorizationType,
+                                                                isEn,
+                                                            });
+                                                            setProjectIntent(compiled);
+                                                            setBriefAutoCompiled(true);
+                                                        }}
+                                                        className="absolute top-2 right-2 text-[10px] font-medium text-indigo-600 hover:text-indigo-800 bg-white/80 backdrop-blur-sm border border-indigo-200 px-2 py-1 rounded-lg transition-colors"
+                                                    >
+                                                        ↻ {isEn ? "Recompile" : "Recompiler"}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Additional notes */}
+                                            <div>
+                                                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                                    {isEn ? "Additional notes (optional)" : "Notes supplémentaires (optionnel)"}
+                                                </label>
+                                                <textarea
+                                                    value={userNotes}
+                                                    onChange={(e) => setUserNotes(e.target.value)}
+                                                    rows={2}
+                                                    placeholder={isEn
+                                                        ? "Add any extra context for the AI analysis: specific concerns, neighbor constraints, materials that must match..."
+                                                        : "Ajoutez tout contexte supplémentaire pour l'analyse IA : contraintes voisinage, matériaux imposés, préoccupations spécifiques..."}
+                                                    className="w-full mt-1 px-4 py-2.5 rounded-xl bg-white border border-dashed border-slate-300 text-slate-800 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 transition-shadow resize-none"
+                                                />
+                                            </div>
+
+                                            <p className="text-[10px] text-slate-400">
                                                 {isEn
-                                                    ? "The more detailed your description, the more precise the analysis will be. If left empty, job descriptions will be used."
-                                                    : "Plus votre description est détaillée, plus l'analyse sera précise. Si vide, les descriptions des travaux seront utilisées."}
+                                                    ? "This brief is auto-compiled from your works and materials. Edit freely — your changes are preserved."
+                                                    : "Ce brief est compilé automatiquement depuis vos travaux et matériaux. Modifiez librement — vos changements sont préservés."}
                                             </p>
                                         </div>
 
