@@ -1,20 +1,16 @@
 /**
- * Satellite Imagery API — IGN WMTS Orthophoto Proxy
+ * Map Tiles API — OpenTopoMap Proxy
  *
- * Fetches satellite/aerial imagery tiles from IGN Géoportail WMTS service
- * and returns a stitched image cropped to the requested bounding box.
+ * Fetches topographic map tiles from OpenTopoMap (green terrain shading,
+ * blue water, roads, contour lines — like Google Earth map view).
+ * Returns tile URLs for client-side stitching.
  *
  * Usage: GET /api/terrain/satellite?bbox=minLng,minLat,maxLng,maxLat&width=512&height=512
  */
 import { NextRequest, NextResponse } from "next/server";
 
-// ─── IGN WMTS Configuration ─────────────────────────────────────────────────
+// ─── Tile Configuration ─────────────────────────────────────────────────
 
-const WMTS_BASE = "https://data.geopf.fr/wmts";
-const LAYER = "ORTHOIMAGERY.ORTHOPHOTOS";
-const STYLE = "normal";
-const FORMAT = "image/jpeg";
-const TILE_MATRIX_SET = "PM"; // Web Mercator (EPSG:3857)
 const TILE_SIZE = 256;
 
 // ─── Mercator Math ──────────────────────────────────────────────────────────
@@ -40,24 +36,11 @@ function tileYToLat(y: number, zoom: number): number {
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-// ─── Tile Fetching ──────────────────────────────────────────────────────────
+// ─── Tile URL Builder ───────────────────────────────────────────────────
 
-async function fetchTile(z: number, x: number, y: number): Promise<ArrayBuffer | null> {
-  const url = `${WMTS_BASE}?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile` +
-    `&LAYER=${LAYER}&STYLE=${STYLE}&FORMAT=${encodeURIComponent(FORMAT)}` +
-    `&TILEMATRIXSET=${TILE_MATRIX_SET}&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}`;
-
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (res.ok) {
-      return await res.arrayBuffer();
-    }
-    console.warn(`[satellite] Tile ${z}/${x}/${y} failed: ${res.status}`);
-    return null;
-  } catch (err) {
-    console.warn(`[satellite] Tile ${z}/${x}/${y} fetch error:`, err);
-    return null;
-  }
+function getTileUrl(z: number, x: number, y: number): string {
+  // OpenTopoMap — green terrain shading, blue water, contour lines
+  return `https://tile.opentopomap.org/${z}/${x}/${y}.png`;
 }
 
 // ─── API Handler ────────────────────────────────────────────────────────────
@@ -67,7 +50,6 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const bboxStr = searchParams.get("bbox");
     const width = parseInt(searchParams.get("width") || "512", 10);
-    const height = parseInt(searchParams.get("height") || "512", 10);
 
     if (!bboxStr) {
       return NextResponse.json({ error: "Missing bbox parameter" }, { status: 400 });
@@ -78,17 +60,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid bbox values" }, { status: 400 });
     }
 
-    // Choose zoom level based on requested resolution
-    // Higher zoom = more detail. For a parcel (~50m wide), zoom 18-19 gives great detail.
+    // Choose zoom level — OpenTopoMap has green terrain at all zoom levels
     const bboxWidthDeg = maxLng - minLng;
     const pixelsNeeded = width;
-    // At zoom z, the world is 256 * 2^z pixels wide, covering 360 degrees
-    // pixels per degree = 256 * 2^z / 360
-    // We want: bboxWidthDeg * pixelsPerDeg >= pixelsNeeded
     const zoom = Math.min(
-      19,
+      17,
       Math.max(
-        10,
+        13,
         Math.ceil(Math.log2((pixelsNeeded * 360) / (bboxWidthDeg * 256)))
       )
     );
@@ -110,29 +88,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch all tiles in parallel
-    const tilePromises: Promise<{ x: number; y: number; data: ArrayBuffer | null }>[] = [];
-    for (let ty = tileMinY; ty <= tileMaxY; ty++) {
-      for (let tx = tileMinX; tx <= tileMaxX; tx++) {
-        tilePromises.push(
-          fetchTile(zoom, tx, ty).then((data) => ({ x: tx - tileMinX, y: ty - tileMinY, data }))
-        );
-      }
-    }
-
-    const tiles = await Promise.all(tilePromises);
-
-    // For simplicity, return the tile grid info + individual tile URLs
-    // The client will stitch them using a canvas
+    // Build tile URLs for client-side stitching
     const tileUrls: string[][] = [];
     for (let ty = tileMinY; ty <= tileMaxY; ty++) {
       const row: string[] = [];
       for (let tx = tileMinX; tx <= tileMaxX; tx++) {
-        row.push(
-          `${WMTS_BASE}?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile` +
-            `&LAYER=${LAYER}&STYLE=${STYLE}&FORMAT=${encodeURIComponent(FORMAT)}` +
-            `&TILEMATRIXSET=${TILE_MATRIX_SET}&TILEMATRIX=${zoom}&TILEROW=${ty}&TILECOL=${tx}`
-        );
+        row.push(getTileUrl(zoom, tx, ty));
       }
       tileUrls.push(row);
     }
@@ -157,7 +118,7 @@ export async function GET(request: NextRequest) {
       numTiles: { x: numTilesX, y: numTilesY },
     });
   } catch (err) {
-    console.error("[satellite] Error:", err);
+    console.error("[map-tiles] Error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

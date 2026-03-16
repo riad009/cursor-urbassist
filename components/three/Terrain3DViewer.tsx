@@ -14,21 +14,224 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { ProcessedSiteData } from "@/types/processed-site-data";
 
+// ─── Realistic Procedural Sky (matches 3D-Mapper HDRI-like sky with clouds) ───
+
+function createSkyDome(scene: THREE.Scene): void {
+  const skyGeo = new THREE.SphereGeometry(5000, 64, 32);
+  const skyMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uSunPosition: { value: new THREE.Vector3(0.4, 0.3, 0.5) },
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      varying vec3 vPosition;
+      void main() {
+        vPosition = position;
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uSunPosition;
+      varying vec3 vWorldPosition;
+      varying vec3 vPosition;
+
+      // Simple hash for noise
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
+      // Value noise
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+
+      // FBM for clouds
+      float fbm(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 5; i++) {
+          v += a * noise(p);
+          p *= 2.0;
+          a *= 0.5;
+        }
+        return v;
+      }
+
+      void main() {
+        vec3 dir = normalize(vWorldPosition);
+        float y = dir.y;
+
+        // Sky gradient: deep blue zenith -> light blue horizon
+        vec3 zenith = vec3(0.30, 0.55, 0.92);  // Deep sky blue
+        vec3 horizon = vec3(0.68, 0.80, 0.92); // Pale blue-grey horizon
+        vec3 belowHorizon = vec3(0.75, 0.82, 0.90); // Below horizon fade
+
+        float t = max(y, 0.0);
+        vec3 skyColor = mix(horizon, zenith, pow(t, 0.5));
+
+        // Below horizon: fade to lighter blue-grey
+        if (y < 0.0) {
+          skyColor = mix(horizon, belowHorizon, min(-y * 3.0, 1.0));
+        }
+
+        // Sun glow
+        vec3 sunDir = normalize(uSunPosition);
+        float sunDot = max(dot(dir, sunDir), 0.0);
+        vec3 sunColor = vec3(1.0, 0.95, 0.85);
+        skyColor += sunColor * pow(sunDot, 64.0) * 0.8;
+        skyColor += sunColor * pow(sunDot, 8.0) * 0.15;
+
+        // Procedural clouds (only above horizon)
+        if (y > 0.01) {
+          vec2 uv = dir.xz / (y + 0.1) * 1.8;
+          float cloud = fbm(uv * 3.0 + vec2(0.3, 0.7));
+          cloud = smoothstep(0.35, 0.65, cloud);
+
+          // Cloud color: white with slight blue tint in shadows
+          vec3 cloudColor = vec3(1.0, 1.0, 1.0);
+          vec3 cloudShadow = vec3(0.75, 0.80, 0.88);
+          float cloudLit = max(dot(vec3(0.0, 1.0, 0.0), sunDir), 0.3);
+          vec3 finalCloud = mix(cloudShadow, cloudColor, cloudLit);
+
+          // Fade clouds near horizon
+          float horizonFade = smoothstep(0.01, 0.15, y);
+          cloud *= horizonFade * 0.7;
+
+          skyColor = mix(skyColor, finalCloud, cloud);
+        }
+
+        // Horizon haze
+        float haze = 1.0 - smoothstep(0.0, 0.12, abs(y));
+        skyColor = mix(skyColor, vec3(0.78, 0.85, 0.92), haze * 0.5);
+
+        gl_FragColor = vec4(skyColor, 1.0);
+      }
+    `,
+    side: THREE.BackSide,
+    depthWrite: false,
+  });
+  scene.add(new THREE.Mesh(skyGeo, skyMat));
+}
+
+// ─── Sedimentary Layer Skirt Material (matches 3D-Mapper earth crust look) ───
+
+function createSkirtMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTopY: { value: 0 },
+      uBottomY: { value: -5 },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        vNormal = normalMatrix * normal;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      uniform float uTopY;
+      uniform float uBottomY;
+
+      void main() {
+        float range = uTopY - uBottomY;
+        float t = clamp((vWorldPos.y - uBottomY) / range, 0.0, 1.0);
+
+        // Sedimentary rock layers (top to bottom)
+        vec3 topSoil    = vec3(0.45, 0.32, 0.20); // Dark brown topsoil
+        vec3 clay       = vec3(0.62, 0.42, 0.25); // Terracotta clay
+        vec3 sandstone  = vec3(0.72, 0.58, 0.38); // Sandy layer
+        vec3 darkRock   = vec3(0.35, 0.25, 0.18); // Dark sediment
+        vec3 limestone  = vec3(0.65, 0.55, 0.42); // Lighter band
+        vec3 bedrock    = vec3(0.30, 0.22, 0.16); // Deep bedrock
+
+        // Create banded layers
+        vec3 color;
+        if (t > 0.85) {
+          color = mix(clay, topSoil, (t - 0.85) / 0.15);
+        } else if (t > 0.70) {
+          color = mix(sandstone, clay, (t - 0.70) / 0.15);
+        } else if (t > 0.55) {
+          color = mix(darkRock, sandstone, (t - 0.55) / 0.15);
+        } else if (t > 0.35) {
+          color = mix(limestone, darkRock, (t - 0.35) / 0.20);
+        } else if (t > 0.15) {
+          color = mix(bedrock, limestone, (t - 0.15) / 0.20);
+        } else {
+          color = bedrock;
+        }
+
+        // Subtle horizontal striations
+        float stripe = sin(vWorldPos.y * 12.0) * 0.03 + sin(vWorldPos.y * 27.0) * 0.015;
+        color += stripe;
+
+        // Simple directional lighting
+        vec3 lightDir = normalize(vec3(0.4, 1.0, 0.35));
+        float diff = max(dot(normalize(vNormal), lightDir), 0.0) * 0.5 + 0.5;
+        color *= diff;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+    side: THREE.DoubleSide,
+  });
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const METERS_PER_DEG = 111320;
 const DEG_TO_RAD = Math.PI / 180;
 const GRID_RES = 128; // 128×128 terrain mesh — smooth diorama quality
-const SAT_PAD = 0.5;  // Satellite bbox padding factor
-const CONTOUR_INTERVAL = 2; // metres between contour lines
-const TREE_COUNT = 400; // max instanced trees
-const TREE_SKIP_RADIUS = 3; // metres clearance inside boundary for trees
+const SAT_PAD = 0.5;  // Map tile bbox padding factor
+
+// ─── Module-level elevation cache (survives 2D↔3D toggles) ────────────────
+const elevationCache = new Map<string, number[]>();
+
+function getElevationCacheKey(coords: [number, number][]): string {
+  // Use first + last + count as a fast key
+  if (coords.length === 0) return '';
+  const f = coords[0], l = coords[coords.length - 1];
+  return `${f[0].toFixed(6)},${f[1].toFixed(6)}|${l[0].toFixed(6)},${l[1].toFixed(6)}|${coords.length}`;
+}
+
+// ── User-placed building from 2D canvas ──
+export interface UserBuilding3D {
+  id: string;
+  name: string;
+  type: string; // house, pool, garden, terrace, parking, garage, shed, carport, annex, extension
+  width: number;   // meters
+  depth: number;   // meters
+  canvasX: number; // px on 2D canvas
+  canvasY: number; // px on 2D canvas
+  canvasAngle: number; // degrees
+  wallHeights?: { ground?: number; first?: number; second?: number };
+  roofType?: string; // flat, gable, hip, shed
+  roofPitch?: number; // degrees
+  roofOverhang?: number; // meters
+  color?: string;
+}
 
 interface Terrain3DViewerProps {
   processedSiteData: ProcessedSiteData | null;
   parcelGeoJSON?: any;
   width?: number;
   height?: number;
+  userBuildings?: UserBuilding3D[];
+  canvasWidth?: number;
+  canvasHeight?: number;
+  pixelsPerMeter?: number;
 }
 
 // ─── Elevation fetcher (via our proxy to avoid CORS) ────────────────────────
@@ -38,6 +241,13 @@ async function fetchElevationsBatch(
   onProgress?: (msg: string) => void
 ): Promise<number[]> {
   if (coords.length === 0) return [];
+
+  // Check module-level cache first
+  const cacheKey = getElevationCacheKey(coords);
+  if (elevationCache.has(cacheKey)) {
+    onProgress?.('Using cached elevation data...');
+    return elevationCache.get(cacheKey)!;
+  }
 
   const CHUNK = 50;
   const result: number[] = [];
@@ -70,6 +280,8 @@ async function fetchElevationsBatch(
     }
   }
 
+  // Save to module-level cache for 2D↔3D toggle persistence
+  elevationCache.set(cacheKey, result);
   return result;
 }
 
@@ -150,9 +362,9 @@ function computeBbox(coords: number[][]): { minLng: number; maxLng: number; minL
   return { minLng, maxLng, minLat, maxLat };
 }
 
-// ─── Satellite Texture Loader ───────────────────────────────────────────────
+// ─── Map Tile Texture Loader (topographic map from IGN PLANIGNV2) ────────────
 
-async function loadSatelliteTexture(
+async function loadMapTexture(
   bbox: { minLng: number; maxLng: number; minLat: number; maxLat: number },
   pad: number,
   renderer: THREE.WebGLRenderer
@@ -198,19 +410,37 @@ async function loadSatelliteTexture(
   }
 }
 
+
 // ═════════════════════════════════════════════════════════════════════════════
 // ── COMPONENT ──
 // ═════════════════════════════════════════════════════════════════════════════
 
-export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height }: Terrain3DViewerProps) {
+export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter }: Terrain3DViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
     controls: OrbitControls;
     animId: number;
+    terrainMesh?: THREE.Mesh;
+    skirtMesh?: THREE.Mesh;
+    bottomCap?: THREE.Mesh;
   } | null>(null);
   const [status, setStatus] = useState("Initializing...");
   const [isReady, setIsReady] = useState(false);
+  const [zScale, setZScale] = useState(1.0);
+  // Store terrain build data for dynamic z-exaggeration
+  const terrainDataRef = useRef<{
+    baseExag: number;
+    minE: number;
+    eRange: number;
+    sceneElev: Array<{ x: number; z: number; y: number }>;
+    normPts: Array<{ x: number; z: number; y: number }>;
+    cX: number;
+    cZ: number;
+    slabH: number;
+    pos: THREE.BufferAttribute;
+    gridN: number;
+  } | null>(null);
 
   const buildScene = useCallback(async () => {
     const container = containerRef.current;
@@ -420,8 +650,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     const cZ = (minSZ + maxSZ) / 2;
 
     // Exaggeration: dramatic visible relief — 25% of span for maquette-like diorama
+    // For flat terrain (small eRange), enforce a minimum exaggeration so it's always visible
     const targetH = tSpan * 0.25;
-    const exag = hasElev ? targetH / eRange : 1;
+    const rawExag = hasElev ? targetH / eRange : 1;
+    const exag = Math.max(rawExag, 3.0); // Minimum 3× exag — flat areas still show relief
 
     // Normalize elevation to [0, targetH]
     const normPts = hasElev
@@ -435,9 +667,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     // ═══════════════════════════════════════════════════════════════════════
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf5f5f0);  // Warm off-white — museum gallery
+    scene.background = new THREE.Color(0xc8ddf0);  // Sky-matching pale blue
+    scene.fog = null; // No fog — terrain must stay fully colored at all zoom distances
 
-    const far = Math.max(500, tSpan * 12);
+    const far = Math.max(6000, tSpan * 12);
     const camera = new THREE.PerspectiveCamera(35, W / H, 0.3, far);
     const cd = tSpan * 1.0;
     camera.position.set(cX + cd * 0.55, targetH + cd * 0.65, cZ + cd * 0.55);
@@ -450,7 +683,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.3;
+    renderer.toneMappingExposure = 1.5; // Brighter for vibrant satellite colors
 
     container.innerHTML = "";
     const cvs = renderer.domElement;
@@ -472,7 +705,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     // Lighting
     const sd = Math.max(80, tSpan * 1.5);
-    const sun = new THREE.DirectionalLight(0xfff8e8, 2.0);  // Warm sunlight
+    const sun = new THREE.DirectionalLight(0xfff8e8, 2.5);  // Warm sunlight — boosted
     sun.position.set(sd * 0.4, sd * 1.0, sd * 0.35);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
@@ -484,9 +717,12 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     sun.shadow.camera.bottom = -sd;
     sun.shadow.bias = -0.0002;
     scene.add(sun);
-    scene.add(new THREE.DirectionalLight(0xc8d8e8, 0.4));  // Cool fill
-    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a7b4e, 0.45));
-    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.25));
+    scene.add(new THREE.DirectionalLight(0xc8d8e8, 0.5));  // Cool fill — boosted
+    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a7b4e, 0.55));
+    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.3));
+
+    // ── SKY DOME ──
+    createSkyDome(scene);
 
     // ═══════════════════════════════════════════════════════════════════════
     // ── TERRAIN MESH ──
@@ -527,7 +763,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     // Recompute normals after height displacement + smoothing
     terrainGeom.computeVertexNormals();
 
-    // Vertex colors (natural gradient fallback — used until satellite loads)
+    // Vertex colors — matching 3D Mapper's vibrant topographic palette
+    // Strong greens dominate, grey only at the steepest rocky peaks
     const colors = new Float32Array(pos.count * 3);
     let yMin = Infinity, yMax = -Infinity;
     for (let i = 0; i < pos.count; i++) {
@@ -536,18 +773,54 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     }
     const yR = yMax - yMin || 1;
 
+    // Also compute slope per vertex for rocky grey areas
+    const slopeGridN = GRID_RES + 1;
+    const slopes = new Float32Array(pos.count);
     for (let i = 0; i < pos.count; i++) {
-      const t = (pos.getY(i) - yMin) / yR;
+      const col = i % slopeGridN;
+      const row = Math.floor(i / slopeGridN);
+      let maxDiff = 0;
+      // Check neighbors
+      if (col > 0) maxDiff = Math.max(maxDiff, Math.abs(pos.getY(i) - pos.getY(i - 1)));
+      if (col < GRID_RES) maxDiff = Math.max(maxDiff, Math.abs(pos.getY(i) - pos.getY(i + 1)));
+      if (row > 0) maxDiff = Math.max(maxDiff, Math.abs(pos.getY(i) - pos.getY(i - slopeGridN)));
+      if (row < GRID_RES) maxDiff = Math.max(maxDiff, Math.abs(pos.getY(i) - pos.getY(i + slopeGridN)));
+      slopes[i] = maxDiff;
+    }
+    const maxSlope = Math.max(...slopes) || 1;
+
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getY(i) - yMin) / yR; // 0=lowest, 1=highest
+      const slopeT = slopes[i] / maxSlope;  // 0=flat, 1=steepest
       let r: number, g: number, b: number;
-      if (t < 0.3) {
-        r = 0.22 + t; g = 0.48 + t * 0.5; b = 0.15 + t * 0.3;
-      } else if (t < 0.6) {
-        const s = (t - 0.3) / 0.3;
-        r = 0.52 + s * 0.2; g = 0.63 + s * 0.04; b = 0.24 + s * 0.1;
+
+      // Base color: vivid green gradient (matching 3D Mapper closely)
+      if (t < 0.25) {
+        // Valley: vivid grass green — clearly green even on flat terrain
+        r = 0.35 + t * 0.3;  g = 0.58 + t * 0.24;  b = 0.22 + t * 0.12;
+      } else if (t < 0.55) {
+        // Mid: bright lime-green (dominant 3D Mapper color)
+        const s = (t - 0.25) / 0.30;
+        r = 0.42 + s * 0.10;  g = 0.64 + s * 0.06;  b = 0.25 + s * 0.06;
+      } else if (t < 0.80) {
+        // Upper: olive → sage green
+        const s = (t - 0.55) / 0.25;
+        r = 0.52 + s * 0.10;  g = 0.70 - s * 0.08;  b = 0.31 + s * 0.10;
       } else {
-        const s = (t - 0.6) / 0.4;
-        r = 0.72 + s * 0.12; g = 0.67 - s * 0.08; b = 0.34 + s * 0.12;
+        // Peak: sage → light grey-green (only at absolute peaks)
+        const s = (t - 0.80) / 0.20;
+        r = 0.62 + s * 0.10;  g = 0.62 + s * 0.04;  b = 0.41 + s * 0.12;
       }
+
+      // Blend towards grey on steep slopes (rocky faces)
+      if (slopeT > 0.3) {
+        const rockBlend = Math.min(1, (slopeT - 0.3) / 0.5);
+        const grey = 0.55 + t * 0.15; // light grey rock
+        r = r + (grey - r) * rockBlend * 0.7;
+        g = g + (grey - g) * rockBlend * 0.7;
+        b = b + (grey - b) * rockBlend * 0.7;
+      }
+
       colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b;
     }
     terrainGeom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -565,8 +838,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.75,
-      metalness: 0.02,
+      roughness: 0.65,
+      metalness: 0.0,
       side: THREE.DoubleSide,
     });
 
@@ -577,508 +850,344 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     scene.add(terrainMesh);
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ── THICK BASE SLAB + SKIRT ──
+    // ── THICK BASE SLAB + MERGED SKIRT ──
     // ═══════════════════════════════════════════════════════════════════════
 
-    const slabH = Math.max(0.8, targetH * 0.15);
-    const skirtMat = new THREE.MeshStandardMaterial({
-      color: 0x5c4033,     // Medium walnut brown — visible maquette edge
-      roughness: 0.80,
-      metalness: 0.08,
-    });
-    const eN = GRID_RES + 1;
+    const slabH = Math.max(2.0, targetH * 0.25); // Chunky diorama base
 
-    const addSkirt = (i1: number, i2: number, flip: boolean) => {
+    // Store terrain data for dynamic z-exaggeration (after slabH is computed)
+    terrainDataRef.current = {
+      baseExag: exag,
+      minE,
+      eRange,
+      sceneElev,
+      normPts,
+      cX,
+      cZ,
+      slabH,
+      pos: terrainGeom.attributes.position as THREE.BufferAttribute,
+      gridN: GRID_RES + 1,
+    };
+    const skirtMat = createSkirtMaterial();
+    // Set uniform Y range: top of terrain to bottom of slab
+    skirtMat.uniforms.uTopY.value = targetH;
+    skirtMat.uniforms.uBottomY.value = -slabH;
+    const eN = GRID_RES + 1;
+    const bottomY = -slabH;
+
+    // Build ONE merged skirt geometry for all 4 edges (watertight belt)
+    const skirtVertices: number[] = [];
+    const skirtIndices: number[] = [];
+    let skirtVtxCount = 0;
+
+    const addSkirtQuad = (i1: number, i2: number, flip: boolean) => {
       const x1 = pos.getX(i1) + cX, z1 = pos.getZ(i1) + cZ, y1 = pos.getY(i1);
       const x2 = pos.getX(i2) + cX, z2 = pos.getZ(i2) + cZ, y2 = pos.getY(i2);
-      const v = flip
-        ? new Float32Array([x2, y2, z2, x1, y1, z1, x1, -slabH, z1, x2, -slabH, z2])
-        : new Float32Array([x1, y1, z1, x2, y2, z2, x2, -slabH, z2, x1, -slabH, z1]);
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(v, 3));
-      g.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 0, 2, 3]), 1));
-      g.computeVertexNormals();
-      scene.add(new THREE.Mesh(g, skirtMat));
+      const base = skirtVtxCount;
+      if (flip) {
+        skirtVertices.push(x2, y2, z2, x1, y1, z1, x1, bottomY, z1, x2, bottomY, z2);
+      } else {
+        skirtVertices.push(x1, y1, z1, x2, y2, z2, x2, bottomY, z2, x1, bottomY, z1);
+      }
+      skirtIndices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      skirtVtxCount += 4;
     };
 
-    for (let i = 0; i < GRID_RES; i++) {
-      addSkirt(i, i + 1, false);
-      addSkirt(GRID_RES * eN + i, GRID_RES * eN + i + 1, true);
-    }
-    for (let j = 0; j < GRID_RES; j++) {
-      addSkirt(j * eN, (j + 1) * eN, true);
-      addSkirt(j * eN + GRID_RES, (j + 1) * eN + GRID_RES, false);
-    }
+    // Top edge (row 0)
+    for (let i = 0; i < GRID_RES; i++) addSkirtQuad(i, i + 1, false);
+    // Bottom edge (last row)
+    for (let i = 0; i < GRID_RES; i++) addSkirtQuad(GRID_RES * eN + i, GRID_RES * eN + i + 1, true);
+    // Left edge
+    for (let j = 0; j < GRID_RES; j++) addSkirtQuad(j * eN, (j + 1) * eN, true);
+    // Right edge
+    for (let j = 0; j < GRID_RES; j++) addSkirtQuad(j * eN + GRID_RES, (j + 1) * eN + GRID_RES, false);
 
-    // Bottom plate
-    scene.add((() => {
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(tW + 0.3, slabH * 0.2, tD + 0.3),
-        new THREE.MeshStandardMaterial({ color: 0x4a3628, roughness: 0.85, metalness: 0.08 })
-      );
-      m.position.set(cX, -slabH - slabH * 0.2, cZ);
-      m.receiveShadow = true;
-      return m;
-    })());
+    const skirtGeom = new THREE.BufferGeometry();
+    skirtGeom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(skirtVertices), 3));
+    skirtGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(skirtIndices), 1));
+    skirtGeom.computeVertexNormals();
+    const skirtMesh = new THREE.Mesh(skirtGeom, skirtMat);
+    skirtMesh.receiveShadow = true;
+    scene.add(skirtMesh);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ── BOUNDARY + PARCEL LINES ON TERRAIN ──
-    // ═══════════════════════════════════════════════════════════════════════
+    // Bottom cap plate (dark bedrock)
+    const bottomCapGeom = new THREE.PlaneGeometry(tW + 0.6, tD + 0.6);
+    bottomCapGeom.rotateX(-Math.PI / 2);
+    const bottomCap = new THREE.Mesh(bottomCapGeom, new THREE.MeshStandardMaterial({
+      color: 0x302216, roughness: 0.95, metalness: 0.02,
+    }));
+    bottomCap.position.set(cX, bottomY, cZ);
+    bottomCap.receiveShadow = true;
+    scene.add(bottomCap);
 
-    const sampleY = (sx: number, sz: number) =>
-      normPts.length >= 3 ? idwInterpolate(sx, sz, normPts, 2) + 0.4 : 0.4;
-
-    // Main boundary
-    const bPts = bCoords.map((c) => {
-      const sx = (c[0] - refPoint.lng) * METERS_PER_DEG * cosLat;
-      const sz = -(c[1] - refPoint.lat) * METERS_PER_DEG;
-      return new THREE.Vector3(sx, sampleY(sx, sz), sz);
-    });
-    scene.add(new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(bPts),
-      new THREE.LineBasicMaterial({ color: 0xff2222, linewidth: 3 })
-    ));
-
-    // Corner posts
-    bPts.forEach((pt, i) => {
-      if (i >= bCoords.length - 1) return;
-      const pH = Math.max(0.8, targetH * 0.10);
-      const pMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.4, metalness: 0.15 });
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, pH, 6), pMat);
-      post.position.set(pt.x, pt.y + pH / 2, pt.z);
-      post.castShadow = true;
-      scene.add(post);
-    });
-
-    // Parcel boundaries
-    if (processedSiteData?.parcels && processedSiteData.parcels.length > 1) {
-      const PC = [0x3b82f6, 0x10b981, 0xf59e0b, 0x8b5cf6, 0xec4899];
-      processedSiteData.parcels.forEach((parcel, idx) => {
-        const coords = parcel.coordinates;
-        if (!coords || coords.length === 0 || coords[0].length < 3) return;
-        const ring = coords[0];
-        const pts = ring.map((c) => {
-          const sx = (c[0] - refPoint.lng) * METERS_PER_DEG * cosLat;
-          const sz = -(c[1] - refPoint.lat) * METERS_PER_DEG;
-          return new THREE.Vector3(sx, sampleY(sx, sz), sz);
-        });
-        scene.add(new THREE.LineLoop(
-          new THREE.BufferGeometry().setFromPoints(pts),
-          new THREE.LineBasicMaterial({ color: PC[idx % PC.length] })
-        ));
+    // ── Parcel boundary outline on terrain (green line) ──
+    if (bCoords.length >= 3) {
+      const boundaryPts3D = bCoords.map(([lng, lat]) => {
+        const sx = (lng - refPoint.lng) * METERS_PER_DEG * cosLat;
+        const sz = -(lat - refPoint.lat) * METERS_PER_DEG;
+        // Sample terrain height via IDW
+        const groundY = normPts.length >= 3 ? idwInterpolate(sx, sz, normPts, 2) : 0;
+        return new THREE.Vector3(sx, groundY + 0.3, sz); // +0.3m above terrain to avoid z-fight
       });
+      const bLineGeom = new THREE.BufferGeometry().setFromPoints(boundaryPts3D);
+      const bLineMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 2, depthTest: true });
+      const bLine = new THREE.LineLoop(bLineGeom, bLineMat);
+      scene.add(bLine);
     }
 
-    // Floor
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(tSpan * 6, tSpan * 6),
-      new THREE.MeshStandardMaterial({ color: 0xc8c0b8, roughness: 0.92 })  // Warm concrete floor
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -slabH - slabH * 0.4 - 0.01;
-    floor.receiveShadow = true;
-    scene.add(floor);
+    // No floor plane needed — sky dome provides the background
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ── SATELLITE ORTHOPHOTO DRAPING ──
+    // ── MAP TILE DRAPING (topographic map — shows real land use colors) ──
     // ═══════════════════════════════════════════════════════════════════════
 
-    setStatus("Loading satellite imagery from IGN...");
+    setStatus("Loading map tiles...");
 
-    // Load satellite in background — scene renders immediately with vertex colors
-    loadSatelliteTexture(bbox, SAT_PAD, renderer).then((result) => {
+    // Load topographic map tiles in background — scene renders with vertex colors first
+    loadMapTexture(bbox, SAT_PAD, renderer).then((result) => {
       if (!result) {
-        console.warn("[terrain3d] Satellite texture unavailable, keeping vertex colors");
+        console.warn("[terrain3d] Map tiles unavailable, keeping vertex color fallback");
         setStatus("");
         return;
       }
 
       const { texture, gridBounds } = result;
 
-      // ── Compute UV remapping for geo-accurate satellite placement ──
-      const satUvs = new Float32Array(pos.count * 2);
+      // ── Quality check: reject nearly-white tiles (OpenTopoMap sometimes returns blank tiles) ──
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = 64; tmpCanvas.height = 64;
+      const tmpCtx = tmpCanvas.getContext('2d');
+      if (tmpCtx && texture.image) {
+        try {
+          tmpCtx.drawImage(texture.image as HTMLCanvasElement, 0, 0, 64, 64);
+          const sampleData = tmpCtx.getImageData(0, 0, 64, 64).data;
+          let totalBrightness = 0;
+          for (let px = 0; px < sampleData.length; px += 4) {
+            totalBrightness += (sampleData[px] + sampleData[px + 1] + sampleData[px + 2]) / 3;
+          }
+          const avgBrightness = totalBrightness / (sampleData.length / 4);
+          if (avgBrightness > 200) {
+            console.warn(`[terrain3d] Map tiles too bright (avg=${avgBrightness.toFixed(0)}), keeping vertex colors`);
+            setStatus("");
+            return;
+          }
+        } catch { /* ignore sampling errors */ }
+      }
+
+      // Compute UV remapping for geo-accurate map placement
+      const mapUvs = new Float32Array(pos.count * 2);
       for (let i = 0; i < pos.count; i++) {
-        // World-space position of this vertex
         const wx = pos.getX(i) + cX;
         const wz = pos.getZ(i) + cZ;
-        // Convert back to lng/lat
         const vLng = refPoint.lng + wx / (METERS_PER_DEG * cosLat);
         const vLat = refPoint.lat - wz / METERS_PER_DEG;
-        // Map to satellite grid bounds
         const u = (vLng - gridBounds.minLng) / (gridBounds.maxLng - gridBounds.minLng);
         const v = (vLat - gridBounds.minLat) / (gridBounds.maxLat - gridBounds.minLat);
-        satUvs[i * 2] = Math.max(0, Math.min(1, u));
-        satUvs[i * 2 + 1] = Math.max(0, Math.min(1, v));
+        mapUvs[i * 2] = Math.max(0, Math.min(1, u));
+        mapUvs[i * 2 + 1] = Math.max(0, Math.min(1, v));
       }
-      terrainGeom.setAttribute("uv", new THREE.BufferAttribute(satUvs, 2));
+      terrainGeom.setAttribute("uv", new THREE.BufferAttribute(mapUvs, 2));
       terrainGeom.attributes.uv.needsUpdate = true;
 
-      // Apply satellite texture to terrain material
+      // Apply map texture — replaces vertex colors with real map data
       terrainMat.map = texture;
       terrainMat.vertexColors = false;
       terrainMat.needsUpdate = true;
 
-      console.log("[terrain3d] Satellite texture applied successfully");
-
-      // ═══════════════════════════════════════════════════════════════════
-      // ── PROCEDURAL VEGETATION (instanced trees) ──
-      // ═══════════════════════════════════════════════════════════════════
-
-      setStatus("Planting trees & vegetation...");
-
-      try {
-        // Read satellite pixels to find green zones
-        const satCanvas = (texture.image as HTMLCanvasElement);
-        const satCtx = satCanvas.getContext("2d");
-        if (satCtx) {
-          const imgData = satCtx.getImageData(0, 0, satCanvas.width, satCanvas.height);
-          const treePts: Array<{ x: number; y: number; z: number; greenness: number }> = [];
-
-          // Sample terrain grid vertices for greenness — every vertex for high density
-          for (let i = 0; i < pos.count && treePts.length < TREE_COUNT * 4; i += 1) {
-            const u = satUvs[i * 2];
-            const v = satUvs[i * 2 + 1];
-            if (u < 0.01 || u > 0.99 || v < 0.01 || v > 0.99) continue; // skip edges
-            const px = Math.floor(u * (satCanvas.width - 1));
-            const py = Math.floor((1 - v) * (satCanvas.height - 1));
-            const idx = (py * satCanvas.width + px) * 4;
-            const rr = imgData.data[idx], gg = imgData.data[idx + 1], bb = imgData.data[idx + 2];
-
-            // Detect green vegetation: green dominates, or dark green (forests)
-            const greenness = gg - Math.max(rr, bb);
-            const isDarkGreen = gg > 40 && rr < 100 && bb < 100 && gg > rr;
-            const isBlue = bb > rr + 30 && bb > gg;
-            const isGrey = Math.abs(rr - gg) < 15 && Math.abs(gg - bb) < 15 && rr > 120; // roads/buildings
-            if ((greenness > 5 || isDarkGreen) && !isBlue && !isGrey && gg > 35) {
-              const wx = pos.getX(i) + cX;
-              const wy = pos.getY(i);
-              const wz = pos.getZ(i) + cZ;
-
-              // Skip if inside property boundary (keep build site clear)
-              let insideBoundary = false;
-              const vLng = refPoint.lng + wx / (METERS_PER_DEG * cosLat);
-              const vLat = refPoint.lat - wz / METERS_PER_DEG;
-              // Simple point-in-polygon check for boundary
-              let inside = false;
-              for (let bi = 0, bj = bCoords.length - 1; bi < bCoords.length; bj = bi++) {
-                const xi = bCoords[bi][0], yi = bCoords[bi][1];
-                const xj = bCoords[bj][0], yj = bCoords[bj][1];
-                if ((yi > vLat) !== (yj > vLat) && vLng < ((xj - xi) * (vLat - yi)) / (yj - yi) + xi) {
-                  inside = !inside;
-                }
-              }
-              insideBoundary = inside;
-
-              if (!insideBoundary) {
-                treePts.push({ x: wx, y: wy, z: wz, greenness });
-              }
-            }
-          }
-
-          // Limit to TREE_COUNT and place instanced meshes
-          const treePositions = treePts.slice(0, TREE_COUNT);
-          if (treePositions.length > 0) {
-            // Tree trunk (cylinder)
-            const trunkGeom = new THREE.CylinderGeometry(0.08, 0.12, 1.2, 5);
-            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5d3a1a, roughness: 0.9 });
-            const trunkMesh = new THREE.InstancedMesh(trunkGeom, trunkMat, treePositions.length);
-            trunkMesh.castShadow = true;
-
-            // Tree canopy (cone)
-            const canopyGeom = new THREE.ConeGeometry(0.6, 1.8, 6);
-            const canopyMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.85 });
-            const canopyMesh = new THREE.InstancedMesh(canopyGeom, canopyMat, treePositions.length);
-            canopyMesh.castShadow = true;
-
-            // Bush (sphere) for variety
-            const bushGeom = new THREE.SphereGeometry(0.4, 6, 5);
-            const bushMat = new THREE.MeshStandardMaterial({ color: 0x3a7d32, roughness: 0.9 });
-            const bushCount = Math.floor(treePositions.length * 0.3);
-            const bushMesh = new THREE.InstancedMesh(bushGeom, bushMat, bushCount);
-            bushMesh.castShadow = true;
-
-            const mat4 = new THREE.Matrix4();
-            const colorObj = new THREE.Color();
-
-            for (let ti = 0; ti < treePositions.length; ti++) {
-              const tp = treePositions[ti];
-              // Randomize height and position slightly
-              const hScale = 0.6 + Math.random() * 0.8;
-              const xOff = (Math.random() - 0.5) * 1.5;
-              const zOff = (Math.random() - 0.5) * 1.5;
-
-              // Trunk
-              mat4.makeTranslation(tp.x + xOff, tp.y + 0.6 * hScale, tp.z + zOff);
-              mat4.scale(new THREE.Vector3(hScale, hScale, hScale));
-              trunkMesh.setMatrixAt(ti, mat4);
-
-              // Canopy
-              mat4.makeTranslation(tp.x + xOff, tp.y + 1.8 * hScale, tp.z + zOff);
-              mat4.scale(new THREE.Vector3(hScale, hScale, hScale));
-              canopyMesh.setMatrixAt(ti, mat4);
-
-              // Vary canopy color
-              const gVar = 0.15 + Math.random() * 0.25;
-              colorObj.setRGB(0.1 + Math.random() * 0.1, 0.25 + gVar, 0.08 + Math.random() * 0.08);
-              canopyMesh.setColorAt(ti, colorObj);
-
-              // Bush (only for first bushCount)
-              if (ti < bushCount) {
-                mat4.makeTranslation(
-                  tp.x + (Math.random() - 0.5) * 2,
-                  tp.y + 0.3,
-                  tp.z + (Math.random() - 0.5) * 2
-                );
-                bushMesh.setMatrixAt(ti, mat4);
-                colorObj.setRGB(0.15 + Math.random() * 0.1, 0.35 + Math.random() * 0.2, 0.1);
-                bushMesh.setColorAt(ti, colorObj);
-              }
-            }
-
-            trunkMesh.instanceMatrix.needsUpdate = true;
-            canopyMesh.instanceMatrix.needsUpdate = true;
-            if (canopyMesh.instanceColor) canopyMesh.instanceColor.needsUpdate = true;
-            bushMesh.instanceMatrix.needsUpdate = true;
-            if (bushMesh.instanceColor) bushMesh.instanceColor.needsUpdate = true;
-
-            scene.add(trunkMesh);
-            scene.add(canopyMesh);
-            scene.add(bushMesh);
-            console.log(`[terrain3d] Placed ${treePositions.length} trees + ${bushCount} bushes`);
-          }
-
-          // ═══════════════════════════════════════════════════════════════
-          // ── WATER DETECTION + RENDERING ──
-          // ═══════════════════════════════════════════════════════════════
-
-          // Detect blue-dominant areas in satellite image → water
-          let waterVertices = 0;
-          const waterYPositions: number[] = [];
-          for (let i = 0; i < pos.count; i += 2) {
-            const u = satUvs[i * 2];
-            const v = satUvs[i * 2 + 1];
-            const px = Math.floor(u * (satCanvas.width - 1));
-            const py = Math.floor((1 - v) * (satCanvas.height - 1));
-            const idx = (py * satCanvas.width + px) * 4;
-            const rr = imgData.data[idx], gg = imgData.data[idx + 1], bb = imgData.data[idx + 2];
-            if (bb > rr + 25 && bb > gg + 10 && bb > 100) {
-              waterVertices++;
-              waterYPositions.push(pos.getY(i));
-            }
-          }
-
-          if (waterVertices > 5) {
-            const waterLevel = Math.min(...waterYPositions) + 0.1;
-            const waterGeom = new THREE.PlaneGeometry(tW * 1.2, tD * 1.2, 32, 32);
-            waterGeom.rotateX(-Math.PI / 2);
-            const waterMat = new THREE.MeshPhysicalMaterial({
-              color: 0x1a6fa8,
-              transparent: true,
-              opacity: 0.7,
-              roughness: 0.1,
-              metalness: 0.3,
-              transmission: 0.3,
-              side: THREE.DoubleSide,
-            });
-            const waterMesh = new THREE.Mesh(waterGeom, waterMat);
-            waterMesh.position.set(cX, waterLevel, cZ);
-            waterMesh.receiveShadow = true;
-            scene.add(waterMesh);
-            console.log(`[terrain3d] Water plane at Y=${waterLevel.toFixed(1)}, ${waterVertices} blue vertices`);
-          }
-        }
-      } catch (vegErr) {
-        console.warn("[terrain3d] Vegetation/water generation error:", vegErr);
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // ── CONTOUR LINES ──
-      // ═══════════════════════════════════════════════════════════════════
-
-      try {
-        if (hasElev && eRange > CONTOUR_INTERVAL) {
-          const contourMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 });
-          const contourGridN = GRID_RES + 1;
-
-          for (let elev = Math.ceil(minE / CONTOUR_INTERVAL) * CONTOUR_INTERVAL; elev <= maxE; elev += CONTOUR_INTERVAL) {
-            const normElev = (elev - minE) * exag;
-            const contourPts: THREE.Vector3[] = [];
-
-            // Scan rows for contour crossings using marching approach
-            for (let row = 0; row < GRID_RES; row++) {
-              for (let col = 0; col < GRID_RES; col++) {
-                const i00 = row * contourGridN + col;
-                const i10 = row * contourGridN + col + 1;
-                const y00 = pos.getY(i00);
-                const y10 = pos.getY(i10);
-
-                // Check if contour crosses this edge (horizontal)
-                if ((y00 - normElev) * (y10 - normElev) < 0) {
-                  const t = (normElev - y00) / (y10 - y00);
-                  const cx = pos.getX(i00) + t * (pos.getX(i10) - pos.getX(i00)) + cX;
-                  const cz = pos.getZ(i00) + t * (pos.getZ(i10) - pos.getZ(i00)) + cZ;
-                  contourPts.push(new THREE.Vector3(cx, normElev + 0.15, cz));
-                }
-              }
-            }
-
-            if (contourPts.length > 2) {
-              // Sort points by angle from centroid for cleaner lines
-              const centX = contourPts.reduce((s, p) => s + p.x, 0) / contourPts.length;
-              const centZ = contourPts.reduce((s, p) => s + p.z, 0) / contourPts.length;
-              contourPts.sort((a, b) => Math.atan2(a.z - centZ, a.x - centX) - Math.atan2(b.z - centZ, b.x - centX));
-
-              const lineGeom = new THREE.BufferGeometry().setFromPoints(contourPts);
-              const isMajor = elev % (CONTOUR_INTERVAL * 5) === 0;
-              const mat = isMajor
-                ? new THREE.LineBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.3 })
-                : contourMat;
-              scene.add(new THREE.LineLoop(lineGeom, mat));
-            }
-          }
-          console.log("[terrain3d] Contour lines added");
-        }
-      } catch (contourErr) {
-        console.warn("[terrain3d] Contour generation error:", contourErr);
-      }
-
+      console.log("[terrain3d] Topographic map tiles applied");
       setStatus("");
     }).catch((err) => {
-      console.warn("[terrain3d] Satellite loading failed:", err);
+      console.warn("[terrain3d] Map tile loading failed:", err);
       setStatus("");
     });
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ── ZONE OVERLAY LINES (parcel colors like reference) ──
-    // ═══════════════════════════════════════════════════════════════════════
+    // Zone overlay lines removed — they float and the topographic map already shows zones
 
-    // Render ALL parcels with distinct, vibrant survey colors (matching reference diorama)
-    const ZONE_COLORS = [0xe74c3c, 0x2ecc71, 0x3498db, 0xf1c40f, 0x9b59b6, 0xe67e22, 0x1abc9c, 0xf39c12];
-    if (processedSiteData?.parcels) {
-      processedSiteData.parcels.forEach((parcel, idx) => {
-        const coords = parcel.coordinates;
-        if (!coords || coords.length === 0 || coords[0].length < 3) return;
-        const ring = coords[0];
-        const zoneColor = ZONE_COLORS[idx % ZONE_COLORS.length];
-
-        // Create thicker, dashed zone lines
-        const zonePts: THREE.Vector3[] = [];
-        // Subdivide edges for smooth terrain following
-        for (let ei = 0; ei < ring.length; ei++) {
-          const c = ring[ei];
-          const sx = (c[0] - refPoint.lng) * METERS_PER_DEG * cosLat;
-          const sz = -(c[1] - refPoint.lat) * METERS_PER_DEG;
-          zonePts.push(new THREE.Vector3(sx, sampleY(sx, sz) + 0.2, sz));
-        }
-
-        // Outer glow line (thicker, semi-transparent)
-        const glowMat = new THREE.LineBasicMaterial({
-          color: zoneColor,
-          transparent: true,
-          opacity: 0.5,
-          linewidth: 2,
-        });
-        scene.add(new THREE.LineLoop(
-          new THREE.BufferGeometry().setFromPoints(zonePts),
-          glowMat
-        ));
-
-        // Inner solid line
-        const solidMat = new THREE.LineBasicMaterial({ color: zoneColor, linewidth: 1 });
-        const innerPts = zonePts.map(p => new THREE.Vector3(p.x, p.y + 0.1, p.z));
-        scene.add(new THREE.LineLoop(
-          new THREE.BufferGeometry().setFromPoints(innerPts),
-          solidMat
-        ));
-      });
-    }
+    // (BDTOPO auto-fetched buildings removed — only user-placed buildings from 2D canvas are rendered)
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ── 3D BUILDING EXTRUSIONS FROM IGN BDTOPO ──
+    // ── USER-PLACED BUILDINGS FROM 2D CANVAS ──
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Fetch building footprints from BDTOPO and extrude them as 3D blocks
-    if (boundary?.geometry) {
-      setStatus("Loading 3D buildings from IGN BDTOPO...");
-      fetch("/api/existing-buildings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parcelGeometry: boundary.geometry }),
-      }).then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        const feats = data?.buildings?.features;
-        if (!Array.isArray(feats) || feats.length === 0) {
-          console.log("[terrain3d] No buildings found nearby");
-          setStatus("");
-          return;
-        }
+    if (userBuildings && userBuildings.length > 0 && canvasWidth && canvasHeight && pixelsPerMeter) {
+      setStatus("Placing user buildings on terrain...");
+      const ppm = pixelsPerMeter;
 
-        const wallMat = new THREE.MeshStandardMaterial({
-          color: 0xd4c5b2, roughness: 0.65, metalness: 0.08,
-        });
-        const roofMat = new THREE.MeshStandardMaterial({
-          color: 0xa0522d, roughness: 0.55, metalness: 0.12,
-        });
-        const edgeMat = new THREE.LineBasicMaterial({ color: 0x555555 });
+      for (const ub of userBuildings) {
+        try {
+          // Convert canvas coords to 3D scene coords:
+          // Canvas (0,0) is top-left; scene uses refPoint as origin
+          // canvasX/Y are pixel positions on the 2D Fabric.js canvas
+          const localX = (ub.canvasX - canvasWidth / 2) / ppm;
+          const localZ = (ub.canvasY - canvasHeight / 2) / ppm;
+          const rotY = ub.canvasAngle ? -ub.canvasAngle * DEG_TO_RAD : 0;
 
-        let count = 0;
-        for (const feat of feats) {
-          try {
-            const geom = feat.geometry;
-            if (!geom || (geom.type !== "Polygon" && geom.type !== "MultiPolygon")) continue;
+          // Ground elevation at building position
+          const groundY = normPts.length >= 3 ? idwInterpolate(localX, localZ, normPts, 2) : 0;
 
-            const rawH = feat.properties?.height ?? 7;
-            const bHeight = Math.max(2.5, rawH) * exag * 0.08;
-            const polyRings = geom.type === "Polygon"
-              ? [geom.coordinates[0]]
-              : geom.coordinates.map((p: number[][][]) => p[0]);
+          const w = ub.width || 6;
+          const d = ub.depth || 6;
+          const buildingType = (ub.type || ub.name || '').toLowerCase().trim();
 
-            for (const ring of polyRings) {
-              if (!ring || ring.length < 3) continue;
+          // ── POOL ──
+          if (buildingType.includes('pool') || buildingType.includes('piscine')) {
+            const poolDepth = 1.5 * exag * 0.06;
+            const deckH = 0.1;
+            // Deck
+            const deckGeom = new THREE.BoxGeometry(w + 2, deckH, d + 2);
+            const deckMat = new THREE.MeshStandardMaterial({ color: 0xddd0b8, roughness: 0.75 });
+            const deck = new THREE.Mesh(deckGeom, deckMat);
+            deck.position.set(localX, groundY + deckH / 2, localZ); deck.rotation.y = rotY;
+            deck.receiveShadow = true; deck.castShadow = true; scene.add(deck);
+            // Water surface
+            const waterGeom = new THREE.PlaneGeometry(w - 0.2, d - 0.2);
+            const waterMat = new THREE.MeshPhysicalMaterial({
+              color: 0x3ec8e8, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.78,
+              transmission: 0.3, clearcoat: 1.0,
+            });
+            const water = new THREE.Mesh(waterGeom, waterMat);
+            water.rotation.x = -Math.PI / 2; water.rotation.z = rotY;
+            water.position.set(localX, groundY + deckH + 0.01, localZ);
+            water.receiveShadow = true; scene.add(water);
+            continue;
+          }
 
-              const pts2d = ring.map((c: number[]) => {
-                const sx = (c[0] - refPoint.lng) * METERS_PER_DEG * cosLat;
-                const sz = -(c[1] - refPoint.lat) * METERS_PER_DEG;
-                return new THREE.Vector2(sx, sz);
-              });
+          // ── GARDEN ──
+          if (buildingType.includes('garden') || buildingType.includes('jardin') || buildingType.includes('green')) {
+            const lawnGeom = new THREE.BoxGeometry(w, 0.15, d);
+            const lawn = new THREE.Mesh(lawnGeom, new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.95 }));
+            lawn.position.set(localX, groundY + 0.075, localZ); lawn.rotation.y = rotY;
+            lawn.receiveShadow = true; scene.add(lawn);
+            // Hedges
+            const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 });
+            [{ p: [0, 0.55, d/2 - 0.15], s: [w*0.9, 0.8, 0.3] }, { p: [0, 0.55, -d/2 + 0.15], s: [w*0.9, 0.8, 0.3] }].forEach(h => {
+              const m = new THREE.Mesh(new THREE.BoxGeometry(h.s[0], h.s[1], h.s[2]), hedgeMat);
+              m.position.set(localX + h.p[0], groundY + h.p[1], localZ + h.p[2]); m.rotation.y = rotY;
+              m.castShadow = true; scene.add(m);
+            });
+            continue;
+          }
 
-              const shape = new THREE.Shape(pts2d);
-              const extGeom = new THREE.ExtrudeGeometry(shape, {
-                depth: bHeight,
-                bevelEnabled: false,
-              });
-              extGeom.rotateX(-Math.PI / 2);
+          // ── TERRACE ──
+          if (buildingType.includes('terrace') || buildingType.includes('terrasse') || buildingType.includes('deck')) {
+            const deckGeom = new THREE.BoxGeometry(w, 0.2, d);
+            const deck = new THREE.Mesh(deckGeom, new THREE.MeshStandardMaterial({ color: 0xa1887f, roughness: 0.85 }));
+            deck.position.set(localX, groundY + 0.1, localZ); deck.rotation.y = rotY;
+            deck.receiveShadow = true; deck.castShadow = true; scene.add(deck);
+            continue;
+          }
 
-              // Ground elevation at building centroid
-              const cx2 = ring.reduce((a: number, c: number[]) => a + c[0], 0) / ring.length;
-              const cy2 = ring.reduce((a: number, c: number[]) => a + c[1], 0) / ring.length;
-              const bsx2 = (cx2 - refPoint.lng) * METERS_PER_DEG * cosLat;
-              const bsz2 = -(cy2 - refPoint.lat) * METERS_PER_DEG;
-              const groundY = sampleY(bsx2, bsz2) - 0.3;
-
-              const mesh = new THREE.Mesh(extGeom, wallMat);
-              mesh.position.set(0, groundY, 0);
-              mesh.castShadow = true;
-              mesh.receiveShadow = true;
-              scene.add(mesh);
-
-              // Add edges for crisp building outlines
-              const edges = new THREE.EdgesGeometry(extGeom);
-              const line = new THREE.LineSegments(edges, edgeMat);
-              line.position.set(0, groundY, 0);
-              scene.add(line);
-
-              count++;
+          // ── PARKING ──
+          if (buildingType.includes('parking') || buildingType.includes('stationnement')) {
+            const surfGeom = new THREE.BoxGeometry(w, 0.08, d);
+            const surf = new THREE.Mesh(surfGeom, new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.95 }));
+            surf.position.set(localX, groundY + 0.04, localZ); surf.rotation.y = rotY;
+            surf.receiveShadow = true; scene.add(surf);
+            // Stripes
+            const numSlots = Math.max(1, Math.round(w / 2.5));
+            for (let si = 0; si <= numSlots; si++) {
+              const sx = -w/2 + (w/numSlots) * si;
+              const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, d*0.8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+              stripe.position.set(localX + sx, groundY + 0.09, localZ); stripe.rotation.y = rotY; scene.add(stripe);
             }
-          } catch { /* skip bad building */ }
-        }
-        console.log(`[terrain3d] Extruded ${count} 3D buildings from BDTOPO`);
-        setStatus("");
-      }).catch((err) => {
-        console.warn("[terrain3d] Building fetch error:", err);
-        setStatus("");
-      });
+            continue;
+          }
+
+          // ── CARPORT ──
+          if (buildingType.includes('carport')) {
+            const cH = 2.5;
+            const postMat = new THREE.MeshStandardMaterial({ color: 0x757575, roughness: 0.5, metalness: 0.3 });
+            [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([sx,sz]) => {
+              const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, cH, 8), postMat);
+              post.position.set(localX + sx*(w/2-0.15), groundY + cH/2, localZ + sz*(d/2-0.15));
+              post.castShadow = true; scene.add(post);
+            });
+            const canopy = new THREE.Mesh(new THREE.BoxGeometry(w+0.3, 0.08, d+0.3),
+              new THREE.MeshStandardMaterial({ color: 0x78909c, roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.85 }));
+            canopy.position.set(localX, groundY + cH, localZ); canopy.rotation.y = rotY;
+            canopy.castShadow = true; scene.add(canopy);
+            continue;
+          }
+
+          // ── DEFAULT: HOUSE / GARAGE / SHED / EXTENSION / ANNEX ──
+          const totalH = ((ub.wallHeights?.ground || 0) + (ub.wallHeights?.first || 0) + (ub.wallHeights?.second || 0)) || 3;
+
+          // Foundation plinth
+          const plinthH = 0.15;
+          const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, plinthH, d + 0.1),
+            new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 0.95 }));
+          plinth.position.set(localX, groundY + plinthH/2, localZ); plinth.rotation.y = rotY;
+          plinth.receiveShadow = true; plinth.castShadow = true; scene.add(plinth);
+
+          // Walls (warm cream stucco like French villas)
+          const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5ead0, roughness: 0.78, metalness: 0.01 });
+          const wallGeom = new THREE.BoxGeometry(w, totalH, d);
+          const walls = new THREE.Mesh(wallGeom, wallMat);
+          walls.position.set(localX, groundY + plinthH + totalH/2, localZ); walls.rotation.y = rotY;
+          walls.castShadow = true; walls.receiveShadow = true; scene.add(walls);
+
+          // Crisp edge lines
+          const edgesG = new THREE.EdgesGeometry(wallGeom, 30);
+          const edgeL = new THREE.LineSegments(edgesG, new THREE.LineBasicMaterial({ color: 0xaaaaaa, opacity: 0.3, transparent: true }));
+          edgeL.position.copy(walls.position); edgeL.rotation.copy(walls.rotation); scene.add(edgeL);
+
+          // Roof
+          const roofType = ub.roofType || 'gable';
+          const roofBaseY = groundY + plinthH + totalH;
+          const roofColor = roofType === 'flat' ? 0x6b6b6b : 0xc45a2c; // grey flat or terra cotta
+          const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.82, metalness: 0.03 });
+
+          if (roofType === 'flat') {
+            const flatRoof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.2, d + 0.3), roofMat);
+            flatRoof.position.set(localX, roofBaseY + 0.1, localZ); flatRoof.rotation.y = rotY;
+            flatRoof.castShadow = true; scene.add(flatRoof);
+          } else {
+            // Gable or hip roof
+            const pitch = ((ub.roofPitch || 35) * Math.PI) / 180;
+            const over = ub.roofOverhang || 0.3;
+            const halfW = w / 2 + over;
+            const halfD = d / 2 + over;
+            const roofH = (Math.min(w, d) / 2) * Math.tan(pitch);
+            // Ridge line along the longer dimension
+            const isLongX = w >= d;
+            const ridgePts = isLongX
+              ? [new THREE.Vector3(-halfW, roofH, 0), new THREE.Vector3(halfW, roofH, 0)]
+              : [new THREE.Vector3(0, roofH, -halfD), new THREE.Vector3(0, roofH, halfD)];
+            const p1 = new THREE.Vector3(-halfW, 0, halfD);
+            const p2 = new THREE.Vector3(halfW, 0, halfD);
+            const p3 = new THREE.Vector3(halfW, 0, -halfD);
+            const p4 = new THREE.Vector3(-halfW, 0, -halfD);
+
+            let roofVerts: Float32Array;
+            if (isLongX) {
+              roofVerts = new Float32Array([
+                ...p4.toArray(), ...p1.toArray(), ...ridgePts[0].toArray(),
+                ...p1.toArray(), ...ridgePts[1].toArray(), ...ridgePts[0].toArray(),
+                ...p2.toArray(), ...p3.toArray(), ...ridgePts[1].toArray(),
+                ...p3.toArray(), ...ridgePts[0].toArray(), ...ridgePts[1].toArray(),
+                ...p1.toArray(), ...p2.toArray(), ...ridgePts[1].toArray(),
+                ...p3.toArray(), ...p4.toArray(), ...ridgePts[0].toArray(),
+              ]);
+            } else {
+              roofVerts = new Float32Array([
+                ...p1.toArray(), ...p2.toArray(), ...ridgePts[0].toArray(),
+                ...p2.toArray(), ...ridgePts[1].toArray(), ...ridgePts[0].toArray(),
+                ...p3.toArray(), ...p4.toArray(), ...ridgePts[1].toArray(),
+                ...p4.toArray(), ...ridgePts[0].toArray(), ...ridgePts[1].toArray(),
+                ...p4.toArray(), ...p1.toArray(), ...ridgePts[0].toArray(),
+                ...p2.toArray(), ...p3.toArray(), ...ridgePts[1].toArray(),
+              ]);
+            }
+            const roofGeom = new THREE.BufferGeometry();
+            roofGeom.setAttribute('position', new THREE.BufferAttribute(roofVerts, 3));
+            roofGeom.computeVertexNormals();
+            const roof = new THREE.Mesh(roofGeom, roofMat);
+            roof.position.set(localX, roofBaseY, localZ); roof.rotation.y = rotY;
+            roof.castShadow = true; scene.add(roof);
+          }
+        } catch { /* skip bad building */ }
+      }
+      console.log(`[terrain3d] Rendered ${userBuildings.length} user buildings from 2D canvas`);
     }
 
     setStatus("");
@@ -1095,10 +1204,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     };
     animate();
 
-    sceneRef.current = { renderer, controls, animId };
+    sceneRef.current = { renderer, controls, animId, terrainMesh, skirtMesh, bottomCap };
     setIsReady(true);
     setStatus("");
-  }, [processedSiteData, parcelGeoJSON, width, height]);
+  }, [processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter]);
 
   useEffect(() => {
     buildScene();
@@ -1122,9 +1231,137 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     return () => window.removeEventListener("resize", onResize);
   }, [width, height]);
 
+  // ── Dynamic Z-Exaggeration: update terrain vertices when slider changes ──
+  useEffect(() => {
+    const td = terrainDataRef.current;
+    const sr = sceneRef.current;
+    if (!td || !sr?.terrainMesh) return;
+
+    const { baseExag, minE, sceneElev, pos, gridN, cX, cZ, slabH } = td;
+    const userExag = baseExag * zScale;
+
+    // Recompute normPts with new exaggeration
+    const hasElev = sceneElev.length >= 3 && td.eRange > 0.01;
+    const newNormPts = hasElev
+      ? sceneElev.map((p) => ({ x: p.x, z: p.z, y: (p.y - minE) * userExag }))
+      : [];
+
+    // Update terrain mesh vertices
+    if (newNormPts.length >= 3) {
+      for (let i = 0; i < pos.count; i++) {
+        const gx = pos.getX(i) + cX;
+        const gz = pos.getZ(i) + cZ;
+        pos.setY(i, idwInterpolate(gx, gz, newNormPts, 3));
+      }
+      // Re-smooth
+      const smoothed = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) smoothed[i] = pos.getY(i);
+      for (let pass = 0; pass < 3; pass++) {
+        for (let row = 1; row < gridN - 1; row++) {
+          for (let col = 1; col < gridN - 1; col++) {
+            const idx = row * gridN + col;
+            const c = smoothed[idx] * 4;
+            const n = (smoothed[idx - gridN] + smoothed[idx + gridN] + smoothed[idx - 1] + smoothed[idx + 1]) * 2;
+            const d = smoothed[idx - gridN - 1] + smoothed[idx - gridN + 1] + smoothed[idx + gridN - 1] + smoothed[idx + gridN + 1];
+            smoothed[idx] = (c + n + d) / 16;
+          }
+        }
+      }
+      for (let i = 0; i < pos.count; i++) pos.setY(i, smoothed[i]);
+    }
+
+    pos.needsUpdate = true;
+    sr.terrainMesh.geometry.computeVertexNormals();
+
+    // Update skirt vertices to match new edge heights
+    if (sr.skirtMesh) {
+      const eN = gridN;
+      const bottomY = -slabH;
+      const skirtPos = sr.skirtMesh.geometry.attributes.position as THREE.BufferAttribute;
+      // Rebuild skirt from scratch with same edge logic
+      const skirtVertices: number[] = [];
+      const addSQ = (i1: number, i2: number, flip: boolean) => {
+        const x1 = pos.getX(i1) + cX, z1 = pos.getZ(i1) + cZ, y1 = pos.getY(i1);
+        const x2 = pos.getX(i2) + cX, z2 = pos.getZ(i2) + cZ, y2 = pos.getY(i2);
+        if (flip) {
+          skirtVertices.push(x2, y2, z2, x1, y1, z1, x1, bottomY, z1, x2, bottomY, z2);
+        } else {
+          skirtVertices.push(x1, y1, z1, x2, y2, z2, x2, bottomY, z2, x1, bottomY, z1);
+        }
+      };
+      const GR = gridN - 1;
+      for (let i = 0; i < GR; i++) addSQ(i, i + 1, false);
+      for (let i = 0; i < GR; i++) addSQ(GR * eN + i, GR * eN + i + 1, true);
+      for (let j = 0; j < GR; j++) addSQ(j * eN, (j + 1) * eN, true);
+      for (let j = 0; j < GR; j++) addSQ(j * eN + GR, (j + 1) * eN + GR, false);
+
+      const newSkirtArr = new Float32Array(skirtVertices);
+      if (skirtPos.count * 3 === newSkirtArr.length) {
+        skirtPos.set(newSkirtArr);
+        skirtPos.needsUpdate = true;
+        sr.skirtMesh.geometry.computeVertexNormals();
+      }
+    }
+  }, [zScale]);
+
   return (
-    <div className="relative w-full h-full" style={{ minHeight: 300, background: "#f0f0f0" }}>
+    <div className="relative w-full h-full" style={{ minHeight: 300, background: "#c8ddf0" }}>
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* ── Height Exaggeration UI Panel ── */}
+      {isReady && (
+        <div
+          className="absolute left-4 top-4 z-20 flex flex-col gap-3 p-4 rounded-xl"
+          style={{
+            background: "rgba(15, 23, 42, 0.90)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+            width: 220,
+            color: "#e2e8f0",
+          }}
+        >
+          <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#94a3b8" }}>Terrain Controls</div>
+          {/* Height Exaggeration Slider */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs" style={{ color: "#cbd5e1" }}>🏔️ Height Exaggeration</span>
+              <span className="text-xs font-mono font-bold" style={{ color: "#38bdf8" }}>{zScale.toFixed(1)}×</span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="5"
+              step="0.1"
+              value={zScale}
+              onChange={(e) => setZScale(parseFloat(e.target.value))}
+              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer"
+              style={{
+                background: `linear-gradient(to right, #0ea5e9 0%, #0ea5e9 ${((zScale - 0.5) / 4.5) * 100}%, #334155 ${((zScale - 0.5) / 4.5) * 100}%, #334155 100%)`,
+              }}
+            />
+          </div>
+          {/* Reset View Button */}
+          <button
+            onClick={() => {
+              if (sceneRef.current?.controls) {
+                sceneRef.current.controls.reset();
+              }
+            }}
+            className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{
+              background: "rgba(51, 65, 85, 0.8)",
+              color: "#94a3b8",
+              border: "1px solid rgba(148, 163, 184, 0.15)",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(71, 85, 105, 0.9)"; e.currentTarget.style.color = "#e2e8f0"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(51, 65, 85, 0.8)"; e.currentTarget.style.color = "#94a3b8"; }}
+          >
+            🔄 Reset View
+          </button>
+        </div>
+      )}
+
+      {/* ── Loading Overlay ── */}
       {(!isReady || status) && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-3 px-6 py-4 bg-white/95 rounded-xl shadow-lg border border-slate-200">
