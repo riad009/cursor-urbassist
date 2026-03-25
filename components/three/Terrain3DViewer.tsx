@@ -13,6 +13,11 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { ProcessedSiteData } from "@/types/processed-site-data";
+import { attachSculptHandlers, createSculptCursorMeshes, applyStoredDeltas, getVertexElevation } from "@/components/editor3d/AltimetrySculptor";
+import { useSculptStore } from "@/store/useSculptStore";
+import dynamic from "next/dynamic";
+
+const AltimetryUI = dynamic(() => import("@/components/editor3d/AltimetryUI"), { ssr: false });
 
 // ─── Realistic Procedural Sky (matches 3D-Mapper HDRI-like sky with clouds) ───
 
@@ -194,7 +199,7 @@ function createSkirtMaterial(): THREE.ShaderMaterial {
 const METERS_PER_DEG = 111320;
 const DEG_TO_RAD = Math.PI / 180;
 const GRID_RES = 128; // 128×128 terrain mesh — smooth diorama quality
-const SAT_PAD = 0.5;  // Map tile bbox padding factor
+
 
 // ─── Module-level elevation cache (survives 2D↔3D toggles) ────────────────
 const elevationCache = new Map<string, number[]>();
@@ -362,54 +367,6 @@ function computeBbox(coords: number[][]): { minLng: number; maxLng: number; minL
   return { minLng, maxLng, minLat, maxLat };
 }
 
-// ─── Map Tile Texture Loader (topographic map from IGN PLANIGNV2) ────────────
-
-async function loadMapTexture(
-  bbox: { minLng: number; maxLng: number; minLat: number; maxLat: number },
-  pad: number,
-  renderer: THREE.WebGLRenderer
-): Promise<{ texture: THREE.Texture; gridBounds: any } | null> {
-  try {
-    const pLng = (bbox.maxLng - bbox.minLng) * pad;
-    const pLat = (bbox.maxLat - bbox.minLat) * pad;
-    const bboxStr = `${bbox.minLng - pLng},${bbox.minLat - pLat},${bbox.maxLng + pLng},${bbox.maxLat + pLat}`;
-
-    const res = await fetch(`/api/terrain/satellite?bbox=${bboxStr}&width=2048&height=2048`);
-    if (!res.ok) return null;
-    const data = await res.json();
-
-    const { tileUrls, tileSize, numTiles, gridBounds } = data;
-    const canvas = document.createElement("canvas");
-    canvas.width = numTiles.x * tileSize;
-    canvas.height = numTiles.y * tileSize;
-    const ctx = canvas.getContext("2d")!;
-
-    const loadImg = (url: string) => new Promise<HTMLImageElement>((ok, fail) => {
-      const img = new Image(); img.crossOrigin = "anonymous";
-      img.onload = () => ok(img); img.onerror = fail; img.src = url;
-    });
-
-    const all: Promise<{ r: number; c: number; img: HTMLImageElement | null }>[] = [];
-    for (let r = 0; r < tileUrls.length; r++)
-      for (let c = 0; c < tileUrls[r].length; c++)
-        all.push(loadImg(tileUrls[r][c]).then((img) => ({ r, c, img })).catch(() => ({ r, c, img: null })));
-
-    (await Promise.all(all)).forEach(({ r, c, img }) => {
-      if (img) ctx.drawImage(img, c * tileSize, r * tileSize, tileSize, tileSize);
-    });
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-
-    return { texture, gridBounds };
-  } catch {
-    return null;
-  }
-}
-
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ── COMPONENT ──
@@ -427,6 +384,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   } | null>(null);
   const [status, setStatus] = useState("Initializing...");
   const [isReady, setIsReady] = useState(false);
+  const sculptCleanupRef = useRef<(() => void) | null>(null);
   const [zScale, setZScale] = useState(1.0);
   // Store terrain build data for dynamic z-exaggeration
   const terrainDataRef = useRef<{
@@ -936,70 +894,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     }
 
     // No floor plane needed — sky dome provides the background
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // ── MAP TILE DRAPING (topographic map — shows real land use colors) ──
-    // ═══════════════════════════════════════════════════════════════════════
-
-    setStatus("Loading map tiles...");
-
-    // Load topographic map tiles in background — scene renders with vertex colors first
-    loadMapTexture(bbox, SAT_PAD, renderer).then((result) => {
-      if (!result) {
-        console.warn("[terrain3d] Map tiles unavailable, keeping vertex color fallback");
-        setStatus("");
-        return;
-      }
-
-      const { texture, gridBounds } = result;
-
-      // ── Quality check: reject nearly-white tiles (OpenTopoMap sometimes returns blank tiles) ──
-      const tmpCanvas = document.createElement('canvas');
-      tmpCanvas.width = 64; tmpCanvas.height = 64;
-      const tmpCtx = tmpCanvas.getContext('2d');
-      if (tmpCtx && texture.image) {
-        try {
-          tmpCtx.drawImage(texture.image as HTMLCanvasElement, 0, 0, 64, 64);
-          const sampleData = tmpCtx.getImageData(0, 0, 64, 64).data;
-          let totalBrightness = 0;
-          for (let px = 0; px < sampleData.length; px += 4) {
-            totalBrightness += (sampleData[px] + sampleData[px + 1] + sampleData[px + 2]) / 3;
-          }
-          const avgBrightness = totalBrightness / (sampleData.length / 4);
-          if (avgBrightness > 200) {
-            console.warn(`[terrain3d] Map tiles too bright (avg=${avgBrightness.toFixed(0)}), keeping vertex colors`);
-            setStatus("");
-            return;
-          }
-        } catch { /* ignore sampling errors */ }
-      }
-
-      // Compute UV remapping for geo-accurate map placement
-      const mapUvs = new Float32Array(pos.count * 2);
-      for (let i = 0; i < pos.count; i++) {
-        const wx = pos.getX(i) + cX;
-        const wz = pos.getZ(i) + cZ;
-        const vLng = refPoint.lng + wx / (METERS_PER_DEG * cosLat);
-        const vLat = refPoint.lat - wz / METERS_PER_DEG;
-        const u = (vLng - gridBounds.minLng) / (gridBounds.maxLng - gridBounds.minLng);
-        const v = (vLat - gridBounds.minLat) / (gridBounds.maxLat - gridBounds.minLat);
-        mapUvs[i * 2] = Math.max(0, Math.min(1, u));
-        mapUvs[i * 2 + 1] = Math.max(0, Math.min(1, v));
-      }
-      terrainGeom.setAttribute("uv", new THREE.BufferAttribute(mapUvs, 2));
-      terrainGeom.attributes.uv.needsUpdate = true;
-
-      // Apply map texture — replaces vertex colors with real map data
-      terrainMat.map = texture;
-      terrainMat.vertexColors = false;
-      terrainMat.needsUpdate = true;
-
-      console.log("[terrain3d] Topographic map tiles applied");
-      setStatus("");
-    }).catch((err) => {
-      console.warn("[terrain3d] Map tile loading failed:", err);
-      setStatus("");
-    });
+    // Terrain always uses procedural vertex colors (green/brown diorama style)
+    // — consistent, fast, and reliable for every project location
 
     // Zone overlay lines removed — they float and the topographic map already shows zones
 
@@ -1205,6 +1101,33 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     animate();
 
     sceneRef.current = { renderer, controls, animId, terrainMesh, skirtMesh, bottomCap };
+
+    // ── Sculpt System: attach handlers + cursor meshes ──
+    {
+      const { cursor, brushRing } = createSculptCursorMeshes();
+      scene.add(cursor);
+      scene.add(brushRing);
+
+      // Restore any previously sculpted deltas (survives 2D↔3D toggle)
+      const storedDeltas = useSculptStore.getState().elevationDeltas;
+      if (Object.keys(storedDeltas).length > 0) {
+        applyStoredDeltas(terrainMesh, storedDeltas);
+        terrainGeom.computeVertexNormals();
+      }
+
+      sculptCleanupRef.current = attachSculptHandlers({
+        terrainMesh,
+        renderer,
+        camera,
+        gridRes: GRID_RES,
+        baseExag: exag,
+        minElev: minE,
+        elevRange: eRange,
+        cursorMesh: cursor,
+        brushRingMesh: brushRing,
+      });
+    }
+
     setIsReady(true);
     setStatus("");
   }, [processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter]);
@@ -1216,6 +1139,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
         cancelAnimationFrame(sceneRef.current.animId);
         sceneRef.current.renderer.dispose();
         sceneRef.current.controls.dispose();
+      }
+      if (sculptCleanupRef.current) {
+        sculptCleanupRef.current();
+        sculptCleanupRef.current = null;
       }
     };
   }, [buildScene]);
@@ -1307,6 +1234,21 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   return (
     <div className="relative w-full h-full" style={{ minHeight: 300, background: "#c8ddf0" }}>
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* ── Altimetry Sculpt UI Overlay ── */}
+      {isReady && (
+        <AltimetryUI
+          getVertexNGF={terrainDataRef.current
+            ? (idx: number) => getVertexElevation(
+                sceneRef.current!.terrainMesh!,
+                idx,
+                terrainDataRef.current!.baseExag,
+                terrainDataRef.current!.minE
+              )
+            : undefined
+          }
+        />
+      )}
 
       {/* ── Height Exaggeration UI Panel ── */}
       {isReady && (

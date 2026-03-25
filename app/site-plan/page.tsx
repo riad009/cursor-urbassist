@@ -103,6 +103,10 @@ import {
 import { calculateRoofData } from "@/lib/roofCalculations";
 import { useEditorStore } from "@/store/editorStore";
 import { useAutoSave } from "@/hooks/useAutoSave";
+import { usePluCompliance } from "@/hooks/usePluCompliance";
+import PluAlertBanner from "@/components/editor/PluAlertBanner";
+import { useVrdDrawing } from "@/hooks/useVrdDrawing";
+import VrdToolbar from "@/components/editor/VrdToolbar";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -405,6 +409,37 @@ function SitePlanContent() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'error' | null>(null);
   // Perf: debounce updateLayers so rapid canvas events don't spam O(n) layer recomputes
   const updateLayersDebounceRef = useRef<number | null>(null);
+
+  // ─── Real-Time PLU Compliance Engine ──────────────────────────────────────
+  const pluComplianceReport = usePluCompliance({
+    fabricCanvasRef: fabricRef,
+    pixelsPerMeter: currentScale.pixelsPerMeter,
+    pluRules: projectData
+      ? {
+          maxCoverageRatio: projectData.maxCoverageRatio ?? null,
+          setbacks: projectData.pluSetbacks
+            ? {
+                front: (projectData.pluSetbacks as Record<string, number>).front ?? null,
+                side: (projectData.pluSetbacks as Record<string, number>).side ?? null,
+                rear: (projectData.pluSetbacks as Record<string, number>).rear ?? null,
+              }
+            : null,
+        }
+      : null,
+    parcelAreaM2: projectData?.parcelArea,
+    debounceMs: 150,
+  });
+
+  // ─── VRD Drawing Engine (Polyline/Polygon state machine) ───────────────────
+  const vrdDrawing = useVrdDrawing(fabricRef, {
+    strokeWidth,
+    onShapeFinalized: (obj) => {
+      setIsDirty(true);
+      if (fabricRef.current) updateLayers(fabricRef.current);
+      runComplianceCheck();
+      pushUndoState();
+    },
+  });
 
   // ─── Utility functions ──────────────────────────────────────────────────────
 
@@ -3270,18 +3305,8 @@ function SitePlanContent() {
 
   return (
     <div className={cn("bg-white flex flex-col overflow-hidden", isFullScreen ? "fixed inset-0 z-50 h-screen" : "h-screen")}>
-      {/* Real-time PLU violation banner (spec 2.8) */}
-      {violationChecks.length > 0 && (
-        <div className="px-4 py-2.5 bg-red-50 border-b border-red-500/40 flex items-center gap-3 text-sm text-red-200 flex-wrap">
-          <AlertTriangle className="w-5 h-5 shrink-0" />
-          <span className="font-medium">PLU alert:</span>
-          <span>{violationChecks[0].message}</span>
-          {violationChecks.length > 1 && (
-            <span className="text-red-600/90">+{violationChecks.length - 1} more</span>
-          )}
-          <button onClick={() => setShowCompliance(true)} className="ml-auto px-2 py-1 rounded bg-red-500/30 hover:bg-red-500/50 text-xs font-medium">View all</button>
-        </div>
-      )}
+      {/* Real-time PLU Compliance Banner — powered by plu-math.ts engine */}
+      <PluAlertBanner report={pluComplianceReport} />
 
       {/* Top Bar */}
       <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 gap-3 shrink-0">
@@ -4081,14 +4106,7 @@ function SitePlanContent() {
                 </div>
                 {activeTool === "vrd" && (
                   <div className="mt-3">
-                    <label className="text-xs text-slate-500 block mb-1.5">VRD Network</label>
-                    <div className="flex flex-wrap gap-1">
-                      {VRD_TYPES.map((v) => (
-                        <button key={v.id} onClick={() => setActiveVrdType(v)}
-                          className={cn("px-2 py-0.5 rounded text-[10px]", activeVrdType.id === v.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
-                          style={{ backgroundColor: v.color + "40", color: v.color }}>{v.label}</button>
-                      ))}
-                    </div>
+                    <VrdToolbar vrdDrawing={vrdDrawing} />
                   </div>
                 )}
                 <div className="mt-3 flex items-center gap-3">
