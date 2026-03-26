@@ -398,6 +398,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     slabH: number;
     pos: THREE.BufferAttribute;
     gridN: number;
+    baseY: Float32Array;
   } | null>(null);
 
   const buildScene = useCallback(async () => {
@@ -814,6 +815,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     const slabH = Math.max(2.0, targetH * 0.25); // Chunky diorama base
 
     // Store terrain data for dynamic z-exaggeration (after slabH is computed)
+    const basePos = terrainGeom.attributes.position as THREE.BufferAttribute;
+    const baseY = new Float32Array(basePos.count);
+    for (let i = 0; i < basePos.count; i++) baseY[i] = basePos.getY(i);
+
     terrainDataRef.current = {
       baseExag: exag,
       minE,
@@ -823,8 +828,9 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
       cX,
       cZ,
       slabH,
-      pos: terrainGeom.attributes.position as THREE.BufferAttribute,
+      pos: basePos,
       gridN: GRID_RES + 1,
+      baseY,
     };
     const skirtMat = createSkirtMaterial();
     // Set uniform Y range: top of terrain to bottom of slab
@@ -1158,6 +1164,62 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     return () => window.removeEventListener("resize", onResize);
   }, [width, height]);
 
+  // ── Sync Undo/Reset from Zustand to Geometry ──
+  useEffect(() => {
+    return useSculptStore.subscribe((state, prevState) => {
+      // Re-apply if deltas object changed (undo, reset), but NOT on hover
+      if (state.elevationDeltas !== prevState.elevationDeltas) {
+        const td = terrainDataRef.current;
+        const sr = sceneRef.current;
+        if (!td || !td.baseY || !sr?.terrainMesh) return;
+
+        const pos = td.pos;
+        const deltas = state.elevationDeltas;
+
+        // 1. Reset exactly to baseY and add the active deltas
+        for (let i = 0; i < pos.count; i++) {
+          pos.setY(i, td.baseY[i] + (deltas[i] || 0));
+        }
+
+        pos.needsUpdate = true;
+        sr.terrainMesh.geometry.computeVertexNormals();
+
+        // 2. Rebuild skirt vertices to match new edge heights
+        if (sr.skirtMesh) {
+          const eN = td.gridN;
+          const bottomY = -td.slabH;
+          const cX = td.cX;
+          const cZ = td.cZ;
+          const skirtPos = sr.skirtMesh.geometry.attributes.position as THREE.BufferAttribute;
+          
+          const skirtVertices: number[] = [];
+          const addSQ = (i1: number, i2: number, flip: boolean) => {
+            const x1 = pos.getX(i1) + cX, z1 = pos.getZ(i1) + cZ, y1 = pos.getY(i1);
+            const x2 = pos.getX(i2) + cX, z2 = pos.getZ(i2) + cZ, y2 = pos.getY(i2);
+            if (flip) {
+              skirtVertices.push(x2, y2, z2, x1, y1, z1, x1, bottomY, z1, x2, bottomY, z2);
+            } else {
+              skirtVertices.push(x1, y1, z1, x2, y2, z2, x2, bottomY, z2, x1, bottomY, z1);
+            }
+          };
+          
+          const GR = td.gridN - 1;
+          for (let i = 0; i < GR; i++) addSQ(i, i + 1, false);
+          for (let i = 0; i < GR; i++) addSQ(GR * eN + i, GR * eN + i + 1, true);
+          for (let j = 0; j < GR; j++) addSQ(j * eN, (j + 1) * eN, true);
+          for (let j = 0; j < GR; j++) addSQ(j * eN + GR, (j + 1) * eN + GR, false);
+
+          const newSkirtArr = new Float32Array(skirtVertices);
+          if (skirtPos.count * 3 === newSkirtArr.length) {
+            skirtPos.set(newSkirtArr);
+            skirtPos.needsUpdate = true;
+            sr.skirtMesh.geometry.computeVertexNormals();
+          }
+        }
+      }
+    });
+  }, []);
+
   // ── Dynamic Z-Exaggeration: update terrain vertices when slider changes ──
   useEffect(() => {
     const td = terrainDataRef.current;
@@ -1194,7 +1256,19 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
           }
         }
       }
-      for (let i = 0; i < pos.count; i++) pos.setY(i, smoothed[i]);
+      for (let i = 0; i < pos.count; i++) {
+        pos.setY(i, smoothed[i]);
+        td.baseY[i] = smoothed[i];
+      }
+    }
+
+    // Re-apply any active sculpt deltas on top of the new base
+    const currentDeltas = useSculptStore.getState().elevationDeltas;
+    for (const [idxStr, delta] of Object.entries(currentDeltas)) {
+      const idx = Number(idxStr);
+      if (idx >= 0 && idx < pos.count) {
+        pos.setY(idx, td.baseY[idx] + delta);
+      }
     }
 
     pos.needsUpdate = true;

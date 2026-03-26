@@ -1666,7 +1666,7 @@ function SitePlanContent() {
 
   // ─── Guided placement & preset helpers (must be before canvas mouse handlers) ─
   const addBuildingToCanvasAt = useCallback(
-    (b: BuildingDetail, isExisting: boolean, centerX: number, centerY: number) => {
+    (b: BuildingDetail, isExisting: boolean, centerX: number, centerY: number, surfaceType: string = "house") => {
       const canvas = fabricRef.current;
       if (!canvas) return;
       const wPx = metersToPixels(b.width), dPx = metersToPixels(b.depth);
@@ -1679,7 +1679,7 @@ function SitePlanContent() {
       });
       (rect as any).id = b.id;
       (rect as any).elementName = b.name;
-      (rect as any).surfaceType = "building";
+      (rect as any).surfaceType = surfaceType;
       (rect as any).isExistingBuilding = isExisting;
       (rect as any).buildingDetailId = b.id;
       if (!isExisting) (rect as any).templateType = "house";
@@ -1713,14 +1713,14 @@ function SitePlanContent() {
       const canvas = fabricRef.current;
       if (!canvas) return;
 
-      if (selectedPreset.surfaceType === "green" || selectedPreset.category === "other") {
+      if (selectedPreset.surfaceType === "garden" || selectedPreset.category === "other") {
         const wPx = metersToPixels(selectedPreset.width);
         const dPx = metersToPixels(selectedPreset.depth);
         const fill =
-          selectedPreset.surfaceType === "green"
+          selectedPreset.surfaceType === "garden"
             ? "rgba(34, 197, 94, 0.4)"
             : "rgba(168, 162, 158, 0.3)";
-        const stroke = selectedPreset.surfaceType === "green" ? "#22c55e" : "#a8a29e";
+        const stroke = selectedPreset.surfaceType === "garden" ? "#22c55e" : "#a8a29e";
         const rect = new fabric.Rect({
           left: pointerX - wPx / 2,
           top: pointerY - dPx / 2,
@@ -1750,7 +1750,7 @@ function SitePlanContent() {
           ? { ...base, width: customDimensions.width, depth: customDimensions.depth, wallHeights: { ...base.wallHeights, ground: customDimensions.groundHeight } }
           : base;
       setBuildingDetails((prev) => [...prev, b]);
-      addBuildingToCanvasAt(b, false, pointerX, pointerY);
+      addBuildingToCanvasAt(b, false, pointerX, pointerY, selectedPreset.surfaceType);
       setLastPlacedBuildingId(b.id);
       setPlacementMode(false);
       setGuidedStep(3);
@@ -2459,6 +2459,17 @@ function SitePlanContent() {
     } else {
       canvas.isDrawingMode = false;
       canvas.selection = tool === "select";
+      
+      // Fix: Bulk toggle interactability for drawn objects
+      const isSelect = tool === "select";
+      canvas.getObjects().forEach((o: any) => {
+        // Skip grid, measurements, and other system overlays
+        if (o.isGrid || o.isMeasurement || o.isPolygonPreview || o.isRegulatoryFootprint || o.excludeFromExport) return;
+        o.set("selectable", isSelect);
+        o.set("evented", isSelect);
+      });
+      if (!isSelect) canvas.discardActiveObject();
+      canvas.requestRenderAll();
     }
   };
 
@@ -2492,20 +2503,32 @@ function SitePlanContent() {
     const canvas = fabricRef.current;
     if (!canvas) return;
     // Confirm before clearing everything
-    if (!window.confirm("Clear all objects and buildings? This cannot be undone.")) return;
+    if (!window.confirm("Reset editor to initial state? All your drawings and buildings will be removed. This cannot be undone.")) return;
     // Suppress undo tracking during bulk removal
     isRestoringRef.current = true;
-    // Remove all non-grid objects
-    const toRemove = canvas.getObjects().filter((o: any) => !o.isGrid);
+    
+    // Remove all user-drawn objects, but KEEP the base map layers
+    const toRemove = canvas.getObjects().filter((o: any) => 
+      !o.isGrid && 
+      !o.isOverlay && 
+      !o.sourceBdtopo && 
+      !o.isExistingBuilding && 
+      !o.processedBoundary && 
+      !o.processedParcel && 
+      !o.isRegulatoryFootprint &&
+      !o.isCadastral 
+    );
     toRemove.forEach((o) => canvas.remove(o));
+    
     measurementLabelsRef.current.clear();
-    // Reset all related state so 3D viewer doesn't show stale objects
+    // Reset user-placed elements so 3D viewer doesn't show stale objects
     setBuildingDetails([]);
     setElevationPoints([]);
     setLastPlacedBuildingId(null);
     buildingPositionsRef.current = {};
     setLayers([]);
     setSelectedObject(null);
+    
     // Ensure dark background is preserved and redraw grid
     canvas.backgroundColor = "#0f172a";
     if (showGrid) {
@@ -2513,17 +2536,33 @@ function SitePlanContent() {
       canvas.getObjects().filter((o: any) => o.isGrid).forEach((o) => canvas.remove(o));
       drawGrid(canvas);
     }
+    
+    updateLayers(canvas);
     canvas.renderAll();
+    
     // Release restoring lock
     setTimeout(() => { isRestoringRef.current = false; }, 50);
-    // Clear undo/redo stacks
+    // Clear undo/redo stacks and push the fresh "reset" baseline
     undoStackRef.current = [];
     redoStackRef.current = [];
     setCanUndo(false);
     setCanRedo(false);
-    // Allow parcel re-import on next load
-    parcelsDrawnFromGeometryRef.current = null;
-    // Persist the empty state to DB so refresh doesn't bring back old data
+    
+    // Take one baseline snapshot so the first undo reverts to the loaded state
+    setTimeout(() => {
+      const c = fabricRef.current;
+      if (c) {
+        try {
+          const json = JSON.stringify((c as any).toJSON([...CANVAS_PROPS]));
+          undoStackRef.current = [{ canvas: json, buildings: [] }];
+          useEditorStore.getState().setCanvasData(json);
+          useEditorStore.getState().setBuildingDetails([]);
+          useEditorStore.getState().markClean();
+        } catch { /* ignore */ }
+      }
+    }, 500);
+
+    // Persist the reset state to DB so refresh reflects the reset map
     if (currentProjectId) {
       await saveSitePlan();
     }
@@ -3155,7 +3194,7 @@ function SitePlanContent() {
     const canvas = fabricRef.current;
     if (!canvas) return;
     const center = canvas.getCenterPoint();
-    addBuildingToCanvasAt(b, isExisting, center.x, center.y);
+    addBuildingToCanvasAt(b, isExisting, center.x, center.y, "house");
   };
 
   const addExistingBuilding = () => {
@@ -3752,51 +3791,54 @@ function SitePlanContent() {
 
           </div>
 
-          {/* === 3D Viewer Layer (conditionally rendered — rebuilds scene from data each mount) === */}
-          {viewMode === "3d" && (() => {
-            // Collect user-placed buildings from canvas objects for 3D rendering
-            const ub3d: UserBuilding3D[] = [];
-            const canvas = fabricRef.current;
-            if (canvas) {
-              canvas.getObjects().forEach((obj: any) => {
-                const bdId = obj.buildingDetailId;
-                if (!bdId) return;
-                const bd = buildingDetails.find(b => b.id === bdId);
-                if (!bd) return;
-                ub3d.push({
-                  id: bd.id,
-                  name: bd.name,
-                  type: bd.name, // name is used as type discriminator
-                  width: bd.width,
-                  depth: bd.depth,
-                  canvasX: obj.left ?? 0,
-                  canvasY: obj.top ?? 0,
-                  canvasAngle: obj.angle ?? 0,
-                  wallHeights: bd.wallHeights,
-                  roofType: bd.roof.type,
-                  roofPitch: bd.roof.pitch,
-                  roofOverhang: bd.roof.overhang,
-                  color: bd.color,
+          {/* === 3D Viewer Layer (kept mounted to prevent heavy unmount/rebuild lag) === */}
+          <div className={cn("absolute inset-0 bg-white transition-opacity duration-300", viewMode === "3d" ? "opacity-100 z-30 pointer-events-auto" : "opacity-0 -z-10 pointer-events-none")}>
+            {(() => {
+              // Collect user-placed buildings from canvas objects for 3D rendering
+              const ub3d: UserBuilding3D[] = [];
+              const canvas = fabricRef.current;
+              if (canvas) {
+                canvas.getObjects().forEach((obj: any) => {
+                  const bdId = obj.buildingDetailId;
+                  if (!bdId) return;
+                  const bd = buildingDetails.find(b => b.id === bdId);
+                  if (!bd) return;
+                  ub3d.push({
+                    id: bd.id,
+                    name: bd.name,
+                    type: bd.name, // name is used as type discriminator
+                    width: bd.width,
+                    depth: bd.depth,
+                    canvasX: obj.left ?? 0,
+                    canvasY: obj.top ?? 0,
+                    canvasAngle: obj.angle ?? 0,
+                    wallHeights: bd.wallHeights,
+                    roofType: bd.roof.type,
+                    roofPitch: bd.roof.pitch,
+                    roofOverhang: bd.roof.overhang,
+                    color: bd.color,
+                  });
                 });
-              });
-            }
-            return (
-            <div className="absolute inset-0 bg-white">
-              <Terrain3DViewer
-                key={`3d-terrain-v${scene3dVersion}`}
-                processedSiteData={processedSiteData}
-                parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
-                userBuildings={ub3d.length > 0 ? ub3d : undefined}
-                canvasWidth={canvasSize.width}
-                canvasHeight={canvasSize.height}
-                pixelsPerMeter={currentScale.pixelsPerMeter}
-              />
-              <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
-                <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
-                <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
-              </div>
-            </div>
-          );})()}
+              }
+              return (
+                <>
+                  <Terrain3DViewer
+                    key={`3d-terrain-v${scene3dVersion}`}
+                    processedSiteData={processedSiteData}
+                    parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
+                    userBuildings={ub3d.length > 0 ? ub3d : undefined}
+                    canvasWidth={canvasSize.width}
+                    canvasHeight={canvasSize.height}
+                    pixelsPerMeter={currentScale.pixelsPerMeter}
+                  />
+                  <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
+                    <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
+                    <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
 
         {/* Right Panel */}
@@ -4151,11 +4193,11 @@ function SitePlanContent() {
                   const ppm = currentScale.pixelsPerMeter;
                   addAccessPoint();
                   addTemplate("parking");
-                  const housePreset = getPresetById("house");
+                  const housePreset = getPresetById("house-medium");
                   if (housePreset) {
                     const b = buildingDetailFromPreset(housePreset);
                     setBuildingDetails((prev) => [...prev, b]);
-                    addBuildingToCanvasAt(b, false, center.x - 80, center.y);
+                    addBuildingToCanvasAt(b, false, center.x - 80, center.y, "house");
                   }
                   setShowTutorial(false);
                 }
