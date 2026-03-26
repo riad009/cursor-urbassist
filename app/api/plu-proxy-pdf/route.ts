@@ -39,40 +39,86 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
+  // Browser-like headers — GPU servers respond better to these
+  const browserHeaders = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/pdf,*/*",
+  };
+
+  // ── Step 1: Quick HEAD check to verify the URL is reachable ──
   try {
-    // Use browser-like headers — GPU servers respond better to these
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/pdf,*/*",
-      },
+    const headRes = await fetch(url, {
+      method: "HEAD",
+      headers: browserHeaders,
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!headRes.ok) {
+      console.warn(`[plu-proxy-pdf] HEAD returned ${headRes.status} for ${url}`);
+      return NextResponse.json(
+        { error: `Le serveur GPU a retourné une erreur (HTTP ${headRes.status}). Le document n'est peut-être pas disponible.` },
+        { status: 502 }
+      );
+    }
+  } catch (headErr) {
+    // Some GPU servers reject HEAD → fall through to GET
+    console.warn(`[plu-proxy-pdf] HEAD failed (${(headErr as Error).message}), falling through to GET`);
+  }
+
+  // ── Step 2: Full GET download ──
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: browserHeaders,
       redirect: "follow",
       signal: AbortSignal.timeout(120_000),
     });
+  } catch (fetchErr) {
+    const msg = (fetchErr as Error).message;
+    console.error(`[plu-proxy-pdf] Fetch failed: ${msg}`);
+    const isTimeout = msg.includes("abort") || msg.includes("timeout");
+    return NextResponse.json(
+      { error: isTimeout
+          ? "Le serveur GPU n'a pas répondu dans le délai imparti (timeout). Veuillez réessayer ou importer le document manuellement."
+          : `Erreur réseau lors du téléchargement (${msg}). Veuillez réessayer.`
+      },
+      { status: 502 }
+    );
+  }
 
-    if (!res.ok) {
-      console.warn(`[plu-proxy-pdf] Upstream returned ${res.status} for ${url}`);
-      return NextResponse.json(
-        { error: `Le serveur GPU a retourné une erreur (HTTP ${res.status}). Le document n'est peut-être pas disponible.` },
-        { status: 502 }
-      );
-    }
+  if (!res.ok) {
+    console.warn(`[plu-proxy-pdf] Upstream returned ${res.status} for ${url}`);
+    return NextResponse.json(
+      { error: `Le serveur GPU a retourné une erreur (HTTP ${res.status}). Le document n'est peut-être pas disponible.` },
+      { status: 502 }
+    );
+  }
 
-    const contentType = res.headers.get("content-type") || "";
+  // ── Step 3: Download body safely ──
+  let buf: Buffer;
+  try {
     const arrayBuf = await res.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
+    buf = Buffer.from(arrayBuf);
+  } catch (dlErr) {
+    console.error(`[plu-proxy-pdf] Body download failed: ${(dlErr as Error).message}`);
+    return NextResponse.json(
+      { error: "Le téléchargement du document a échoué en cours de route. Veuillez réessayer." },
+      { status: 502 }
+    );
+  }
 
-    // Validate it's actually a PDF
-    const first4 = buf.slice(0, 4).toString();
-    if (first4 !== "%PDF") {
-      console.warn(`[plu-proxy-pdf] Upstream returned non-PDF content (${buf.byteLength} bytes, starts: "${first4}")`);
-      return NextResponse.json(
-        { error: "Le fichier téléchargé n'est pas un PDF valide. Il s'agit peut-être d'une page d'erreur du serveur GPU." },
-        { status: 502 }
-      );
-    }
+  // Validate it's actually a PDF
+  const first4 = buf.slice(0, 4).toString();
+  if (first4 !== "%PDF") {
+    console.warn(`[plu-proxy-pdf] Upstream returned non-PDF content (${buf.byteLength} bytes, starts: "${first4}")`);
+    return NextResponse.json(
+      { error: "Le fichier téléchargé n'est pas un PDF valide. Il s'agit peut-être d'une page d'erreur du serveur GPU." },
+      { status: 502 }
+    );
+  }
 
-    // Detect placeholder/redirect PDFs (small PDFs that just say "visit our website")
+  // Detect placeholder/redirect PDFs (small PDFs that just say "visit our website")
+  try {
     const placeholderCheck = await detectPlaceholderPdf(buf);
     if (placeholderCheck.isPlaceholder) {
       console.warn(`[plu-proxy-pdf] ⚠ Placeholder PDF detected: ${placeholderCheck.reason}`);
@@ -88,35 +134,32 @@ export async function GET(request: NextRequest) {
         { status: 502 }
       );
     }
-
-    // Extract filename from URL
-    let filename = "reglement_plu.pdf";
-    try {
-      const pathname = new URL(url).pathname;
-      const last = pathname.split("/").pop();
-      if (last && last.length > 3 && last.toLowerCase().endsWith(".pdf")) {
-        filename = decodeURIComponent(last);
-      }
-    } catch { /* use default */ }
-
-    console.log(`[plu-proxy-pdf] ✓ Proxied ${buf.byteLength} bytes (${filename})`);
-
-    return new NextResponse(buf, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": String(buf.byteLength),
-        "Cache-Control": "public, max-age=86400", // Cache for 24h
-      },
-    });
-  } catch (e) {
-    console.error(`[plu-proxy-pdf] Download error:`, (e as Error).message);
-    return NextResponse.json(
-      { error: "Erreur lors du téléchargement du document. Veuillez réessayer." },
-      { status: 500 }
-    );
+  } catch (placeholderErr) {
+    // Non-fatal: if placeholder detection crashes, still serve the PDF
+    console.warn(`[plu-proxy-pdf] Placeholder detection failed (non-fatal): ${(placeholderErr as Error).message}`);
   }
+
+  // Extract filename from URL
+  let filename = "reglement_plu.pdf";
+  try {
+    const pathname = new URL(url).pathname;
+    const last = pathname.split("/").pop();
+    if (last && last.length > 3 && last.toLowerCase().endsWith(".pdf")) {
+      filename = decodeURIComponent(last);
+    }
+  } catch { /* use default */ }
+
+  console.log(`[plu-proxy-pdf] ✓ Proxied ${buf.byteLength} bytes (${filename})`);
+
+  return new NextResponse(new Uint8Array(buf), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": String(buf.byteLength),
+      "Cache-Control": "public, max-age=86400", // Cache for 24h
+    },
+  });
 }
 
 /** HEAD support for fast URL validation without downloading the full PDF */

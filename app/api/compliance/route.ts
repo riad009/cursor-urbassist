@@ -281,7 +281,7 @@ export async function POST(request: NextRequest) {
 
     // 4. Green space check
     const greenAreas = (elements as ElementIn[]).filter(
-      (e) => e.category === "vegetation" || e.surfaceType === "green"
+      (e) => e.category === "vegetation" || e.surfaceType === "green" || e.surfaceType === "garden"
     );
     const totalGreen = greenAreas.reduce((sum, g) => sum + (g.area || 0), 0);
     const greenPct = (totalGreen / parcelArea) * 100;

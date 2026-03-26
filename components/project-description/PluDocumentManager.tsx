@@ -171,11 +171,11 @@ export default function PluDocumentManager({
     setUrlError(null);
     setPlaceholderUrl(null);
     try {
-      // Use GET instead of HEAD so the proxy can detect placeholder PDFs
+      // Use GET so the proxy can detect placeholder PDFs
       const proxyUrl = `/api/plu-proxy-pdf?url=${encodeURIComponent(autoFetchedUrl)}`;
       const res = await fetch(proxyUrl, { method: "GET", signal: AbortSignal.timeout(30_000) });
       if (!res.ok) {
-        // Check if it's a placeholder detection response
+        // Check if it's a placeholder detection response — this IS a hard block
         try {
           const errData = await res.json();
           if (errData.isPlaceholder && errData.suggestedUrl) {
@@ -186,14 +186,20 @@ export default function PluDocumentManager({
                 : "Le document auto-détecté est un placeholder (pas le vrai règlement). Veuillez télécharger le document réel depuis le lien ci-dessous et l'importer manuellement."
             );
             setUrlValidating(false);
-            return;
+            return; // Hard block — placeholder is confirmed wrong document
           }
-        } catch { /* not JSON — fall through to generic error */ }
+        } catch { /* not JSON — fall through */ }
+
+        // Non-placeholder failure (GPU server down, timeout, etc.)
+        // Show warning but DO NOT block confirmation — the actual analysis
+        // will handle PDF fetching independently
+        console.warn(`[PluDocumentManager] Proxy check returned ${res.status}, proceeding with confirmation anyway`);
         setUrlError(
-          `Le document n'est pas accessible (HTTP ${res.status}). Veuillez importer manuellement le règlement PLU.`
+          isEn
+            ? `Warning: Document validation returned HTTP ${res.status}. The server may be temporarily unavailable. Proceeding with confirmation — the analysis will retry the download.`
+            : `Avertissement : La vérification a retourné HTTP ${res.status}. Le serveur est peut-être temporairement indisponible. Confirmation en cours — l'analyse réessaiera le téléchargement.`
         );
-        setUrlValidating(false);
-        return;
+        // Fall through to confirm
       }
     } catch (e) {
       // Network timeout / proxy not ready — don't block the user

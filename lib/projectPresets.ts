@@ -21,9 +21,9 @@ export interface ProjectPreset {
     overhang: number;
   };
   /** Suggested surface type for 2D plan */
-  surfaceType: "building" | "green" | "concrete" | "gravel";
+  surfaceType: "house" | "garage" | "pool" | "parking" | "garden" | "terrace" | "access" | "vrd" | "other";
   /** Category for footprint/compliance */
-  category: "building" | "pool" | "terrace" | "parking" | "other";
+  category: "building" | "pool" | "terrace" | "parking" | "other" | "garden";
   /**
    * Phase 5: links preset to the per-type regulatory rule engine.
    * Used by compliance API to apply type-specific setbacks/height/CES rules.
@@ -42,7 +42,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 10,
     wallHeights: { ground: 3, first: 0, second: 0 },
     roof: { type: "gable", pitch: 35, overhang: 0.5 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
   },
   {
@@ -55,7 +55,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 12,
     wallHeights: { ground: 3, first: 2.7, second: 0 },
     roof: { type: "gable", pitch: 35, overhang: 0.5 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
   },
   {
@@ -68,7 +68,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 14,
     wallHeights: { ground: 3, first: 2.7, second: 2.7 },
     roof: { type: "gable", pitch: 38, overhang: 0.5 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
   },
   {
@@ -81,7 +81,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 6,
     wallHeights: { ground: 2.7, first: 0, second: 0 },
     roof: { type: "gable", pitch: 35, overhang: 0.3 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
   },
   {
@@ -94,7 +94,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 5,
     wallHeights: { ground: 2.5, first: 0, second: 0 },
     roof: { type: "shed", pitch: 15, overhang: 0.3 },
-    surfaceType: "building",
+    surfaceType: "garage",
     category: "building",
   },
   {
@@ -107,7 +107,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 5,
     wallHeights: { ground: 0, first: 0, second: 0 },
     roof: { type: "flat", pitch: 0, overhang: 0 },
-    surfaceType: "building", // pool drawn as surface
+    surfaceType: "pool", // pool drawn as surface
     category: "pool",
   },
   {
@@ -120,7 +120,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 4,
     wallHeights: { ground: 0, first: 0, second: 0 },
     roof: { type: "flat", pitch: 0, overhang: 0 },
-    surfaceType: "concrete",
+    surfaceType: "terrace",
     category: "terrace",
     constructionType: "main_house",
   },
@@ -135,7 +135,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 2,
     wallHeights: { ground: 2.2, first: 0, second: 0 },
     roof: { type: "shed", pitch: 10, overhang: 0.2 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
     constructionType: "shed",
   },
@@ -149,7 +149,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 3,
     wallHeights: { ground: 2.5, first: 0, second: 0 },
     roof: { type: "shed", pitch: 5, overhang: 0.3 },
-    surfaceType: "building",
+    surfaceType: "parking",
     category: "building",
     constructionType: "carport",
   },
@@ -163,7 +163,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 3,
     wallHeights: { ground: 2.5, first: 0, second: 0 },
     roof: { type: "gable", pitch: 30, overhang: 0.3 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
     constructionType: "annex",
   },
@@ -177,8 +177,8 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 6,
     wallHeights: { ground: 0, first: 0, second: 0 },
     roof: { type: "flat", pitch: 0, overhang: 0 },
-    surfaceType: "green",
-    category: "other",
+    surfaceType: "garden",
+    category: "garden",
   },
   {
     id: "custom",
@@ -190,7 +190,7 @@ export const PROJECT_PRESETS: ProjectPreset[] = [
     depth: 10,
     wallHeights: { ground: 3, first: 0, second: 0 },
     roof: { type: "gable", pitch: 35, overhang: 0.5 },
-    surfaceType: "building",
+    surfaceType: "house",
     category: "building",
   },
 ];
