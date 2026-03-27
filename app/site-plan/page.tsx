@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   Suspense,
 } from "react";
 import Link from "next/link";
@@ -356,6 +357,60 @@ function SitePlanContent() {
   // Always-fresh ref — undo/redo callbacks read this directly (no stale-closure issues)
   const buildingDetailsSnapshotRef = useRef<BuildingDetail[]>([]);
   useEffect(() => { buildingDetailsSnapshotRef.current = buildingDetails; }, [buildingDetails]);
+
+  /**
+   * Bumped whenever a canvas object is moved/scaled/rotated so that
+   * userBuildings3d accurately reflects the current canvas positions when
+   * the user switches to the 3D view.
+   */
+  const [canvasVersion, setCanvasVersion] = useState(0);
+
+  /**
+   * Stable derived array — fed to Terrain3DViewer as the `userBuildings` prop.
+   *
+   * WHY: Terrain3DViewer.buildScene() is a useCallback whose dep array includes
+   * `userBuildings`. If that prop is a new array reference on every render (as it
+   * was when computed via an inline IIFE in JSX) the callback changes, the
+   * useEffect([buildScene]) fires, and the ENTIRE Three.js WebGL scene is torn
+   * down and rebuilt — causing the >1s lag every time React re-renders the page.
+   *
+   * This useMemo only recomputes when buildingDetails actually changes (new element
+   * added / size changed / removed). View-mode toggles, toolbar clicks, mouse
+   * moves, etc. do NOT trigger a rebuild.
+   *
+   * We read canvas object positions from fabricRef inside the memo body; this is
+   * safe because React guarantees refs are stable across renders.
+   */
+  const userBuildings3d = useMemo<UserBuilding3D[]>(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || buildingDetails.length === 0) return [];
+    const result: UserBuilding3D[] = [];
+    canvas.getObjects().forEach((obj: any) => {
+      const bdId = obj.buildingDetailId;
+      if (!bdId) return;
+      const bd = buildingDetails.find((b) => b.id === bdId);
+      if (!bd) return;
+      result.push({
+        id: bd.id,
+        // bd.name is the lowercase templateId (e.g. 'garden', 'parking')
+        // so Terrain3DViewer's buildingType.includes('garden') checks always match.
+        name: bd.name,
+        type: bd.name,
+        width: bd.width,
+        depth: bd.depth,
+        canvasX: obj.left ?? 0,
+        canvasY: obj.top ?? 0,
+        canvasAngle: obj.angle ?? 0,
+        wallHeights: bd.wallHeights,
+        roofType: bd.roof.type,
+        roofPitch: bd.roof.pitch,
+        roofOverhang: bd.roof.overhang,
+        color: bd.color,
+      });
+    });
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingDetails, canvasVersion]); // canvasVersion bumps on object move/scale/rotate
   const [existingBuildingsLoaded, setExistingBuildingsLoaded] = useState(false);
   const [loadingExistingBuildings, setLoadingExistingBuildings] = useState(false);
   const [loadingParcelsGeoJSON, setLoadingParcelsGeoJSON] = useState(false);
@@ -1734,10 +1789,30 @@ function SitePlanContent() {
         (rect as any).id = shapeId;
         (rect as any).elementName = selectedPreset.shortLabel;
         (rect as any).surfaceType = selectedPreset.surfaceType;
+        // ── 3D bridge: set buildingDetailId so userBuildings3d can find this shape ──
+        (rect as any).buildingDetailId = shapeId;
         canvas.add(rect);
         addRectMeasurements(rect as fabric.Rect, shapeId);
         canvas.renderAll();
         updateLayers(canvas);
+
+        // Create a minimal BuildingDetail so the element appears in the 3D viewer.
+        // name = lowercase surfaceType (e.g. 'garden') so Terrain3DViewer type-matching works.
+        const surfType = selectedPreset.surfaceType; // 'garden' | 'other'
+        const flatPreset = getPresetById("green"); // closest physical preset
+        if (flatPreset) {
+          const b = createDefaultBuilding({
+            name: surfType, // lowercase — critical for Terrain3DViewer type-matching
+            width: selectedPreset.width,
+            depth: selectedPreset.depth,
+            wallHeights: flatPreset.wallHeights,
+            roof: { type: flatPreset.roof.type, pitch: flatPreset.roof.pitch, overhang: flatPreset.roof.overhang, material: "None" },
+            color: stroke,
+          });
+          (b as any).id = shapeId;
+          setBuildingDetails((prev) => [...prev, b]);
+        }
+
         setPlacementMode(false);
         setGuidedStep(5);
         setSelectedPreset(null);
@@ -1789,6 +1864,8 @@ function SitePlanContent() {
       // Clean up snap highlight lines
       const snapLines = canvas.getObjects().filter((o: any) => o._snapHighlight);
       if (snapLines.length) canvas.remove(...snapLines);
+      // Bump canvasVersion so userBuildings3d reflects the new position in 3D
+      setCanvasVersion((v) => v + 1);
       runComplianceCheck();
       pushUndoState();
     });
@@ -2631,21 +2708,25 @@ function SitePlanContent() {
     measurementLabelsRef.current.set(shapeId, existing);
     canvas.setActiveObject(rect);
 
-    // For building-type templates (house, garage, pool, terrace), create a BuildingDetail
-    // so they render in the 3D viewer
-    const BUILDING_TEMPLATE_IDS = ["house", "garage", "pool", "terrace"];
+    // For all renderable templates, create a BuildingDetail so they appear in the 3D viewer.
+    // 'type' is always the lowercase templateId so Terrain3DViewer type-matching works.
+    const BUILDING_TEMPLATE_IDS = ["house", "garage", "pool", "terrace", "garden", "parking"];
     if (BUILDING_TEMPLATE_IDS.includes(templateId)) {
       const presetMap: Record<string, string> = {
         house: "house-small",
         garage: "garage",
         pool: "pool",
         terrace: "terrace",
+        garden: "green",
+        parking: "carport", // closest preset — wall heights irrelevant for flat surface
       };
       const presetId = presetMap[templateId];
       const preset = presetId ? getPresetById(presetId) : null;
       if (preset) {
         const b = createDefaultBuilding({
-          name: template.label,
+          // IMPORTANT: name must equal templateId (lowercase) so Terrain3DViewer
+          // type-string matching (buildingType.includes('garden') etc.) works.
+          name: templateId,
           width: template.width,
           depth: template.height,
           wallHeights: preset.wallHeights,
@@ -3793,51 +3874,23 @@ function SitePlanContent() {
 
           {/* === 3D Viewer Layer (kept mounted to prevent heavy unmount/rebuild lag) === */}
           <div className={cn("absolute inset-0 bg-white transition-opacity duration-300", viewMode === "3d" ? "opacity-100 z-30 pointer-events-auto" : "opacity-0 -z-10 pointer-events-none")}>
-            {(() => {
-              // Collect user-placed buildings from canvas objects for 3D rendering
-              const ub3d: UserBuilding3D[] = [];
-              const canvas = fabricRef.current;
-              if (canvas) {
-                canvas.getObjects().forEach((obj: any) => {
-                  const bdId = obj.buildingDetailId;
-                  if (!bdId) return;
-                  const bd = buildingDetails.find(b => b.id === bdId);
-                  if (!bd) return;
-                  ub3d.push({
-                    id: bd.id,
-                    name: bd.name,
-                    type: bd.name, // name is used as type discriminator
-                    width: bd.width,
-                    depth: bd.depth,
-                    canvasX: obj.left ?? 0,
-                    canvasY: obj.top ?? 0,
-                    canvasAngle: obj.angle ?? 0,
-                    wallHeights: bd.wallHeights,
-                    roofType: bd.roof.type,
-                    roofPitch: bd.roof.pitch,
-                    roofOverhang: bd.roof.overhang,
-                    color: bd.color,
-                  });
-                });
-              }
-              return (
-                <>
-                  <Terrain3DViewer
-                    key={`3d-terrain-v${scene3dVersion}`}
-                    processedSiteData={processedSiteData}
-                    parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
-                    userBuildings={ub3d.length > 0 ? ub3d : undefined}
-                    canvasWidth={canvasSize.width}
-                    canvasHeight={canvasSize.height}
-                    pixelsPerMeter={currentScale.pixelsPerMeter}
-                  />
-                  <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
-                    <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
-                    <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
-                  </div>
-                </>
-              );
-            })()}
+            {/* userBuildings3d — stable reference so Terrain3DViewer.buildScene only rebuilds
+                when elements actually change, NOT on every React render. We read from
+                buildingDetails (state) and the canvas ref (not reactive) to produce a stable
+                array that only changes when setBuildingDetails is called. */}
+            <Terrain3DViewer
+              key="3d-terrain-stable"
+              processedSiteData={processedSiteData}
+              parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
+              userBuildings={userBuildings3d.length > 0 ? userBuildings3d : undefined}
+              canvasWidth={canvasSize.width}
+              canvasHeight={canvasSize.height}
+              pixelsPerMeter={currentScale.pixelsPerMeter}
+            />
+            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
+              <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
+              <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
+            </div>
           </div>
         </div>
 
