@@ -367,10 +367,319 @@ function computeBbox(coords: number[][]): { minLng: number; maxLng: number; minL
   return { minLng, maxLng, minLat, maxLat };
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// ── PREMIUM PROCEDURAL ASSET FACTORY ──
+// Each builder returns a THREE.Group positioned at world origin ready for
+// placement. All meshes use castShadow + receiveShadow for quality rendering.
+// ═════════════════════════════════════════════════════════════════════════════
 
-// ═════════════════════════════════════════════════════════════════════════════
-// ── COMPONENT ──
-// ═════════════════════════════════════════════════════════════════════════════
+function _box(g:THREE.Group,w:number,h:number,d:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:0.75,metalness:0.02,...opts}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;}
+function _cyl(g:THREE.Group,rt:number,rb:number,h:number,segs:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segs),new THREE.MeshStandardMaterial({color,roughness:0.7,metalness:0.05,...opts}));m.castShadow=true;g.add(m);return m;}
+
+function _addWindows(g:THREE.Group,count:number,wallW:number,centerX:number,centerY:number,wallZ:number):void{
+  const ww=Math.min(0.65,wallW/count*0.5),wh=0.6,sp=wallW/count;
+  for(let i=0;i<count;i++){
+    const wx=centerX-wallW/2+sp*(i+0.5);
+    const fr=new THREE.Mesh(new THREE.BoxGeometry(ww+0.08,wh+0.08,0.05),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.5}));
+    fr.position.set(wx,centerY,wallZ+0.005);g.add(fr);
+    const gl=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,0.04),new THREE.MeshStandardMaterial({color:0x90caf9,roughness:0.04,metalness:0.2,transparent:true,opacity:0.8}));
+    gl.position.set(wx,centerY,wallZ+0.03);g.add(gl);
+  }
+}
+
+function _buildGableRoof(g:THREE.Group,w:number,d:number,pitchDeg:number,overhang:number,color:number):THREE.Mesh{
+  const pitch=(pitchDeg*Math.PI)/180,hw=w/2+overhang,hd=d/2+overhang,roofH=(Math.min(w,d)/2)*Math.tan(pitch),isX=w>=d;
+  const rPts=isX?[new THREE.Vector3(-hw,roofH,0),new THREE.Vector3(hw,roofH,0)]:[new THREE.Vector3(0,roofH,-hd),new THREE.Vector3(0,roofH,hd)];
+  const [p1,p2,p3,p4]=[new THREE.Vector3(-hw,0,hd),new THREE.Vector3(hw,0,hd),new THREE.Vector3(hw,0,-hd),new THREE.Vector3(-hw,0,-hd)];
+  const v=isX?new Float32Array([...p4.toArray(),...p1.toArray(),...rPts[0].toArray(),...p1.toArray(),...rPts[1].toArray(),...rPts[0].toArray(),...p2.toArray(),...p3.toArray(),...rPts[1].toArray(),...p3.toArray(),...rPts[0].toArray(),...rPts[1].toArray(),...p1.toArray(),...p2.toArray(),...rPts[1].toArray(),...p3.toArray(),...p4.toArray(),...rPts[0].toArray()])
+    :new Float32Array([...p1.toArray(),...p2.toArray(),...rPts[0].toArray(),...p2.toArray(),...rPts[1].toArray(),...rPts[0].toArray(),...p3.toArray(),...p4.toArray(),...rPts[1].toArray(),...p4.toArray(),...rPts[0].toArray(),...rPts[1].toArray(),...p4.toArray(),...p1.toArray(),...rPts[0].toArray(),...p2.toArray(),...p3.toArray(),...rPts[1].toArray()]);
+  const geom=new THREE.BufferGeometry();geom.setAttribute('position',new THREE.BufferAttribute(v,3));geom.computeVertexNormals();
+  const m=new THREE.Mesh(geom,new THREE.MeshStandardMaterial({color,roughness:0.70,metalness:0.04}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;
+}
+
+function _buildTree(g:THREE.Group,x:number,y:number,z:number){
+  const trunk=_cyl(g,0.08,0.10,0.8,8,0x5d4037,{roughness:0.9});trunk.position.set(x,y+0.4,z);
+  const crown=new THREE.Mesh(new THREE.SphereGeometry(0.48,10,8),new THREE.MeshStandardMaterial({color:0x2e7d32,roughness:0.85}));
+  crown.position.set(x,y+0.8+0.38,z);crown.castShadow=true;g.add(crown);
+}
+
+function _buildLampPost(g:THREE.Group,x:number,y:number,z:number){
+  const pole=_cyl(g,0.035,0.045,3.2,8,0x424242,{roughness:0.35,metalness:0.55});pole.position.set(x,y+1.6,z);
+  const arm=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.04,0.04),new THREE.MeshStandardMaterial({color:0x424242,roughness:0.35,metalness:0.55}));
+  arm.position.set(x+0.275,y+3.14,z);g.add(arm);
+  const lamp=new THREE.Mesh(new THREE.SphereGeometry(0.13,8,6),new THREE.MeshStandardMaterial({color:0xfff9c4,roughness:0.1,emissive:0xfff176,emissiveIntensity:0.7}));
+  lamp.position.set(x+0.55,y+3.05,z);g.add(lamp);
+}
+
+// ── HOUSE / GARAGE ────────────────────────────────────────────────────────────
+interface UBLike{width?:number;depth?:number;roofType?:string;roofPitch?:number;roofOverhang?:number;wallHeights?:{ground?:number;first?:number;second?:number};type?:string;name?:string}
+
+function buildPremiumHouse(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||10,d=ub.depth||8;
+  const isGarage=(ub.type||ub.name||'').toLowerCase().includes('garage');
+  const totalH=((ub.wallHeights?.ground||0)+(ub.wallHeights?.first||0)+(ub.wallHeights?.second||0))||(isGarage?3.0:3.8);
+  const pH=0.18;
+
+  // Plinth
+  const plinth=_box(g,w+0.12,pH,d+0.12,0x90a4ae,{roughness:0.95});plinth.position.y=pH/2;
+
+  // Main walls
+  const wallColor=isGarage?0xf5f5f5:0xfafafa;
+  const wallGeom=new THREE.BoxGeometry(w,totalH,d);
+  const walls=new THREE.Mesh(wallGeom,new THREE.MeshStandardMaterial({color:wallColor,roughness:0.68,metalness:0.01}));
+  walls.position.y=pH+totalH/2;walls.castShadow=true;walls.receiveShadow=true;g.add(walls);
+  // Edge outline
+  const el=new THREE.LineSegments(new THREE.EdgesGeometry(wallGeom,20),new THREE.LineBasicMaterial({color:0xbdbdbd,opacity:0.4,transparent:true}));
+  el.position.y=walls.position.y;g.add(el);
+
+  const baseY=pH;
+
+  if(isGarage){
+    // Garage roller door panels
+    for(let pi=0;pi<4;pi++){
+      const p=_box(g,w*0.74,0.38,0.06,pi%2===0?0xe0e0e0:0xeeeeee,{roughness:0.55});
+      p.position.set(0,baseY+0.1+pi*0.40,d/2+0.04);
+    }
+    // Door frame
+    const gdf=_box(g,w*0.74+0.12,1.66,0.04,0x616161,{roughness:0.6});gdf.position.set(0,baseY+0.83,d/2+0.02);
+    // Side pedestrian door
+    const sd=_box(g,0.75,1.85,0.06,0xef5350,{roughness:0.6});sd.position.set(-w/2+0.5,baseY+0.925,d/2+0.04);
+    void sd;
+    // Windows high
+    _addWindows(g,2,w*0.55,0,baseY+totalH*0.72,d/2+0.01);
+    // Red accent stripe
+    const stripe=_box(g,w,0.18,d+0.02,0xef5350,{roughness:0.6,metalness:0.05});stripe.position.y=baseY+totalH*0.88;
+    void stripe;
+  } else {
+    // Front door
+    const doorFrame=_box(g,0.88,2.05,0.055,0x4e342e,{roughness:0.65});doorFrame.position.set(0,baseY+1.025,d/2+0.01);
+    const door=_box(g,0.72,1.9,0.05,0x6d4c41,{roughness:0.7});door.position.set(0,baseY+0.95,d/2+0.035);
+    // Door knob
+    const knob=new THREE.Mesh(new THREE.SphereGeometry(0.045,6,5),new THREE.MeshStandardMaterial({color:0xf9a825,roughness:0.15,metalness:0.9}));
+    knob.position.set(0.26,baseY+0.85,d/2+0.065);g.add(knob);
+    // Door step
+    const step=_box(g,0.95,0.10,0.28,0x9e9e9e,{roughness:0.9});step.position.set(0,baseY+0.05,d/2+0.16);
+    void doorFrame;void door;void step;
+    // Ground floor windows (left/right of door)
+    const wWing=(w-1.1)/2;
+    _addWindows(g,Math.max(1,Math.round(wWing/1.6)),wWing,-wWing/2-0.55,baseY+totalH*0.28+0.1,d/2+0.01);
+    _addWindows(g,Math.max(1,Math.round(wWing/1.6)),wWing, wWing/2+0.55,baseY+totalH*0.28+0.1,d/2+0.01);
+    // Back windows
+    const wnCount=Math.max(1,Math.round((w-0.4)/1.7));
+    _addWindows(g,wnCount,w*0.85,0,baseY+totalH*0.28+0.1,-(d/2+0.01));
+    // Upper floor
+    if(totalH>3.2){
+      _addWindows(g,wnCount+1,w*0.9,0,baseY+totalH*0.66,d/2+0.01);
+      _addWindows(g,wnCount+1,w*0.9,0,baseY+totalH*0.66,-(d/2+0.01));
+    }
+    // Chimney
+    const chX=w*0.28,chH=0.85;
+    const ch=_box(g,0.36,totalH*0.55+chH,0.36,0x8d6e63,{roughness:0.9});ch.position.set(chX,pH+(totalH*0.55+chH)/2,-d*0.22);
+    const chCap=_box(g,0.48,0.08,0.48,0x5d4037,{roughness:0.8});chCap.position.set(chX,pH+totalH*0.55+chH+0.04,-d*0.22);
+    void ch;void chCap;
+  }
+
+  // ROOF
+  const rBaseY=pH+totalH;
+  const roofType=ub.roofType||'gable';
+  const roofColor=isGarage?0x1a1a2e:0xc0392b;
+  const pitchDeg=ub.roofPitch||40,ovr=ub.roofOverhang||0.45;
+
+  if(roofType==='flat'){
+    const fr=_box(g,w+0.3,0.20,d+0.3,roofColor,{roughness:0.78});fr.position.y=rBaseY+0.10;
+    // Parapet
+    for(const[px,pz,pw,pd] of [[0,d/2+0.09,w+0.3,0.12],[0,-d/2-0.09,w+0.3,0.12],[w/2+0.09,0,0.12,d],[- w/2-0.09,0,0.12,d]] as [number,number,number,number][]){
+      const par=_box(g,pw,0.38,pd,0x546e7a,{roughness:0.88});par.position.set(px,rBaseY+0.38/2,pz);void par;
+    }
+  } else {
+    const roofMesh=_buildGableRoof(g,w,d,pitchDeg,ovr,roofColor);
+    roofMesh.position.y=rBaseY;
+    // Ridge cap
+    const ridgeH=(Math.min(w,d)/2)*Math.tan((pitchDeg*Math.PI)/180);
+    const isX=w>=d,ridgeLen=(isX?w:d)+ovr*2;
+    const ridgeCap=_box(g,isX?ridgeLen:0.16,0.09,isX?0.16:ridgeLen,0x7f1d1d,{roughness:0.68});
+    ridgeCap.position.set(0,rBaseY+ridgeH,0);void ridgeCap;
+  }
+  return g;
+}
+
+// ── POOL ──────────────────────────────────────────────────────────────────────
+function buildPremiumPool(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||8,d=ub.depth||5;
+  const dH=0.20;
+
+  // Travertine deck
+  const deck=_box(g,w+2.4,dH,d+2.4,0xe8dbc8,{roughness:0.62});deck.position.y=dH/2;
+
+  // Pool basin
+  _box(g,w,0.22,d,0x1565c0,{roughness:0.5}).position.y=dH/2+0.11;
+
+  // Water surface
+  const water=new THREE.Mesh(new THREE.PlaneGeometry(w-0.06,d-0.06),
+    new THREE.MeshPhysicalMaterial({color:0x26c6da,roughness:0.01,metalness:0.1,transparent:true,opacity:0.88,transmission:0.22,clearcoat:1.0,clearcoatRoughness:0.04}));
+  water.rotation.x=-Math.PI/2;water.position.y=dH+0.21;g.add(water);
+
+  // White pool edge tiles
+  const eM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.4});
+  for(const[ex,ez,ew,ed] of [[0,d/2+0.06,w+0.12,0.12],[0,-d/2-0.06,w+0.12,0.12],[w/2+0.06,0,0.12,d],[-w/2-0.06,0,0.12,d]] as [number,number,number,number][]){
+    const e=new THREE.Mesh(new THREE.BoxGeometry(ew,0.055,ed),eM);e.position.set(ex,dH+0.225,ez);g.add(e);
+  }
+
+  // Stainless ladder
+  const lM=new THREE.MeshStandardMaterial({color:0xe0e0e0,roughness:0.15,metalness:0.88});
+  const rail=new THREE.Mesh(new THREE.CylinderGeometry(0.024,0.024,0.9,6),lM);rail.position.set(w/2-0.12,dH+0.5,d/2-0.04);g.add(rail);
+  for(let r=0;r<3;r++){const rg=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.04,0.04),lM);rg.position.set(w/2-0.12,dH+0.2+r*0.22,d/2-0.04);g.add(rg);}
+
+  // Lounge chairs × 4
+  const chM=new THREE.MeshStandardMaterial({color:0xfff9c4,roughness:0.7});
+  for(const[cx,cz] of [[-(w/2+0.9),d/4],[-(w/2+0.9),-d/4],[(w/2+0.9),d/4],[(w/2+0.9),-d/4]] as [number,number][]){
+    const seat=new THREE.Mesh(new THREE.BoxGeometry(0.58,0.07,1.52),chM);seat.position.set(cx,dH+0.10,cz);g.add(seat);
+    const back=new THREE.Mesh(new THREE.BoxGeometry(0.58,0.5,0.06),chM);back.position.set(cx,dH+0.32,cz+0.7);back.rotation.x=-0.33;g.add(back);
+    const lM2=new THREE.MeshStandardMaterial({color:0xbdbdbd,roughness:0.2,metalness:0.7});
+    for(const[lsx,lsz] of [[-0.21,-0.62],[-0.21,0.62],[0.21,-0.62],[0.21,0.62]] as [number,number][]){
+      const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,0.10,5),lM2);lg.position.set(cx+lsx,dH+0.05,cz+lsz);g.add(lg);
+    }
+  }
+  // Parasol
+  const pp=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.035,2.0,8),new THREE.MeshStandardMaterial({color:0xbdbdbd,roughness:0.28,metalness:0.72}));
+  pp.position.set(-(w/2+0.9),dH+1.0,0);g.add(pp);
+  const pr=new THREE.Mesh(new THREE.ConeGeometry(1.05,0.20,12,1,true),new THREE.MeshStandardMaterial({color:0xf44336,roughness:0.62,side:THREE.DoubleSide}));
+  pr.position.set(-(w/2+0.9),dH+1.95,0);g.add(pr);
+  return g;
+}
+
+// ── GARDEN ────────────────────────────────────────────────────────────────────
+function buildPremiumGarden(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||8,d=ub.depth||8;
+
+  // Lush base lawn
+  const lawn=_box(g,w,0.16,d,0x43a047,{roughness:0.97});lawn.position.y=0.08;
+
+  // Gravel path (central cross)
+  const pM=new THREE.MeshStandardMaterial({color:0xd7ccc8,roughness:0.93});
+  const pathL=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.05,d*0.86),pM);pathL.position.set(0,0.195,0);g.add(pathL);
+
+  // Flower beds
+  const flColors=[0xe91e63,0xff9800,0xffeb3b,0xab47bc];
+  for(const[fz,side] of [[-d*0.28,1],[d*0.28,-1]] as [number,number][]){
+    for(let fi=0;fi<3;fi++){
+      const bed=_box(g,w*0.22,0.10,d*0.07,0x6d4c41,{roughness:0.97});bed.position.set(-w*0.22+fi*w*0.22,0.21,fz);
+      const fc=flColors[fi%flColors.length];
+      const bloom=new THREE.Mesh(new THREE.SphereGeometry(0.17,6,5),new THREE.MeshStandardMaterial({color:fc,roughness:0.82}));
+      bloom.position.set(-w*0.22+fi*w*0.22,0.42,fz);bloom.castShadow=true;g.add(bloom);void bed;void side;
+    }
+  }
+
+  // Perimeter hedge
+  const hM=new THREE.MeshStandardMaterial({color:0x2e7d32,roughness:0.88});
+  const hH=0.78,hT=0.26;
+  for(const hx of [-w/2+hT/2,w/2-hT/2]){const h=new THREE.Mesh(new THREE.BoxGeometry(hT,hH,d-hT*2),hM);h.position.set(hx,0.16+hH/2,0);h.castShadow=true;g.add(h);}
+  // Back hedge
+  const hb=new THREE.Mesh(new THREE.BoxGeometry(w-hT*2,hH,hT),hM);hb.position.set(0,0.16+hH/2,-d/2+hT/2);hb.castShadow=true;g.add(hb);
+  // Front hedge (with gate gap)
+  for(const hx of [-w/4-0.28,w/4+0.28]){const h=new THREE.Mesh(new THREE.BoxGeometry(w/2-0.85,hH,hT),hM);h.position.set(hx,0.16+hH/2,d/2-hT/2);h.castShadow=true;g.add(h);}
+  // Gate posts
+  for(const gpx of [-0.52,0.52]){
+    const gp=_cyl(g,0.052,0.068,hH+0.28,8,0x8d6e63,{roughness:0.68});gp.position.set(gpx,0.16+(hH+0.28)/2,d/2-hT/2);
+  }
+
+  // Corner topiary trees
+  for(const[tx,tz] of [[-w/2+0.75,-d/2+0.75],[w/2-0.75,-d/2+0.75],[-w/2+0.75,d/2-0.75],[w/2-0.75,d/2-0.75]] as [number,number][]){
+    _buildTree(g,tx,0.16,tz);
+  }
+
+  // Garden bench
+  const bM=new THREE.MeshStandardMaterial({color:0x8d6e63,roughness:0.78});
+  const bs=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.055,0.36),bM);bs.position.set(w*0.2,0.36,0);g.add(bs);
+  const bb=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.30,0.05),bM);bb.position.set(w*0.2,0.52,0.20);g.add(bb);
+  for(const blx of [-0.36,0.36]){const bl=new THREE.Mesh(new THREE.BoxGeometry(0.045,0.36,0.36),new THREE.MeshStandardMaterial({color:0x616161,roughness:0.3,metalness:0.6}));bl.position.set(w*0.2+blx,0.18,0);g.add(bl);}
+  return g;
+}
+
+// ── PARKING ───────────────────────────────────────────────────────────────────
+function buildPremiumParking(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||10,d=ub.depth||6;
+
+  // Tarmac
+  const surf=_box(g,w,0.10,d,0x37474f,{roughness:0.90});surf.position.y=0.05;
+
+  // Kerb
+  const kM=new THREE.MeshStandardMaterial({color:0xbdbdbd,roughness:0.83});
+  const kH=0.10,kT=0.13;
+  for(const[kx,kz,kw,kd] of [[0,d/2+kT/2,w+kT*2,kT],[0,-d/2-kT/2,w+kT*2,kT],[w/2+kT/2,0,kT,d],[-w/2-kT/2,0,kT,d]] as [number,number,number,number][]){
+    const k=new THREE.Mesh(new THREE.BoxGeometry(kw,kH,kd),kM);k.position.set(kx,kH/2,kz);g.add(k);
+  }
+
+  // Bay lines
+  const numSlots=Math.max(1,Math.round(w/2.6));
+  const slotW=w/numSlots;
+  const lM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.68});
+  for(let si=0;si<=numSlots;si++){
+    const sx=-w/2+slotW*si;
+    const ln=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.025,d*0.88),lM);ln.position.set(sx,0.113,0);g.add(ln);
+  }
+  // Stop lines
+  for(const sz of [-d*0.44,d*0.44]){const sl=new THREE.Mesh(new THREE.BoxGeometry(w,0.025,0.07),lM);sl.position.set(0,0.113,sz);g.add(sl);}
+
+  // Directional arrows
+  const aM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.68});
+  const numArrows=Math.max(1,Math.round(numSlots/2));
+  for(let ai=0;ai<numArrows;ai++){
+    const ax=-w/2+slotW*(ai*2+0.5);
+    const shaft=new THREE.Mesh(new THREE.BoxGeometry(0.11,0.025,0.5),aM);shaft.position.set(ax,0.116,0.08);g.add(shaft);
+    const head=new THREE.Mesh(new THREE.ConeGeometry(0.14,0.26,3),aM);head.rotation.x=Math.PI/2;head.position.set(ax,0.116,-0.22);g.add(head);
+  }
+
+  // Lamp posts (2 corners)
+  for(const[lpx,lpz] of [[-w/2+0.28,-d/2+0.28],[w/2-0.28,-d/2+0.28]] as [number,number][]){_buildLampPost(g,lpx,0.10,lpz);}
+
+  // Parking sign
+  const signGeom=new THREE.BoxGeometry(0.42,0.42,0.04);
+  const sign=new THREE.Mesh(signGeom,new THREE.MeshStandardMaterial({color:0x1565c0,roughness:0.45}));
+  sign.position.set(w/2-0.28,1.7,d/2-0.28);g.add(sign);
+  const sp=_cyl(g,0.028,0.038,1.7,6,0x9e9e9e,{roughness:0.28,metalness:0.65});sp.position.set(w/2-0.28,0.85,d/2-0.28);void sp;
+  return g;
+}
+
+// ── CARPORT ───────────────────────────────────────────────────────────────────
+function buildPremiumCarport(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||6,d=ub.depth||4;
+
+  // Concrete pad
+  _box(g,w+0.28,0.07,d+0.28,0xb0bec5,{roughness:0.90}).position.y=0.035;
+
+  const cH=2.65;
+  const pM=new THREE.MeshStandardMaterial({color:0x607d8b,roughness:0.38,metalness:0.52});
+  // I-beam posts
+  for(const[px,pz] of [[-w/2+0.14,-d/2+0.14],[-w/2+0.14,d/2-0.14],[w/2-0.14,-d/2+0.14],[w/2-0.14,d/2-0.14]] as [number,number][]){
+    for(const fz of[-0.075,0.075]){const fl=new THREE.Mesh(new THREE.BoxGeometry(0.12,cH,0.038),pM);fl.position.set(px,0.07+cH/2,pz+fz);g.add(fl);}
+    const web=new THREE.Mesh(new THREE.BoxGeometry(0.036,cH,0.15),pM);web.position.set(px,0.07+cH/2,pz);g.add(web);
+    const bp=_box(g,0.20,0.055,0.20,0x9e9e9e,{roughness:0.5,metalness:0.45});bp.position.set(px,0.028,pz);void bp;
+  }
+
+  // Longitudinal ridge beam
+  const rb=_box(g,w,0.10,0.10,0x546e7a,{roughness:0.32,metalness:0.58});rb.position.set(0,0.07+cH+0.05,0);void rb;
+  // Cross beams
+  const nBeams=Math.max(2,Math.round(w/1.4));
+  for(let bi=0;bi<nBeams;bi++){
+    const bx=-w/2+(bi+0.5)*(w/nBeams);
+    const cb=_box(g,0.07,0.09,d,0x546e7a,{roughness:0.32,metalness:0.58});cb.position.set(bx,0.07+cH+0.045,0);void cb;
+  }
+
+  // Translucent polycarbonate roof
+  const roofPanel=new THREE.Mesh(new THREE.BoxGeometry(w-0.18,0.038,d-0.18),
+    new THREE.MeshPhysicalMaterial({color:0x90caf9,roughness:0.04,metalness:0.04,transparent:true,opacity:0.42,transmission:0.62,clearcoat:0.85}));
+  roofPanel.position.set(0,0.07+cH+0.115,0);g.add(roofPanel);
+
+  return g;
+}
+
+
 
 export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter }: Terrain3DViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -407,6 +716,10 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   } | null>(null);
   // Stores exag value from last buildScene run so buildings useEffect can use it
   const exagRef = useRef<number>(1);
+  // Always-current ref for userBuildings — lets buildScene read latest value
+  // without needing userBuildings in its dep array (which would cause full rebuilds)
+  const userBuildingsRef = useRef<UserBuilding3D[] | undefined>(undefined);
+  useEffect(() => { userBuildingsRef.current = userBuildings; }, [userBuildings]);
 
   const buildScene = useCallback(async () => {
     const container = containerRef.current;
@@ -918,172 +1231,33 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     const buildingsGroup = new THREE.Group();
     scene.add(buildingsGroup);
 
-    if (userBuildings && userBuildings.length > 0 && canvasWidth && canvasHeight && pixelsPerMeter) {
+    const latestBuildings = userBuildingsRef.current;
+    if (latestBuildings && latestBuildings.length > 0 && canvasWidth && canvasHeight && pixelsPerMeter) {
       setStatus("Placing user buildings on terrain...");
       const ppm = pixelsPerMeter;
-      for (const ub of userBuildings) {
+      for (const ub of latestBuildings) {
         try {
           const localX = (ub.canvasX - canvasWidth / 2) / ppm;
           const localZ = (ub.canvasY - canvasHeight / 2) / ppm;
           const rotY = ub.canvasAngle ? -ub.canvasAngle * DEG_TO_RAD : 0;
           const groundY = normPts.length >= 3 ? idwInterpolate(localX, localZ, normPts, 2) : 0;
-          const w = ub.width || 6;
-          const d = ub.depth || 6;
           const buildingType = (ub.type || ub.name || '').toLowerCase().trim();
-
-          // ── POOL ──
+          let assetGroup: THREE.Group;
           if (buildingType.includes('pool') || buildingType.includes('piscine')) {
-            const deckH = 0.1;
-            const deck = new THREE.Mesh(
-              new THREE.BoxGeometry(w + 2, deckH, d + 2),
-              new THREE.MeshStandardMaterial({ color: 0xddd0b8, roughness: 0.75 })
-            );
-            deck.position.set(localX, groundY + deckH / 2, localZ); deck.rotation.y = rotY;
-            deck.receiveShadow = true; deck.castShadow = true; buildingsGroup.add(deck);
-            const water = new THREE.Mesh(
-              new THREE.PlaneGeometry(w - 0.2, d - 0.2),
-              new THREE.MeshPhysicalMaterial({ color: 0x3ec8e8, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.78, transmission: 0.3, clearcoat: 1.0 })
-            );
-            water.rotation.x = -Math.PI / 2; water.rotation.z = rotY;
-            water.position.set(localX, groundY + deckH + 0.01, localZ);
-            buildingsGroup.add(water);
-            continue;
-          }
-
-          // ── GARDEN ──
-          if (buildingType.includes('garden') || buildingType.includes('jardin') || buildingType.includes('green')) {
-            const lawn = new THREE.Mesh(
-              new THREE.BoxGeometry(w, 0.15, d),
-              new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.95 })
-            );
-            lawn.position.set(localX, groundY + 0.075, localZ); lawn.rotation.y = rotY;
-            lawn.receiveShadow = true; buildingsGroup.add(lawn);
-            const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 });
-            ([{ p: [0, 0.55, d/2 - 0.15], s: [w*0.9, 0.8, 0.3] }, { p: [0, 0.55, -d/2 + 0.15], s: [w*0.9, 0.8, 0.3] }] as {p:number[],s:number[]}[]).forEach(h => {
-              const m = new THREE.Mesh(new THREE.BoxGeometry(h.s[0], h.s[1], h.s[2]), hedgeMat);
-              m.position.set(localX + h.p[0], groundY + h.p[1], localZ + h.p[2]); m.rotation.y = rotY;
-              m.castShadow = true; buildingsGroup.add(m);
-            });
-            continue;
-          }
-
-          // ── TERRACE ──
-          if (buildingType.includes('terrace') || buildingType.includes('terrasse') || buildingType.includes('deck')) {
-            const deck = new THREE.Mesh(
-              new THREE.BoxGeometry(w, 0.2, d),
-              new THREE.MeshStandardMaterial({ color: 0xa1887f, roughness: 0.85 })
-            );
-            deck.position.set(localX, groundY + 0.1, localZ); deck.rotation.y = rotY;
-            deck.receiveShadow = true; deck.castShadow = true; buildingsGroup.add(deck);
-            continue;
-          }
-
-          // ── PARKING ──
-          if (buildingType.includes('parking') || buildingType.includes('stationnement')) {
-            const surf = new THREE.Mesh(
-              new THREE.BoxGeometry(w, 0.08, d),
-              new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.95 })
-            );
-            surf.position.set(localX, groundY + 0.04, localZ); surf.rotation.y = rotY;
-            surf.receiveShadow = true; buildingsGroup.add(surf);
-            const numSlots = Math.max(1, Math.round(w / 2.5));
-            for (let si = 0; si <= numSlots; si++) {
-              const sx = -w/2 + (w/numSlots) * si;
-              const stripe = new THREE.Mesh(
-                new THREE.BoxGeometry(0.08, 0.02, d * 0.8),
-                new THREE.MeshStandardMaterial({ color: 0xffffff })
-              );
-              stripe.position.set(localX + sx, groundY + 0.09, localZ); stripe.rotation.y = rotY;
-              buildingsGroup.add(stripe);
-            }
-            continue;
-          }
-
-          // ── CARPORT ──
-          if (buildingType.includes('carport')) {
-            const cH = 2.5;
-            const postMat = new THREE.MeshStandardMaterial({ color: 0x757575, roughness: 0.5, metalness: 0.3 });
-            ([ [-1,-1],[-1,1],[1,-1],[1,1] ] as [number,number][]).forEach(([sx,sz]) => {
-              const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, cH, 8), postMat);
-              post.position.set(localX + sx*(w/2-0.15), groundY + cH/2, localZ + sz*(d/2-0.15));
-              post.castShadow = true; buildingsGroup.add(post);
-            });
-            const canopy = new THREE.Mesh(
-              new THREE.BoxGeometry(w+0.3, 0.08, d+0.3),
-              new THREE.MeshStandardMaterial({ color: 0x78909c, roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.85 })
-            );
-            canopy.position.set(localX, groundY + cH, localZ); canopy.rotation.y = rotY;
-            canopy.castShadow = true; buildingsGroup.add(canopy);
-            continue;
-          }
-
-          // ── DEFAULT: HOUSE / GARAGE / SHED / EXTENSION / ANNEX ──
-          const totalH = ((ub.wallHeights?.ground || 0) + (ub.wallHeights?.first || 0) + (ub.wallHeights?.second || 0)) || 3;
-          const plinthH = 0.15;
-          const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, plinthH, d + 0.1), new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 0.95 }));
-          plinth.position.set(localX, groundY + plinthH/2, localZ); plinth.rotation.y = rotY;
-          plinth.receiveShadow = true; plinth.castShadow = true; buildingsGroup.add(plinth);
-
-          const wallGeom = new THREE.BoxGeometry(w, totalH, d);
-          const walls = new THREE.Mesh(wallGeom, new THREE.MeshStandardMaterial({ color: 0xf5ead0, roughness: 0.78, metalness: 0.01 }));
-          walls.position.set(localX, groundY + plinthH + totalH/2, localZ); walls.rotation.y = rotY;
-          walls.castShadow = true; walls.receiveShadow = true; buildingsGroup.add(walls);
-
-          const edgeL = new THREE.LineSegments(new THREE.EdgesGeometry(wallGeom, 30), new THREE.LineBasicMaterial({ color: 0xaaaaaa, opacity: 0.3, transparent: true }));
-          edgeL.position.copy(walls.position); edgeL.rotation.copy(walls.rotation); buildingsGroup.add(edgeL);
-
-          const roofType = ub.roofType || 'gable';
-          const roofBaseY = groundY + plinthH + totalH;
-          const roofMat = new THREE.MeshStandardMaterial({ color: roofType === 'flat' ? 0x6b6b6b : 0xc45a2c, roughness: 0.82, metalness: 0.03 });
-
-          if (roofType === 'flat') {
-            const flatRoof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.2, d + 0.3), roofMat);
-            flatRoof.position.set(localX, roofBaseY + 0.1, localZ); flatRoof.rotation.y = rotY;
-            flatRoof.castShadow = true; buildingsGroup.add(flatRoof);
+            assetGroup = buildPremiumPool(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('garden') || buildingType.includes('jardin') || buildingType.includes('green')) {
+            assetGroup = buildPremiumGarden(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('parking') || buildingType.includes('stationnement')) {
+            assetGroup = buildPremiumParking(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('carport')) {
+            assetGroup = buildPremiumCarport(ub, groundY, localX, localZ, rotY);
           } else {
-            const pitch = ((ub.roofPitch || 35) * Math.PI) / 180;
-            const over = ub.roofOverhang || 0.3;
-            const halfW = w / 2 + over;
-            const halfD = d / 2 + over;
-            const roofH = (Math.min(w, d) / 2) * Math.tan(pitch);
-            const isLongX = w >= d;
-            const ridgePts = isLongX
-              ? [new THREE.Vector3(-halfW, roofH, 0), new THREE.Vector3(halfW, roofH, 0)]
-              : [new THREE.Vector3(0, roofH, -halfD), new THREE.Vector3(0, roofH, halfD)];
-            const p1 = new THREE.Vector3(-halfW, 0, halfD);
-            const p2 = new THREE.Vector3(halfW, 0, halfD);
-            const p3 = new THREE.Vector3(halfW, 0, -halfD);
-            const p4 = new THREE.Vector3(-halfW, 0, -halfD);
-            let roofVerts: Float32Array;
-            if (isLongX) {
-              roofVerts = new Float32Array([
-                ...p4.toArray(), ...p1.toArray(), ...ridgePts[0].toArray(),
-                ...p1.toArray(), ...ridgePts[1].toArray(), ...ridgePts[0].toArray(),
-                ...p2.toArray(), ...p3.toArray(), ...ridgePts[1].toArray(),
-                ...p3.toArray(), ...ridgePts[0].toArray(), ...ridgePts[1].toArray(),
-                ...p1.toArray(), ...p2.toArray(), ...ridgePts[1].toArray(),
-                ...p3.toArray(), ...p4.toArray(), ...ridgePts[0].toArray(),
-              ]);
-            } else {
-              roofVerts = new Float32Array([
-                ...p1.toArray(), ...p2.toArray(), ...ridgePts[0].toArray(),
-                ...p2.toArray(), ...ridgePts[1].toArray(), ...ridgePts[0].toArray(),
-                ...p3.toArray(), ...p4.toArray(), ...ridgePts[1].toArray(),
-                ...p4.toArray(), ...ridgePts[0].toArray(), ...ridgePts[1].toArray(),
-                ...p4.toArray(), ...p1.toArray(), ...ridgePts[0].toArray(),
-                ...p2.toArray(), ...p3.toArray(), ...ridgePts[1].toArray(),
-              ]);
-            }
-            const roofGeom = new THREE.BufferGeometry();
-            roofGeom.setAttribute('position', new THREE.BufferAttribute(roofVerts, 3));
-            roofGeom.computeVertexNormals();
-            const roof = new THREE.Mesh(roofGeom, roofMat);
-            roof.position.set(localX, roofBaseY, localZ); roof.rotation.y = rotY;
-            roof.castShadow = true; buildingsGroup.add(roof);
+            assetGroup = buildPremiumHouse(ub, groundY, localX, localZ, rotY);
           }
+          buildingsGroup.add(assetGroup);
         } catch { /* skip bad building */ }
       }
-      console.log(`[terrain3d] Rendered ${userBuildings.length} buildings into buildingsGroup`);
+      console.log(`[terrain3d] Rendered ${latestBuildings.length} premium buildings into buildingsGroup`);
     }
 
     setStatus("");
@@ -1165,127 +1339,69 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   }, [buildScene]);
 
   // ── Buildings-only update (no terrain rebuild) ──
-  // Runs whenever the 2D canvas elements change without triggering a full GPU teardown.
+  // Runs whenever the 2D canvas elements change. If the scene isn't ready yet
+  // (buildScene is still async), we retry in 200ms intervals until it is.
   useEffect(() => {
-    const sr = sceneRef.current;
-    if (!sr?.buildingsGroup || !canvasWidth || !canvasHeight || !pixelsPerMeter) return;
-    const { buildingsGroup, normPts } = sr;
-    const exag = exagRef.current;
+    let cancelled = false;
 
-    // Dispose & clear existing building meshes
-    buildingsGroup.traverse((obj) => {
-      if ((obj as THREE.Mesh).isMesh) {
-        const m = obj as THREE.Mesh;
-        m.geometry?.dispose();
-        if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose());
-        else m.material?.dispose();
+    function applyBuildings() {
+      const sr = sceneRef.current;
+      if (!sr?.buildingsGroup) {
+        // Scene not ready yet — retry after 200ms
+        if (!cancelled) setTimeout(applyBuildings, 200);
+        return;
       }
-    });
-    buildingsGroup.clear();
+      if (!canvasWidth || !canvasHeight || !pixelsPerMeter) return;
 
-    if (!userBuildings || userBuildings.length === 0) return;
-    const ppm = pixelsPerMeter;
+      const { buildingsGroup, normPts } = sr;
 
-    for (const ub of userBuildings) {
-      try {
-        const localX = (ub.canvasX - canvasWidth / 2) / ppm;
-        const localZ = (ub.canvasY - canvasHeight / 2) / ppm;
-        const rotY = ub.canvasAngle ? -ub.canvasAngle * DEG_TO_RAD : 0;
-        const groundY = normPts.length >= 3 ? idwInterpolate(localX, localZ, normPts, 2) : 0;
-        const w = ub.width || 6;
-        const d = ub.depth || 6;
-        const buildingType = (ub.type || ub.name || '').toLowerCase().trim();
-        void exag; // referenced for future exaggeration-scaled assets
+      // Dispose & clear existing building meshes
+      buildingsGroup.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const m = obj as THREE.Mesh;
+          m.geometry?.dispose();
+          if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose());
+          else (m.material as THREE.Material)?.dispose();
+        }
+      });
+      buildingsGroup.clear();
 
-        if (buildingType.includes('pool') || buildingType.includes('piscine')) {
-          const deckH = 0.1;
-          const deck = new THREE.Mesh(new THREE.BoxGeometry(w + 2, deckH, d + 2), new THREE.MeshStandardMaterial({ color: 0xddd0b8, roughness: 0.75 }));
-          deck.position.set(localX, groundY + deckH / 2, localZ); deck.rotation.y = rotY;
-          deck.receiveShadow = true; deck.castShadow = true; buildingsGroup.add(deck);
-          const water = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, d - 0.2), new THREE.MeshPhysicalMaterial({ color: 0x3ec8e8, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.78, transmission: 0.3, clearcoat: 1.0 }));
-          water.rotation.x = -Math.PI / 2; water.rotation.z = rotY;
-          water.position.set(localX, groundY + deckH + 0.01, localZ); buildingsGroup.add(water);
-          continue;
-        }
-        if (buildingType.includes('garden') || buildingType.includes('jardin') || buildingType.includes('green')) {
-          const lawn = new THREE.Mesh(new THREE.BoxGeometry(w, 0.15, d), new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.95 }));
-          lawn.position.set(localX, groundY + 0.075, localZ); lawn.rotation.y = rotY; buildingsGroup.add(lawn);
-          const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 });
-          ([{ p: [0, 0.55, d/2 - 0.15], s: [w*0.9, 0.8, 0.3] }, { p: [0, 0.55, -d/2 + 0.15], s: [w*0.9, 0.8, 0.3] }] as {p:number[],s:number[]}[]).forEach(h => {
-            const m = new THREE.Mesh(new THREE.BoxGeometry(h.s[0], h.s[1], h.s[2]), hedgeMat);
-            m.position.set(localX + h.p[0], groundY + h.p[1], localZ + h.p[2]); m.rotation.y = rotY; buildingsGroup.add(m);
-          });
-          continue;
-        }
-        if (buildingType.includes('terrace') || buildingType.includes('terrasse') || buildingType.includes('deck')) {
-          const deck = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), new THREE.MeshStandardMaterial({ color: 0xa1887f, roughness: 0.85 }));
-          deck.position.set(localX, groundY + 0.1, localZ); deck.rotation.y = rotY; buildingsGroup.add(deck);
-          continue;
-        }
-        if (buildingType.includes('parking') || buildingType.includes('stationnement')) {
-          const surf = new THREE.Mesh(new THREE.BoxGeometry(w, 0.08, d), new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.95 }));
-          surf.position.set(localX, groundY + 0.04, localZ); surf.rotation.y = rotY; buildingsGroup.add(surf);
-          const numSlots = Math.max(1, Math.round(w / 2.5));
-          for (let si = 0; si <= numSlots; si++) {
-            const sx = -w/2 + (w/numSlots) * si;
-            const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, d * 0.8), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-            stripe.position.set(localX + sx, groundY + 0.09, localZ); stripe.rotation.y = rotY; buildingsGroup.add(stripe);
+      if (!userBuildings || userBuildings.length === 0) {
+        console.log('[terrain3d] No buildings to render');
+        return;
+      }
+      const ppm = pixelsPerMeter;
+
+      for (const ub of userBuildings) {
+        try {
+          const localX = (ub.canvasX - canvasWidth / 2) / ppm;
+          const localZ = (ub.canvasY - canvasHeight / 2) / ppm;
+          const rotY = ub.canvasAngle ? -ub.canvasAngle * DEG_TO_RAD : 0;
+          const groundY = normPts.length >= 3 ? idwInterpolate(localX, localZ, normPts, 2) : 0;
+          const buildingType = (ub.type || ub.name || '').toLowerCase().trim();
+
+          let assetGroup: THREE.Group;
+          if (buildingType.includes('pool') || buildingType.includes('piscine')) {
+            assetGroup = buildPremiumPool(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('garden') || buildingType.includes('jardin') || buildingType.includes('green')) {
+            assetGroup = buildPremiumGarden(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('parking') || buildingType.includes('stationnement')) {
+            assetGroup = buildPremiumParking(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('carport')) {
+            assetGroup = buildPremiumCarport(ub, groundY, localX, localZ, rotY);
+          } else {
+            assetGroup = buildPremiumHouse(ub, groundY, localX, localZ, rotY);
           }
-          continue;
-        }
-        if (buildingType.includes('carport')) {
-          const cH = 2.5;
-          const postMat = new THREE.MeshStandardMaterial({ color: 0x757575, roughness: 0.5, metalness: 0.3 });
-          ([ [-1,-1],[-1,1],[1,-1],[1,1] ] as [number,number][]).forEach(([sx,sz]) => {
-            const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, cH, 8), postMat);
-            post.position.set(localX + sx*(w/2-0.15), groundY + cH/2, localZ + sz*(d/2-0.15));
-            post.castShadow = true; buildingsGroup.add(post);
-          });
-          const canopy = new THREE.Mesh(new THREE.BoxGeometry(w+0.3, 0.08, d+0.3), new THREE.MeshStandardMaterial({ color: 0x78909c, roughness: 0.6, metalness: 0.2, transparent: true, opacity: 0.85 }));
-          canopy.position.set(localX, groundY + cH, localZ); canopy.rotation.y = rotY; buildingsGroup.add(canopy);
-          continue;
-        }
-        // ── DEFAULT HOUSE/GARAGE ──
-        const totalH = ((ub.wallHeights?.ground || 0) + (ub.wallHeights?.first || 0) + (ub.wallHeights?.second || 0)) || 3;
-        const plinthH = 0.15;
-        const plinth = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, plinthH, d + 0.1), new THREE.MeshStandardMaterial({ color: 0x807872, roughness: 0.95 }));
-        plinth.position.set(localX, groundY + plinthH/2, localZ); plinth.rotation.y = rotY;
-        plinth.receiveShadow = true; plinth.castShadow = true; buildingsGroup.add(plinth);
-        const wallGeom = new THREE.BoxGeometry(w, totalH, d);
-        const walls = new THREE.Mesh(wallGeom, new THREE.MeshStandardMaterial({ color: 0xf5ead0, roughness: 0.78, metalness: 0.01 }));
-        walls.position.set(localX, groundY + plinthH + totalH/2, localZ); walls.rotation.y = rotY;
-        walls.castShadow = true; walls.receiveShadow = true; buildingsGroup.add(walls);
-        const edgeL = new THREE.LineSegments(new THREE.EdgesGeometry(wallGeom, 30), new THREE.LineBasicMaterial({ color: 0xaaaaaa, opacity: 0.3, transparent: true }));
-        edgeL.position.copy(walls.position); edgeL.rotation.copy(walls.rotation); buildingsGroup.add(edgeL);
-        const roofType = ub.roofType || 'gable';
-        const roofBaseY = groundY + plinthH + totalH;
-        const roofMat = new THREE.MeshStandardMaterial({ color: roofType === 'flat' ? 0x6b6b6b : 0xc45a2c, roughness: 0.82, metalness: 0.03 });
-        if (roofType === 'flat') {
-          const flatRoof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.2, d + 0.3), roofMat);
-          flatRoof.position.set(localX, roofBaseY + 0.1, localZ); flatRoof.rotation.y = rotY; buildingsGroup.add(flatRoof);
-        } else {
-          const pitch = ((ub.roofPitch || 35) * Math.PI) / 180;
-          const over = ub.roofOverhang || 0.3;
-          const halfW = w / 2 + over; const halfD = d / 2 + over;
-          const roofH = (Math.min(w, d) / 2) * Math.tan(pitch);
-          const isLongX = w >= d;
-          const ridgePts = isLongX
-            ? [new THREE.Vector3(-halfW, roofH, 0), new THREE.Vector3(halfW, roofH, 0)]
-            : [new THREE.Vector3(0, roofH, -halfD), new THREE.Vector3(0, roofH, halfD)];
-          const [p1, p2, p3, p4] = [new THREE.Vector3(-halfW, 0, halfD), new THREE.Vector3(halfW, 0, halfD), new THREE.Vector3(halfW, 0, -halfD), new THREE.Vector3(-halfW, 0, -halfD)];
-          const roofVerts = isLongX
-            ? new Float32Array([...p4.toArray(),...p1.toArray(),...ridgePts[0].toArray(),...p1.toArray(),...ridgePts[1].toArray(),...ridgePts[0].toArray(),...p2.toArray(),...p3.toArray(),...ridgePts[1].toArray(),...p3.toArray(),...ridgePts[0].toArray(),...ridgePts[1].toArray(),...p1.toArray(),...p2.toArray(),...ridgePts[1].toArray(),...p3.toArray(),...p4.toArray(),...ridgePts[0].toArray()])
-            : new Float32Array([...p1.toArray(),...p2.toArray(),...ridgePts[0].toArray(),...p2.toArray(),...ridgePts[1].toArray(),...ridgePts[0].toArray(),...p3.toArray(),...p4.toArray(),...ridgePts[1].toArray(),...p4.toArray(),...ridgePts[0].toArray(),...ridgePts[1].toArray(),...p4.toArray(),...p1.toArray(),...ridgePts[0].toArray(),...p2.toArray(),...p3.toArray(),...ridgePts[1].toArray()]);
-          const roofGeom = new THREE.BufferGeometry();
-          roofGeom.setAttribute('position', new THREE.BufferAttribute(roofVerts, 3));
-          roofGeom.computeVertexNormals();
-          const roof = new THREE.Mesh(roofGeom, roofMat);
-          roof.position.set(localX, roofBaseY, localZ); roof.rotation.y = rotY; buildingsGroup.add(roof);
-        }
-      } catch { /* skip bad building */ }
+          buildingsGroup.add(assetGroup);
+        } catch { /* skip bad building */ }
+      }
+      console.log(`[terrain3d] Buildings imperatively updated: ${userBuildings.length}`);
     }
-    console.log(`[terrain3d] Buildings imperatively updated: ${userBuildings?.length ?? 0}`);
+
+    applyBuildings();
+    return () => { cancelled = true; };
   }, [userBuildings, canvasWidth, canvasHeight, pixelsPerMeter]);
+
 
   useEffect(() => {
     const onResize = () => {

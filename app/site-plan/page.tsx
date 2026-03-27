@@ -75,11 +75,12 @@ import dynamic from "next/dynamic";
 const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
 const Terrain3DViewer = dynamic(() => import("@/components/three/Terrain3DViewer"), { ssr: false });
 import type { UserBuilding3D } from "@/components/three/Terrain3DViewer";
-import {
-  BuildingDetailPanel,
+import { BuildingDetailPanel,
   createDefaultBuilding,
   createBuildingFromOSM,
 } from "@/components/site-plan/BuildingDetailPanel";
+import { ElementPropertiesPanel } from "@/components/site-plan/ElementPropertiesPanel";
+
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
 import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
@@ -390,16 +391,20 @@ function SitePlanContent() {
       if (!bdId) return;
       const bd = buildingDetails.find((b) => b.id === bdId);
       if (!bd) return;
+      // Use surfaceType from canvas object (always lowercase: 'pool', 'garden', 'parking', 'house', etc.)
+      // Fall back to bd.name. This is the critical field for 3D factory dispatch.
+      const surfaceType = (obj.surfaceType as string | undefined)?.toLowerCase() || bd.name.toLowerCase();
+      // Fabric stores left/top as top-left corner; pass the center point to 3D viewer
+      const objWidth = (obj.width ?? 0) * (obj.scaleX ?? 1);
+      const objHeight = (obj.height ?? 0) * (obj.scaleY ?? 1);
       result.push({
         id: bd.id,
-        // bd.name is the lowercase templateId (e.g. 'garden', 'parking')
-        // so Terrain3DViewer's buildingType.includes('garden') checks always match.
-        name: bd.name,
-        type: bd.name,
+        name: surfaceType,
+        type: surfaceType,
         width: bd.width,
         depth: bd.depth,
-        canvasX: obj.left ?? 0,
-        canvasY: obj.top ?? 0,
+        canvasX: (obj.left ?? 0) + objWidth / 2,
+        canvasY: (obj.top ?? 0) + objHeight / 2,
         canvasAngle: obj.angle ?? 0,
         wallHeights: bd.wallHeights,
         roofType: bd.roof.type,
@@ -407,6 +412,7 @@ function SitePlanContent() {
         roofOverhang: bd.roof.overhang,
         color: bd.color,
       });
+
     });
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1922,8 +1928,20 @@ function SitePlanContent() {
       updateObjectMeasurements(e.target);
       runComplianceCheck();
     });
-    canvas.on("object:added", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
-    canvas.on("object:removed", () => { setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState(); });
+    canvas.on("object:added", (e: any) => {
+      // Skip ALL internal helper objects — triggering state here causes infinite loops
+      // because state updates → re-renders → useEffects remove helpers → object:removed → repeat
+      const o = e.target as any;
+      if (o?.isMeasurement || o?._snapHighlight || o?.isGrid || o?.isPolygonPreview || o?.isRegulatoryFootprint || o?.excludeFromExport) return;
+      setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState();
+    });
+    canvas.on("object:removed", (e: any) => {
+      const o = e.target as any;
+      if (o?.isMeasurement || o?._snapHighlight || o?.isGrid || o?.isPolygonPreview || o?.isRegulatoryFootprint || o?.excludeFromExport) return;
+      setIsDirty(true); updateLayers(canvas); runComplianceCheck(); pushUndoState();
+    });
+
+
 
     return () => { setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3869,6 +3887,52 @@ function SitePlanContent() {
               <canvas ref={canvasRef} className="shadow-2xl" />
             </div>
             <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
+
+            {/* ── Element Properties Panel (2D floating overlay) ── */}
+            {viewMode === "2d" && (() => {
+              const bdId = (selectedObject as any)?.buildingDetailId;
+              const selBuilding = bdId ? buildingDetails.find((b) => b.id === bdId) ?? null : null;
+              return selBuilding ? (
+                <ElementPropertiesPanel
+                  building={selBuilding}
+                  onSizeChange={(buildingId, patch) => {
+                    setBuildingDetails((prev) => {
+                      const next = prev.map((bd) =>
+                        bd.id === buildingId
+                          ? {
+                              ...bd,
+                              ...(patch.width != null && { width: patch.width }),
+                              ...(patch.depth != null && { depth: patch.depth }),
+                              ...(patch.wallHeights != null && { wallHeights: patch.wallHeights }),
+                              ...(patch.altitudeM !== undefined && { altitudeM: patch.altitudeM }),
+                            }
+                          : bd
+                      );
+                      const updated = next.find((b) => b.id === buildingId);
+                      const canvas = fabricRef.current;
+                      if (canvas && updated && (patch.width != null || patch.depth != null)) {
+                        const obj = canvas.getObjects().find((o: any) => o.id === buildingId);
+                        if (obj && obj.type === "rect") {
+                          const wPx = metersToPixels(updated.width);
+                          const dPx = metersToPixels(updated.depth);
+                          obj.set({ width: wPx, height: dPx });
+                          removeMeasurements(buildingId);
+                          addRectMeasurements(obj as fabric.Rect, buildingId);
+                          canvas.renderAll();
+                          updateLayers(canvas);
+                        }
+                      }
+                      return next;
+                    });
+                  }}
+                  onRoofChange={(buildingId, roof) => {
+                    setBuildingDetails((prev) =>
+                      prev.map((bd) => (bd.id === buildingId ? { ...bd, roof: { ...bd.roof, ...roof } } : bd))
+                    );
+                  }}
+                />
+              ) : null;
+            })()}
 
           </div>
 
