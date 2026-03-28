@@ -1,22 +1,15 @@
 /**
- * AltimetryUI.tsx — 3D Terrain Sculpting Overlay Controls
+ * AltimetryUI.tsx — Simplified "Advanced Terrain" FAB
  *
- * Enterprise-grade HTML/Tailwind overlay that sits on top of the 3D viewer.
- * Provides:
- *   1. Sculpt Mode toggle
- *   2. Brush configuration (radius, strength, falloff)
- *   3. Selected vertex elevation display + manual input
- *   4. Undo / Reset controls
- *
- * DESIGN:
- *   - Compact floating panel in the top-right corner of the 3D viewport
- *   - Semi-transparent dark glass aesthetic matching the editor theme
- *   - Non-blocking: never prevents interaction with the 3D canvas
+ * ▸ DEFAULT: A single, minimal FAB "Modifier le terrain" — not intimidating at all.
+ * ▸ ON CLICK: Slides out the existing brush/sculpt controls in a compact panel.
+ * ▸ The underlying sculpt math (AltimetrySculptor.ts) is completely untouched.
+ * ▸ Zero regression on undo/reset/brush logic — all still wired.
  */
 
 "use client";
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Mountain,
   Undo2,
@@ -25,44 +18,43 @@ import {
   Minus,
   Plus,
   MousePointer2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useSculptStore } from "@/store/useSculptStore";
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
 interface AltimetryUIProps {
-  /**
-   * Function to compute the real-world NGF elevation for a given vertex.
-   * Called when the UI needs to display the current elevation.
-   * Receives: vertexIndex → returns elevation in metres NGF.
-   */
   getVertexNGF?: (vertexIndex: number) => number;
-  /** Optional CSS class for positioning */
   className?: string;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function AltimetryUI({ getVertexNGF, className = "" }: AltimetryUIProps) {
-  const isSculptMode = useSculptStore((s) => s.isSculptMode);
-  const setSculptMode = useSculptStore((s) => s.setSculptMode);
-  const brush = useSculptStore((s) => s.brush);
-  const setBrush = useSculptStore((s) => s.setBrush);
+  const isSculptMode   = useSculptStore((s) => s.isSculptMode);
+  const setSculptMode  = useSculptStore((s) => s.setSculptMode);
+  const brush          = useSculptStore((s) => s.brush);
+  const setBrush       = useSculptStore((s) => s.setBrush);
   const selectedVertex = useSculptStore((s) => s.selectedVertex);
-  const hoveredVertex = useSculptStore((s) => s.hoveredVertex);
+  const hoveredVertex  = useSculptStore((s) => s.hoveredVertex);
   const elevationDeltas = useSculptStore((s) => s.elevationDeltas);
-  const setExactDelta = useSculptStore((s) => s.setExactDelta);
-  const undo = useSculptStore((s) => s.undo);
+  const setExactDelta  = useSculptStore((s) => s.setExactDelta);
+  const undo           = useSculptStore((s) => s.undo);
   const resetAllDeltas = useSculptStore((s) => s.resetAllDeltas);
-  const undoStack = useSculptStore((s) => s.undoStack);
+  const undoStack      = useSculptStore((s) => s.undoStack);
+
+  /** Whether the advanced controls drawer is open */
+  const [panelOpen, setPanelOpen] = useState(false);
 
   const activeVertex = selectedVertex ?? hoveredVertex;
 
-  // Compute the real-world elevation for the active vertex
   const currentElevation = useMemo(() => {
     if (activeVertex === null || !getVertexNGF) return null;
     return getVertexNGF(activeVertex);
-  }, [activeVertex, getVertexNGF, elevationDeltas]); // re-derive when deltas change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVertex, getVertexNGF, elevationDeltas]);
 
   const currentDelta = useMemo(() => {
     if (activeVertex === null) return 0;
@@ -81,46 +73,28 @@ export default function AltimetryUI({ getVertexNGF, className = "" }: AltimetryU
   }, [isSculptMode, setSculptMode]);
 
   const handleRadiusChange = useCallback(
-    (dir: 1 | -1) => {
-      const newR = Math.max(0.5, Math.min(20.0, brush.radius + dir * 0.5));
-      setBrush({ radius: newR });
-    },
+    (dir: 1 | -1) => setBrush({ radius: Math.max(0.5, Math.min(20.0, brush.radius + dir * 0.5)) }),
     [brush.radius, setBrush]
   );
 
   const handleStrengthChange = useCallback(
-    (dir: 1 | -1) => {
-      const newS = Math.max(0.002, Math.min(0.15, brush.strength + dir * 0.005));
-      setBrush({ strength: Math.round(newS * 1000) / 1000 });
-    },
+    (dir: 1 | -1) => setBrush({ strength: Math.round(Math.max(0.002, Math.min(0.15, brush.strength + dir * 0.005)) * 1000) / 1000 }),
     [brush.strength, setBrush]
   );
 
-  const handleFalloffToggle = useCallback(() => {
-    setBrush({ falloff: brush.falloff === "smooth" ? "linear" : "smooth" });
-  }, [brush.falloff, setBrush]);
+  const handleFalloffToggle = useCallback(
+    () => setBrush({ falloff: brush.falloff === "smooth" ? "linear" : "smooth" }),
+    [brush.falloff, setBrush]
+  );
 
   const handleManualElevation = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (activeVertex === null || !getVertexNGF) return;
       const targetNGF = parseFloat(e.target.value);
       if (isNaN(targetNGF)) return;
-
-      // Compute what delta we need:
-      // currentNGF = originalNGF + existingDelta/exag (simplified)
-      // We store the raw scene-space delta — but for manual input,
-      // we set an absolute delta that produces the desired NGF.
-      // The getVertexNGF callback already handles exag conversion,
-      // so we compute: newDelta = (targetNGF - originalNGF) * exag
-      // Since we don't have exag here, we compute relative to current:
       const currentNGF = getVertexNGF(activeVertex);
       const existingDelta = elevationDeltas[activeVertex] ?? 0;
-      // delta that was needed to get from original to current:
-      // we don't know exag, so we use the difference approach:
-      const additionalDelta = targetNGF - currentNGF;
-      // This won't be perfectly scene-space-accurate without the exag factor,
-      // but for the UI it provides reasonable manual control.
-      setExactDelta(activeVertex, existingDelta + additionalDelta);
+      setExactDelta(activeVertex, existingDelta + (targetNGF - currentNGF));
     },
     [activeVertex, getVertexNGF, elevationDeltas, setExactDelta]
   );
@@ -129,193 +103,161 @@ export default function AltimetryUI({ getVertexNGF, className = "" }: AltimetryU
 
   return (
     <div
-      className={`
-        absolute top-3 right-3 z-50 w-64
-        flex flex-col gap-2
-        ${className}
-      `}
+      className={`absolute bottom-5 right-4 z-50 flex flex-col items-end gap-2 ${className}`}
       style={{ pointerEvents: "auto" }}
     >
-      {/* ═══ Toggle Button ═══ */}
-      <button
-        onClick={handleToggleSculpt}
-        className={`
-          flex items-center gap-2.5 px-4 py-2.5 rounded-xl
-          text-sm font-semibold tracking-wide
-          backdrop-blur-md border transition-all duration-200
-          ${
-            isSculptMode
-              ? "bg-amber-500/90 border-amber-400/50 text-slate-900 shadow-lg shadow-amber-500/25 hover:bg-amber-500"
-              : "bg-slate-800/80 border-slate-600/40 text-slate-200 hover:bg-slate-700/80 hover:border-slate-500/50"
-          }
-        `}
-      >
-        <Mountain className="w-4 h-4" />
-        {isSculptMode ? "Sculpting Active" : "Enable Terrain Sculpting"}
-      </button>
+      {/* ── Advanced Controls Drawer (hidden by default) ── */}
+      {panelOpen && (
+        <div
+          className="rounded-2xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom-3 duration-200"
+          style={{
+            background: "rgba(15,23,42,0.92)",
+            backdropFilter: "blur(16px) saturate(180%)",
+            border: "1px solid rgba(148,163,184,0.15)",
+            width: 240,
+            color: "#e2e8f0",
+          }}
+        >
+          {/* Sculpt Mode Toggle */}
+          <button
+            onClick={handleToggleSculpt}
+            className={`
+              w-full flex items-center gap-2.5 px-4 py-3
+              text-sm font-semibold tracking-wide border-b transition-all duration-150
+              ${isSculptMode
+                ? "bg-amber-500/20 border-amber-500/30 text-amber-300"
+                : "border-slate-700/50 text-slate-300 hover:bg-slate-700/40"
+              }
+            `}
+          >
+            <Mountain className="w-4 h-4 shrink-0" />
+            {isSculptMode ? "Sculpture active" : "Activer la sculpture"}
+            <span className={`ml-auto w-2 h-2 rounded-full ${isSculptMode ? "bg-amber-400" : "bg-slate-600"}`} />
+          </button>
 
-      {/* ═══ Controls Panel (only when sculpt mode is on) ═══ */}
-      {isSculptMode && (
-        <div className="rounded-xl bg-slate-900/85 backdrop-blur-md border border-slate-700/50 overflow-hidden shadow-xl">
-          {/* Brush Settings */}
-          <div className="px-3 pt-3 pb-2 space-y-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <span>Brush Settings</span>
-              <button
-                onClick={handleFalloffToggle}
-                className="px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 hover:bg-slate-600/60 text-[9px] font-medium"
-                title="Toggle brush falloff"
-              >
-                {brush.falloff === "smooth" ? "⊛ Smooth" : "△ Linear"}
-              </button>
-            </div>
-
-            {/* Radius */}
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <Circle className="w-3 h-3" /> Radius
-              </span>
-              <div className="flex items-center gap-1">
+          {/* Brush controls — only when sculpt mode on */}
+          {isSculptMode && (
+            <div className="px-3 pt-3 pb-2 space-y-3">
+              {/* Brush header */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pinceau</span>
                 <button
-                  onClick={() => handleRadiusChange(-1)}
-                  className="w-5 h-5 rounded bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center"
+                  onClick={handleFalloffToggle}
+                  className="px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300 hover:bg-slate-600/60 text-[9px] font-medium"
                 >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <span className="text-xs font-mono text-slate-200 w-12 text-center">
-                  {brush.radius.toFixed(1)}m
-                </span>
-                <button
-                  onClick={() => handleRadiusChange(1)}
-                  className="w-5 h-5 rounded bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center"
-                >
-                  <Plus className="w-3 h-3" />
+                  {brush.falloff === "smooth" ? "⊛ Doux" : "△ Linéaire"}
                 </button>
               </div>
-            </div>
 
-            {/* Strength */}
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <MousePointer2 className="w-3 h-3" /> Strength
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => handleStrengthChange(-1)}
-                  className="w-5 h-5 rounded bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center"
-                >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <span className="text-xs font-mono text-slate-200 w-12 text-center">
-                  {brush.strength.toFixed(3)}
+              {/* Radius */}
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <Circle className="w-3 h-3" /> Rayon
                 </span>
-                <button
-                  onClick={() => handleStrengthChange(1)}
-                  className="w-5 h-5 rounded bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="h-px bg-slate-700/50" />
-
-          {/* Active Vertex Info */}
-          <div className="px-3 py-2.5">
-            {activeVertex !== null && currentElevation !== null ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Vertex #{activeVertex}
-                  </span>
-                  {Math.abs(currentDelta) > 0.001 && (
-                    <span
-                      className={`text-[10px] font-mono font-bold ${
-                        currentDelta > 0 ? "text-emerald-400" : "text-red-400"
-                      }`}
-                    >
-                      {currentDelta > 0 ? "+" : ""}
-                      {currentDelta.toFixed(3)}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-slate-400 whitespace-nowrap">
-                    NGF (m):
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={currentElevation.toFixed(2)}
-                    onChange={handleManualElevation}
-                    className="
-                      flex-1 px-2 py-1 rounded-md text-xs font-mono
-                      bg-slate-800/80 border border-slate-600/50
-                      text-slate-200 focus:border-amber-500/60
-                      focus:outline-none focus:ring-1 focus:ring-amber-500/30
-                    "
-                  />
+                <div className="flex items-center gap-1">
+                  <button onClick={() => handleRadiusChange(-1)} className="w-6 h-6 rounded-lg bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center">
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-xs font-mono text-slate-200 w-12 text-center">{brush.radius.toFixed(1)}m</span>
+                  <button onClick={() => handleRadiusChange(1)} className="w-6 h-6 rounded-lg bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center">
+                    <Plus className="w-3 h-3" />
+                  </button>
                 </div>
               </div>
-            ) : (
-              <p className="text-[11px] text-slate-500 italic text-center py-1">
-                Hover or click a terrain vertex
-              </p>
-            )}
-          </div>
 
-          {/* Divider */}
-          <div className="h-px bg-slate-700/50" />
+              {/* Strength */}
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <MousePointer2 className="w-3 h-3" /> Force
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => handleStrengthChange(-1)} className="w-6 h-6 rounded-lg bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center">
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-xs font-mono text-slate-200 w-12 text-center">{brush.strength.toFixed(3)}</span>
+                  <button onClick={() => handleStrengthChange(1)} className="w-6 h-6 rounded-lg bg-slate-700/80 text-slate-300 hover:bg-slate-600 flex items-center justify-center">
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
 
-          {/* Actions */}
-          <div className="px-3 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => undo()}
-                disabled={undoStack.length === 0}
-                className={`
-                  flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium
-                  transition-colors
-                  ${
-                    undoStack.length > 0
-                      ? "bg-slate-700/60 text-slate-300 hover:bg-slate-600/60"
-                      : "bg-slate-800/40 text-slate-600 cursor-not-allowed"
-                  }
-                `}
-                title="Undo last sculpt action"
-              >
-                <Undo2 className="w-3 h-3" /> Undo
-              </button>
+              {/* Active vertex elevation input */}
+              {activeVertex !== null && currentElevation !== null && (
+                <div className="border-t border-slate-700/50 pt-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Élévation</span>
+                    {Math.abs(currentDelta) > 0.001 && (
+                      <span className={`text-[10px] font-mono font-bold ${currentDelta > 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {currentDelta > 0 ? "+" : ""}{currentDelta.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[11px] text-slate-400 whitespace-nowrap">NGF (m):</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={currentElevation.toFixed(2)}
+                      onChange={handleManualElevation}
+                      className="flex-1 px-2 py-1 rounded-lg text-xs font-mono bg-slate-800/80 border border-slate-600/50 text-slate-200 focus:border-amber-500/60 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                    />
+                  </div>
+                </div>
+              )}
 
-              <button
-                onClick={() => resetAllDeltas()}
-                disabled={modifiedCount === 0}
-                className={`
-                  flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium
-                  transition-colors
-                  ${
-                    modifiedCount > 0
-                      ? "bg-red-500/15 text-red-300 hover:bg-red-500/25"
-                      : "bg-slate-800/40 text-slate-600 cursor-not-allowed"
-                  }
-                `}
-                title="Reset all terrain modifications"
-              >
-                <RotateCcw className="w-3 h-3" /> Reset
-              </button>
+              {/* Undo / Reset */}
+              <div className="border-t border-slate-700/50 pt-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => undo()}
+                    disabled={undoStack.length === 0}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${undoStack.length > 0 ? "bg-slate-700/60 text-slate-300 hover:bg-slate-600/60" : "bg-slate-800/40 text-slate-600 cursor-not-allowed"}`}
+                  >
+                    <Undo2 className="w-3 h-3" /> Annuler
+                  </button>
+                  <button
+                    onClick={() => resetAllDeltas()}
+                    disabled={modifiedCount === 0}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${modifiedCount > 0 ? "bg-red-500/15 text-red-300 hover:bg-red-500/25" : "bg-slate-800/40 text-slate-600 cursor-not-allowed"}`}
+                  >
+                    <RotateCcw className="w-3 h-3" /> Réinitialiser
+                  </button>
+                </div>
+                {modifiedCount > 0 && (
+                  <span className="text-[10px] font-mono text-amber-400/80">{modifiedCount} pts</span>
+                )}
+              </div>
             </div>
-
-            {modifiedCount > 0 && (
-              <span className="text-[10px] font-mono text-amber-400/80">
-                {modifiedCount} pts
-              </span>
-            )}
-          </div>
+          )}
         </div>
       )}
+
+      {/* ── Main FAB trigger ── */}
+      <button
+        onClick={() => setPanelOpen((o) => !o)}
+        className="flex items-center gap-2.5 pl-4 pr-3 py-2.5 rounded-2xl shadow-xl transition-all duration-200 group"
+        style={{
+          background: panelOpen
+            ? "rgba(15,23,42,0.95)"
+            : "rgba(255,255,255,0.88)",
+          backdropFilter: "blur(16px) saturate(180%)",
+          WebkitBackdropFilter: "blur(16px) saturate(180%)",
+          border: panelOpen
+            ? "1px solid rgba(148,163,184,0.20)"
+            : "1px solid rgba(148,163,184,0.28)",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.14), inset 0 1px 0 rgba(255,255,255,0.5)",
+          color: panelOpen ? "#e2e8f0" : "#334155",
+        }}
+      >
+        <Mountain className="w-4 h-4 shrink-0" style={{ color: panelOpen ? "#fbbf24" : "#64748b" }} />
+        <span className="text-sm font-semibold whitespace-nowrap">Terrain avancé</span>
+        {modifiedCount > 0 && (
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-400/90 text-[9px] font-bold text-slate-900">
+            {modifiedCount > 9 ? "9+" : modifiedCount}
+          </span>
+        )}
+        {panelOpen ? <ChevronDown className="w-3.5 h-3.5 opacity-60" /> : <ChevronUp className="w-3.5 h-3.5 opacity-60" />}
+      </button>
     </div>
   );
 }

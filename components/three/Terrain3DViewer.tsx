@@ -1559,7 +1559,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     <div className="relative w-full h-full" style={{ minHeight: 300, background: "#c8ddf0" }}>
       <div ref={containerRef} className="w-full h-full" />
 
-      {/* ── Altimetry Sculpt UI Overlay ── */}
+      {/* ── Altimetry FAB — single clean entry point for terrain editing ── */}
       {isReady && (
         <AltimetryUI
           getVertexNGF={terrainDataRef.current
@@ -1574,59 +1574,6 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
         />
       )}
 
-      {/* ── Height Exaggeration UI Panel ── */}
-      {isReady && (
-        <div
-          className="absolute left-4 top-4 z-20 flex flex-col gap-3 p-4 rounded-xl"
-          style={{
-            background: "rgba(15, 23, 42, 0.90)",
-            backdropFilter: "blur(12px)",
-            border: "1px solid rgba(148, 163, 184, 0.2)",
-            width: 220,
-            color: "#e2e8f0",
-          }}
-        >
-          <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#94a3b8" }}>Terrain Controls</div>
-          {/* Height Exaggeration Slider */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={{ color: "#cbd5e1" }}>🏔️ Height Exaggeration</span>
-              <span className="text-xs font-mono font-bold" style={{ color: "#38bdf8" }}>{zScale.toFixed(1)}×</span>
-            </div>
-            <input
-              type="range"
-              min="0.5"
-              max="5"
-              step="0.1"
-              value={zScale}
-              onChange={(e) => setZScale(parseFloat(e.target.value))}
-              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, #0ea5e9 0%, #0ea5e9 ${((zScale - 0.5) / 4.5) * 100}%, #334155 ${((zScale - 0.5) / 4.5) * 100}%, #334155 100%)`,
-              }}
-            />
-          </div>
-          {/* Reset View Button */}
-          <button
-            onClick={() => {
-              if (sceneRef.current?.controls) {
-                sceneRef.current.controls.reset();
-              }
-            }}
-            className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-            style={{
-              background: "rgba(51, 65, 85, 0.8)",
-              color: "#94a3b8",
-              border: "1px solid rgba(148, 163, 184, 0.15)",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(71, 85, 105, 0.9)"; e.currentTarget.style.color = "#e2e8f0"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(51, 65, 85, 0.8)"; e.currentTarget.style.color = "#94a3b8"; }}
-          >
-            🔄 Reset View
-          </button>
-        </div>
-      )}
-
       {/* ── Loading Overlay ── */}
       {(!isReady || status) && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -1635,7 +1582,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
             )}
             <span className="text-sm text-slate-600 font-medium max-w-xs text-center">
-              {status || "Building 3D terrain..."}
+              {status || "Construction du terrain 3D..."}
             </span>
           </div>
         </div>

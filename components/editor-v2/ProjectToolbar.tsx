@@ -1,156 +1,199 @@
 "use client";
 
 /**
- * ProjectToolbar — Render-Isolated Right-Side Panel (Mandate 2)
+ * ProjectToolbar — Minimal Floating Tool Palette (Phase 1 Refactor)
  *
- * React.memo'd. Reads ONLY useActiveToolSlice() + useSummarySlice() from Zustand.
- * Clicking a tool button → Zustand state update → ONLY this component re-renders.
- * The canvas wrapper (SitePlanEditorV2) stays completely frozen.
- *
- * Contains:
- *  - OUTILS: 2-column tool grid (Sélection, Bâtiment, Parking, etc.)
- *  - TABLEAU RÉCAPITULATIF: Live summary from compliance report
+ * ▸ 5 core tools visible at all times: Sélection, Maison, Piscine, Jardin, Terrasse
+ * ▸ 1 expandable "Plus" drawer revealing secondary tools
+ * ▸ Glassmorphism pill design — premium Apple-like aesthetic
+ * ▸ React.memo'd — ONLY re-renders when activeTool changes (zero canvas impact)
  */
 
-import React, { memo } from "react";
+import React, { memo, useState, useCallback } from "react";
 import {
   MousePointer2,
   Home,
-  Car,
   Waves,
-  Pentagon,
-  Zap,
   TreePine,
-  Shrub,
+  LayoutGrid,
+  Plus,
+  X,
+  Car,
+  Zap,
+  Pentagon,
 } from "lucide-react";
-
 import {
   useActiveToolSlice,
-  useSummarySlice,
   type EditorTool,
 } from "@/store/useUrbAssistProjectStore";
 
 // ─── Tool Definitions ─────────────────────────────────────────────────────────
 
-const TOOLS: { id: EditorTool; label: string; Icon: React.ElementType }[] = [
-  { id: "select",  label: "Sélection",  Icon: MousePointer2 },
-  { id: "house",   label: "Maison",     Icon: Home },
-  { id: "garage",  label: "Garage",     Icon: Car },
-  { id: "pool",    label: "Piscine",    Icon: Waves },
-  { id: "parking", label: "Parking",    Icon: Car },
-  { id: "garden",  label: "Jardin",     Icon: TreePine },
-  { id: "terrace", label: "Terrasse",   Icon: Pentagon },
-  { id: "access",  label: "Accès",      Icon: Zap },
-  { id: "vrd",     label: "Réseau",     Icon: Zap },
-  { id: "freeform",label: "Forme libre",Icon: Pentagon },
+interface ToolDef {
+  id: EditorTool;
+  label: string;
+  Icon: React.ElementType;
+  color: string;        // active tint color
+  dot: string;          // dot indicator color (Tailwind bg-*)
+}
+
+const PRIMARY_TOOLS: ToolDef[] = [
+  { id: "select",  label: "Sélection", Icon: MousePointer2, color: "#64748b", dot: "bg-slate-400" },
+  { id: "house",   label: "Maison",    Icon: Home,          color: "#2563eb", dot: "bg-blue-500"  },
+  { id: "pool",    label: "Piscine",   Icon: Waves,         color: "#0891b2", dot: "bg-cyan-500"  },
+  { id: "garden",  label: "Jardin",    Icon: TreePine,      color: "#16a34a", dot: "bg-green-500" },
+  { id: "terrace", label: "Terrasse",  Icon: LayoutGrid,    color: "#d97706", dot: "bg-amber-500" },
 ];
 
-// ─── Tool Grid ──────────────────────────────────────────────────────────────
+const SECONDARY_TOOLS: ToolDef[] = [
+  { id: "garage",  label: "Garage",    Icon: Car,      color: "#7c3aed", dot: "bg-violet-500" },
+  { id: "parking", label: "Parking",   Icon: Car,      color: "#475569", dot: "bg-slate-500"  },
+  { id: "access",  label: "Accès",     Icon: Zap,      color: "#ea580c", dot: "bg-orange-500" },
+  { id: "vrd",     label: "Réseau",    Icon: Zap,      color: "#0f766e", dot: "bg-teal-500"   },
+  { id: "freeform",label: "Libre",     Icon: Pentagon, color: "#9333ea", dot: "bg-purple-500" },
+];
 
-const ToolGrid = memo(function ToolGrid() {
-  const { activeTool, setActiveTool } = useActiveToolSlice();
+// ─── Single Tool Button ────────────────────────────────────────────────────────
 
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {TOOLS.map(({ id, label, Icon }) => {
-        const isActive = activeTool === id;
-        return (
-          <button
-            key={id}
-            onClick={() => setActiveTool(id)}
-            className={`
-              flex flex-col items-center justify-center gap-1.5 py-3 px-2 rounded-xl
-              transition-all duration-150 text-xs font-medium
-              ${isActive
-                ? "bg-blue-50 text-blue-700 ring-2 ring-blue-200 shadow-sm"
-                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 border border-slate-200"
-              }
-            `}
-          >
-            {React.createElement(Icon, { size: 20, strokeWidth: isActive ? 2.2 : 1.5 })}
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
-});
+interface ToolButtonProps {
+  tool: ToolDef;
+  isActive: boolean;
+  onClick: (id: EditorTool) => void;
+  compact?: boolean;
+}
 
-// ─── Summary Table ──────────────────────────────────────────────────────────
-
-const SummaryTable = memo(function SummaryTable() {
-  const { complianceReport, objectCount } = useSummarySlice();
-
-  const parcelArea = complianceReport?.parcelAreaM2 ?? 0;
-  const buildingArea = complianceReport?.totalBuildingAreaM2 ?? 0;
-  const coveragePct = complianceReport?.coverageRatio
-    ? (complianceReport.coverageRatio * 100).toFixed(1)
-    : "0.0";
-  const isOver = complianceReport?.coverageExceeded ?? false;
+const ToolButton = memo(function ToolButton({ tool, isActive, onClick, compact }: ToolButtonProps) {
+  const { id, label, Icon, color } = tool;
 
   return (
-    <div className="space-y-3">
-      {/* Parcel area */}
-      <div className="border border-slate-200 rounded-xl p-3 bg-white">
-        <div className="text-[11px] text-slate-500 font-medium">Surface de la parcelle</div>
-        <div className="text-2xl font-bold text-slate-900 mt-0.5">
-          {parcelArea > 0 ? parcelArea.toFixed(1) : "—"} m²
-        </div>
-        <div className="text-[11px] text-slate-400 mt-1">
-          Bâtiments existants : {objectCount} (rendus: {objectCount})
-        </div>
-      </div>
+    <button
+      key={id}
+      onClick={() => onClick(id)}
+      title={label}
+      style={isActive ? { backgroundColor: color + "18", color } : undefined}
+      className={`
+        group relative flex flex-col items-center justify-center gap-1
+        ${compact ? "w-11 h-11" : "w-14 h-14"}
+        rounded-2xl transition-all duration-150
+        ${isActive
+          ? "shadow-sm ring-1 ring-inset"
+          : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/80"
+        }
+      `}
+    >
+      {/* Active indicator dot */}
+      {isActive && (
+        <span
+          className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
 
-      {/* Coverage breakdown */}
-      <div className="border border-slate-200 rounded-xl p-3 bg-white space-y-2">
-        <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">
-          Espaces verts et espaces libres
-        </div>
-        {buildingArea > 0 && (
-          <div className="flex justify-between text-xs text-slate-600">
-            <span>Building (imp.)</span>
-            <span className="font-mono">{buildingArea.toFixed(1)} m²</span>
-          </div>
-        )}
-        <div className="border-t border-slate-100 pt-2 space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-600">CES (emprise)</span>
-            <span className={`font-bold font-mono ${isOver ? "text-red-600" : "text-emerald-600"}`}>
-              {coveragePct}%
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-600">Espaces verts</span>
-            <span className="font-bold font-mono text-emerald-600">
-              {parcelArea > 0 ? ((1 - (complianceReport?.coverageRatio ?? 0)) * 100).toFixed(1) : "0.0"}%
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+      {React.createElement(Icon as React.ElementType<{ size: number; strokeWidth: number }>, { size: compact ? 18 : 20, strokeWidth: isActive ? 2.2 : 1.6 })}
+
+      {!compact && (
+        <span className="text-[9px] font-semibold tracking-wide leading-none" style={{ letterSpacing: "0.04em" }}>
+          {label.toUpperCase()}
+        </span>
+      )}
+    </button>
   );
 });
 
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
 const ProjectToolbar = memo(function ProjectToolbar() {
+  const { activeTool, setActiveTool } = useActiveToolSlice();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const handleTool = useCallback((id: EditorTool) => {
+    setActiveTool(id);
+    setMoreOpen(false);
+  }, [setActiveTool]);
+
+  const toggleMore = useCallback(() => setMoreOpen((o) => !o), []);
+
+  const isSecondaryActive = SECONDARY_TOOLS.some((t) => t.id === activeTool);
+
   return (
-    <div className="w-72 bg-slate-50 border-l border-slate-200 overflow-y-auto shrink-0 flex flex-col">
-      {/* Tool Grid */}
-      <div className="p-4 border-b border-slate-200">
-        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-3">
-          Outils
-        </h3>
-        <ToolGrid />
+    <div
+      className="absolute left-4 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2"
+      style={{ pointerEvents: "auto" }}
+    >
+      {/* ── Main pill ── */}
+      <div
+        className="flex flex-col items-center gap-1 p-2 rounded-3xl shadow-2xl"
+        style={{
+          background: "rgba(255,255,255,0.88)",
+          backdropFilter: "blur(24px) saturate(180%)",
+          WebkitBackdropFilter: "blur(24px) saturate(180%)",
+          border: "1px solid rgba(148,163,184,0.22)",
+          boxShadow:
+            "0 8px 32px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.8)",
+        }}
+      >
+        {PRIMARY_TOOLS.map((tool) => (
+          <ToolButton
+            key={tool.id}
+            tool={tool}
+            isActive={activeTool === tool.id}
+            onClick={handleTool}
+          />
+        ))}
+
+        {/* Divider */}
+        <div className="w-8 h-px bg-slate-200/80 my-1" />
+
+        {/* More button */}
+        <button
+          onClick={toggleMore}
+          title="Plus d'outils"
+          className={`
+            relative flex flex-col items-center justify-center gap-1 w-14 h-14 rounded-2xl
+            transition-all duration-150
+            ${moreOpen || isSecondaryActive
+              ? "bg-slate-900 text-white"
+              : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/80"
+            }
+          `}
+        >
+          {moreOpen
+            ? <X size={20} strokeWidth={2} />
+            : <Plus size={20} strokeWidth={1.6} />
+          }
+          <span className="text-[9px] font-semibold tracking-wide" style={{ letterSpacing: "0.04em" }}>
+            {moreOpen ? "FERMER" : "PLUS"}
+          </span>
+          {isSecondaryActive && !moreOpen && (
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-slate-400" />
+          )}
+        </button>
       </div>
 
-      {/* Summary Table */}
-      <div className="p-4 flex-1">
-        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-3">
-          Tableau récapitulatif
-        </h3>
-        <SummaryTable />
-      </div>
+      {/* ── Expandable secondary drawer ── */}
+      {moreOpen && (
+        <div
+          className="flex flex-col items-center gap-1 p-2 rounded-3xl shadow-xl animate-in slide-in-from-top-2 duration-150"
+          style={{
+            background: "rgba(255,255,255,0.92)",
+            backdropFilter: "blur(20px) saturate(180%)",
+            WebkitBackdropFilter: "blur(20px) saturate(180%)",
+            border: "1px solid rgba(148,163,184,0.22)",
+            boxShadow:
+              "0 4px 16px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.8)",
+          }}
+        >
+          {SECONDARY_TOOLS.map((tool) => (
+            <ToolButton
+              key={tool.id}
+              tool={tool}
+              isActive={activeTool === tool.id}
+              onClick={handleTool}
+              compact
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 });

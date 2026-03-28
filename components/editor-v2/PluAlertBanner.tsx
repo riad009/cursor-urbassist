@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * PluAlertBanner — Render-Isolated PLU Compliance Banner
+ * PluAlertBanner — Plain-French Actionable Compliance Banner
  *
- * React.memo'd. Reads ONLY useComplianceSlice() from Zustand.
- * When the user clicks a tool or moves a canvas object, this component
- * does NOT re-render unless the compliance report itself changes.
+ * ▸ Translates technical PLU violations into simple, human-readable French.
+ * ▸ ZERO jargon — "Réduisez l'emprise au sol de X m²" not "CES 52% / 50%".
+ * ▸ React.memo'd — only re-renders when complianceReport changes.
  */
 
 import React, { memo } from "react";
@@ -17,44 +17,66 @@ const PluAlertBanner = memo(function PluAlertBanner() {
 
   if (!complianceReport || complianceReport.status === "no-data") {
     return (
-      <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-medium">
-        <Info size={14} />
-        <span>Placez des éléments pour voir l&apos;analyse PLU en temps réel</span>
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-medium">
+        <Info size={13} className="shrink-0" />
+        <span>Placez des éléments sur la parcelle pour voir l&apos;analyse de conformité en temps réel.</span>
       </div>
     );
   }
 
-  const { status, coverageRatio, maxCoverageRatio, setbackViolations, totalBuildingAreaM2, parcelAreaM2 } = complianceReport;
-  const coveragePct = (coverageRatio * 100).toFixed(1);
-  const maxPct = maxCoverageRatio != null ? (maxCoverageRatio * 100).toFixed(0) : null;
-  const violations = setbackViolations ?? [];
+  const {
+    status,
+    coverageRatio,
+    maxCoverageRatio,
+    setbackViolations,
+    totalBuildingAreaM2,
+    parcelAreaM2,
+  } = complianceReport;
 
   if (status === "compliant") {
+    const greenSpace = parcelAreaM2 > 0
+      ? ((1 - coverageRatio) * parcelAreaM2).toFixed(0)
+      : "–";
     return (
-      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs font-medium">
-        <CheckCircle size={14} />
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs font-medium">
+        <CheckCircle size={13} className="shrink-0 text-emerald-500" />
         <span>
-          CES {coveragePct}%{maxPct ? ` / ${maxPct}%` : ""} · {totalBuildingAreaM2.toFixed(1)} m² sur {parcelAreaM2.toFixed(0)} m²
+          Votre projet est conforme aux règles PLU. ·{" "}
+          <span className="font-semibold">{totalBuildingAreaM2.toFixed(0)} m²</span> construits
+          · <span className="font-semibold">{greenSpace} m²</span> d&apos;espaces verts conservés.
         </span>
       </div>
     );
   }
 
-  // Violation state
+  // ── Build plain-language violation messages ───────────────────────────────
+
   const messages: string[] = [];
-  if (complianceReport.coverageExceeded) {
-    messages.push(`CES ${coveragePct}% dépasse le max ${maxPct}%`);
+
+  if (complianceReport.coverageExceeded && maxCoverageRatio != null) {
+    const excess = totalBuildingAreaM2 - maxCoverageRatio * parcelAreaM2;
+    messages.push(`Réduisez l'emprise au sol de ${Math.ceil(excess)} m² pour respecter le PLU.`);
   }
-  for (const v of violations.slice(0, 3)) {
-    messages.push(v.message);
+
+  const violations = setbackViolations ?? [];
+  for (const v of violations.slice(0, 2)) {
+    // Translate raw setback messages to plain French if possible
+    const plain = v.message
+      .replace(/setback/gi, "retrait")
+      .replace(/violated/gi, "non respecté")
+      .replace(/boundary/gi, "limite de parcelle");
+    messages.push(plain);
   }
-  if (violations.length > 3) {
-    messages.push(`+${violations.length - 3} autres violations`);
+  if (violations.length > 2) {
+    messages.push(`+${violations.length - 2} autre${violations.length - 2 > 1 ? "s" : ""} non-conformité${violations.length - 2 > 1 ? "s" : ""} détectée${violations.length - 2 > 1 ? "s" : ""}.`);
+  }
+  if (messages.length === 0) {
+    messages.push("Vérifiez la conformité de votre implantation.");
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-red-50 border-b border-red-200 text-red-800 text-xs font-medium">
-      <AlertTriangle size={14} className="shrink-0" />
+    <div className="flex items-start gap-2 px-4 py-2.5 bg-red-50 border-b border-red-200 text-red-800 text-xs font-medium">
+      <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-500" />
       <span>{messages.join(" · ")}</span>
     </div>
   );
