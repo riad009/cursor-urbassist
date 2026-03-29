@@ -122,11 +122,31 @@ export interface ProjectedVertexLabel {
   text: string;
 }
 
+/** Per-parcel edge measurement label */
+export interface ProjectedParcelEdgeLabel {
+  /** Start point in absolute canvas coords */
+  from: CanvasPoint;
+  /** End point in absolute canvas coords */
+  to: CanvasPoint;
+  /** Midpoint position for label placement (offset outward from polygon) */
+  position: CanvasPoint;
+  /** Angle in radians for label rotation (follows edge direction) */
+  angle: number;
+  /** Human-readable text, e.g. "14.24m" */
+  text: string;
+  /** Edge length in meters */
+  lengthMeters: number;
+}
+
 export interface ProjectedParcel extends ProjectedPolygon {
   id: string;
   section: string;
   number: string;
   area: number;
+  /** Per-parcel edge measurement labels */
+  edgeLabels: ProjectedParcelEdgeLabel[];
+  /** Absolute canvas points (not centroid-relative) for dimension line rendering */
+  absolutePoints: CanvasPoint[];
 }
 
 export interface ProjectedSiteData {

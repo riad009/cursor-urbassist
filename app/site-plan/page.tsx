@@ -107,6 +107,13 @@ import VrdToolbar from "@/components/editor/VrdToolbar";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+type InlinePromptState = {
+  type: "elevation" | "vegetation" | "viewpoint";
+  clientX: number;
+  clientY: number;
+  pointer: { x: number; y: number };
+} | null;
+
 type Tool =
   | "select"
   | "rectangle"
@@ -334,6 +341,7 @@ function SitePlanContent() {
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
   const [activeSurfaceType, setActiveSurfaceType] = useState(SURFACE_TYPES[4]);
   const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
+  const [inlinePrompt, setInlinePrompt] = useState<InlinePromptState>(null);
 
   // Project state
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -1269,16 +1277,83 @@ function SitePlanContent() {
             lengthMeters: e.length || e.lengthMeters || 0,
           }));
         }
-        // Normalize parcels: if parcels are in ParcelInput format (raw GeoJSON features),
-        // convert to ProcessedParcel format with coordinates array
-        if (normalized.parcels?.length > 0 && normalized.parcels[0].geometry && !normalized.parcels[0].coordinates) {
-          normalized.parcels = normalized.parcels.map((p: any) => ({
-            id: p.properties?.id || p.id || "unknown",
-            section: p.properties?.section || p.section || "",
-            number: p.properties?.number || p.number || "",
-            area: p.properties?.area || p.area || 0,
-            coordinates: p.geometry?.coordinates || [],
-          }));
+        // Normalize parcels: convert from any DB/API format to ProcessedParcel[]
+        // Known input formats:
+        //   A) ProcessedParcel: { id, section, number, area, coordinates: number[][][] }
+        //   B) ParcelInput (GeoJSON Feature): { type:"Feature", properties:{id,...}, geometry:{type:"Polygon",coordinates:[...]}}
+        //   C) Raw geometry: { type:"Polygon", coordinates: [...] }
+        if (normalized.parcels?.length > 0) {
+          normalized.parcels = normalized.parcels.map((p: any, idx: number) => {
+            // ── Format A: already a ProcessedParcel ──
+            // Has top-level coordinates AND no geometry wrapper
+            if (
+              Array.isArray(p.coordinates) &&
+              p.coordinates.length > 0 &&
+              !p.geometry &&
+              p.type !== "Feature"
+            ) {
+              return {
+                id: p.id || `parcel-${idx}`,
+                section: p.section || "",
+                number: p.number || "",
+                area: typeof p.area === "number" ? p.area : 0,
+                coordinates: p.coordinates,
+              };
+            }
+
+            // ── Format B: GeoJSON Feature ──
+            // { type: "Feature", properties: {...}, geometry: { type: "Polygon", coordinates: [...] } }
+            const geom = p.geometry ?? (p.type === "Polygon" || p.type === "MultiPolygon" ? p : null);
+            if (geom?.coordinates) {
+              let coordinates: number[][][] = [];
+              if (geom.type === "Polygon") {
+                coordinates = geom.coordinates as number[][][];
+              } else if (geom.type === "MultiPolygon") {
+                // Find the ring with the most vertices (largest polygon)
+                let bestRings: number[][][] = (geom.coordinates as number[][][][])?.[0] || [];
+                let bestLen = 0;
+                for (const poly of (geom.coordinates as number[][][][])) {
+                  const ringLen = poly?.[0]?.length ?? 0;
+                  if (ringLen > bestLen) { bestLen = ringLen; bestRings = poly; }
+                }
+                coordinates = bestRings;
+              }
+
+              // Validate: outer ring must have ≥3 WGS84 points
+              // France is roughly lng: -5..10, lat: 41..52
+              const outerRing = coordinates[0];
+              if (!Array.isArray(outerRing) || outerRing.length < 3) return null;
+              const sampleLng = outerRing[0]?.[0];
+              const sampleLat = outerRing[0]?.[1];
+              if (!Number.isFinite(sampleLng) || !Number.isFinite(sampleLat)) return null;
+              // Reject obviously swapped coordinates (lat stored as lng would be ~44, not ~2)
+              if (Math.abs(sampleLng) > 180 || Math.abs(sampleLat) > 90) return null;
+
+              const props = p.properties ?? {};
+              return {
+                id: props.id || props.IDU || p.id || `parcel-${idx}`,
+                section: String(props.section ?? props.SEC ?? p.section ?? ""),
+                number: String(props.number ?? props.NUM ?? p.number ?? ""),
+                area: Number(props.area ?? props.contenance ?? p.area ?? 0),
+                coordinates,
+              };
+            }
+
+            // ── Fallback: use whatever coordinates exist raw ──
+            if (Array.isArray(p.coordinates) && p.coordinates.length > 0) {
+              return {
+                id: p.id || `parcel-${idx}`,
+                section: p.section || "",
+                number: p.number || "",
+                area: typeof p.area === "number" ? p.area : 0,
+                coordinates: p.coordinates,
+              };
+            }
+
+            // Cannot extract geometry — drop this parcel
+            console.warn(`[site-plan] Could not extract coordinates for parcel ${idx}`, p);
+            return null;
+          }).filter(Boolean);
         }
         // Ensure topographyGrid and stats have expected fields
         if (!normalized.topographyGrid) normalized.topographyGrid = [];
@@ -1327,40 +1402,68 @@ function SitePlanContent() {
           if (pts.length > 0) setElevationPoints(pts);
         }
 
-        // ── Auto-zoom-to-fit the projected boundary ────────────────────────
-        const boundary = projected.boundary;
-        if (boundary && boundary.points.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boundary.points.forEach((p) => {
-            const px = boundary.left + p.x;
-            const py = boundary.top + p.y;
-            minX = Math.min(minX, px);
-            minY = Math.min(minY, py);
-            maxX = Math.max(maxX, px);
-            maxY = Math.max(maxY, py);
-          });
-          if (minX !== Infinity) {
-            const parcelsW = maxX - minX;
-            const parcelsH = maxY - minY;
-            const containerEl = containerRef?.current;
-            const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
-            const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
-            const padding = 60;
-            const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
-            const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
-            const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
-            if (targetZoom > 0 && isFinite(targetZoom)) {
-              const centerPX = (minX + maxX) / 2;
-              const centerPY = (minY + maxY) / 2;
-              canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-              const vpt: [number, number, number, number, number, number] = [
-                targetZoom, 0, 0, targetZoom,
-                viewW / 2 - centerPX * targetZoom,
-                viewH / 2 - centerPY * targetZoom,
-              ];
-              canvas.setViewportTransform(vpt);
-              setZoom(Math.round(targetZoom * 100));
+        // ── Auto-zoom-to-fit: use ALL parcel absolute canvas points ──────────
+        // This replaces the old approach of using the merged boundary polygon,
+        // which was inaccurate when parcels were small or the boundary was a
+        // simplified union. We compute bbox from every corner of every parcel.
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        // Primary: walk all parcel absolutePoints (real projected corner coords)
+        if (projected.parcels && projected.parcels.length > 0) {
+          projected.parcels.forEach((parcel) => {
+            if (parcel.absolutePoints) {
+              parcel.absolutePoints.forEach((pt) => {
+                if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+              });
+            } else {
+              // Fallback: centroid + relative points
+              parcel.points.forEach((p) => {
+                const px = parcel.left + p.x;
+                const py = parcel.top + p.y;
+                if (px < minX) minX = px; if (px > maxX) maxX = px;
+                if (py < minY) minY = py; if (py > maxY) maxY = py;
+              });
             }
+          });
+        }
+
+        // Fallback to merged boundary if no parcel points available
+        if (!Number.isFinite(minX)) {
+          const boundary = projected.boundary;
+          if (boundary && boundary.points.length > 0) {
+            boundary.points.forEach((p) => {
+              const px = boundary.left + p.x;
+              const py = boundary.top + p.y;
+              if (px < minX) minX = px; if (px > maxX) maxX = px;
+              if (py < minY) minY = py; if (py > maxY) maxY = py;
+            });
+          }
+        }
+
+        if (Number.isFinite(minX) && maxX > minX && maxY > minY) {
+          const parcelsW = maxX - minX;
+          const parcelsH = maxY - minY;
+          const containerEl = containerRef?.current;
+          const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+          const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+          const padding = 80;
+          const zoomX = (viewW - padding * 2) / parcelsW;
+          const zoomY = (viewH - padding * 2) / parcelsH;
+          // Allow full zoom range: 0.1 (very large site) to 20 (small parcel)
+          // 0.95 cap was wrong — it prevented seeing small parcels correctly
+          const targetZoom = Math.max(0.1, Math.min(zoomX, zoomY, 20));
+          if (isFinite(targetZoom)) {
+            const centerPX = (minX + maxX) / 2;
+            const centerPY = (minY + maxY) / 2;
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+            const vpt: [number, number, number, number, number, number] = [
+              targetZoom, 0, 0, targetZoom,
+              viewW / 2 - centerPX * targetZoom,
+              viewH / 2 - centerPY * targetZoom,
+            ];
+            canvas.setViewportTransform(vpt);
+            setZoom(Math.round(targetZoom * 100));
           }
         }
       } else {
@@ -1464,9 +1567,17 @@ function SitePlanContent() {
                 // We delete them so they don't pollute the canvas or trigger the naming warning.
                 const toRemove = canvas.getObjects().filter((o: any) => {
                   if (o.isGrid || o.isPolygonPreview) return false; // keep explicit grid
+                  
+                  // Aggressive purge for objects that were accidentally serialized 
+                  // to the database due to CANVAS_PROPS including their flags.
+                  const eName = String(o.elementName ?? o.name ?? "").trim();
+                  if (o.isParcel || o.isBoundaryOverlay || o.isRegulatoryFootprint || o.isMeasurement || eName.startsWith("Parcelle")) {
+                    return true;
+                  }
+
                   if (o.selectable === false && o.evented === false) {
                     const name = String(o.elementName ?? o.name ?? "").trim();
-                    const hasUserMeaning = name || o.surfaceType || o.isParcel || o.isElevationPoint;
+                    const hasUserMeaning = name || o.surfaceType || o.isElevationPoint;
                     if (!hasUserMeaning) return true; // orphaned measurement object → delete
                   }
                   return false;
@@ -1713,6 +1824,31 @@ function SitePlanContent() {
     const t = setInterval(() => saveSitePlan(), 45000);
     return () => clearInterval(t);
   }, [isDirty, currentProjectId, saveSitePlan]);
+
+  // ── Auto-save on unmount (router navigation away from the page) ──────────
+  // Next.js SPA router does NOT trigger beforeunload, so we save in cleanup.
+  // Refs capture the latest state without stale closures.
+  const isDirtyAutosaveRef = useRef(false);
+  useEffect(() => { isDirtyAutosaveRef.current = isDirty; }, [isDirty]);
+  const saveSitePlanAutosaveRef = useRef(saveSitePlan);
+  useEffect(() => { saveSitePlanAutosaveRef.current = saveSitePlan; }, [saveSitePlan]);
+  const projectIdAutosaveRef = useRef(currentProjectId);
+  useEffect(() => { projectIdAutosaveRef.current = currentProjectId; }, [currentProjectId]);
+
+  useEffect(() => {
+    return () => {
+      // Only fire if: load completed AND project exists AND unsaved changes
+      if (
+        initialLoadCompleteRef.current &&
+        projectIdAutosaveRef.current &&
+        isDirtyAutosaveRef.current
+      ) {
+        // Fire-and-forget (can't await in cleanup function)
+        saveSitePlanAutosaveRef.current().catch(() => {/* silent */});
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally empty: mount/unmount only
+
 
   // ─── Guided placement & preset helpers (must be before canvas mouse handlers) ─
   const addBuildingToCanvasAt = useCallback(
@@ -2080,114 +2216,19 @@ function SitePlanContent() {
       }
 
       // Phase 8: Arrow annotation — handled in mouseUp (needs start+end drag)
-      if (activeTool === "arrow" || activeTool === "elevation") {
-        if (activeTool === "arrow") {
-          // Arrow drawn on mouseUp from drawingStart - handled in mouseUp block
-          setIsDrawing(true);
-          return;
-        }
+      if (activeTool === "arrow") {
+        setIsDrawing(true);
+        return;
+      }
 
-        // If not arrow, then it must be elevation (due to the outer if condition)
-        const raw = window.prompt("Elevation (m), e.g. 0.00 or +1.50 or -0.20:", "0.00");
-        if (raw == null) return;
-        const value = parseFloat(raw.replace(",", ".")) || 0;
-        const id = `elev-${Date.now()}`;
-        setElevationPoints((prev) => [...prev, { id, x: pointer.x, y: pointer.y, value }]);
-        const r = 8;
-        const circle = new fabric.Circle({
-          left: pointer.x - r, top: pointer.y - r, radius: r,
-          fill: "#0ea5e9", stroke: "#0284c7", strokeWidth: 1,
-        });
-        (circle as any).id = id;
-        (circle as any).isElevationPoint = true;
-        (circle as any).elevationValue = value;
-        (circle as any).excludeFromExport = false;
-        canvas.add(circle);
-        const label = new fabric.Text(`${value >= 0 ? "+" : ""}${value.toFixed(2)}`, {
-          left: pointer.x, top: pointer.y + r + 2, fontSize: 10, fontFamily: "monospace",
-          fill: "#0ea5e9", originX: "center", originY: "top",
-        });
-        (label as any).isMeasurement = true;
-        (label as any).parentId = id;
-        canvas.add(label);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
-        return;
-      }
-      if (activeTool === "vegetation") {
-        const treeType = window.prompt("Tree type (deciduous / coniferous / shrub):", "deciduous") || "deciduous";
-        const treeId = `tree-${Date.now()}`;
-        const r = 12;
-        const colors: Record<string, string> = { deciduous: "#22c55e", coniferous: "#15803d", shrub: "#65a30d" };
-        const fillColors: Record<string, string> = { deciduous: "rgba(34,197,94,0.5)", coniferous: "rgba(21,128,61,0.5)", shrub: "rgba(101,163,13,0.5)" };
-        const treeColor = colors[treeType] || "#22c55e";
-        const treeFill = fillColors[treeType] || "rgba(34,197,94,0.5)";
-        const circle = new fabric.Circle({
-          left: pointer.x - r, top: pointer.y - r, radius: r,
-          fill: treeFill, stroke: treeColor, strokeWidth: 2,
-        });
-        (circle as any).id = treeId;
-        (circle as any).elementName = `${treeType.charAt(0).toUpperCase() + treeType.slice(1)} tree`;
-        (circle as any).isVegetation = true;
-        (circle as any).vegetationType = treeType;
-        (circle as any).excludeFromExport = false;
-        canvas.add(circle);
-        const label = new fabric.Text(treeType.charAt(0).toUpperCase() + treeType.slice(1), {
-          left: pointer.x, top: pointer.y + r + 4, fontSize: 9, fontFamily: "monospace",
-          fill: treeColor, originX: "center", originY: "top", selectable: false, evented: false,
-        });
-        (label as any).isMeasurement = true;
-        (label as any).parentId = treeId;
-        canvas.add(label);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
-        return;
-      }
-      if (activeTool === "viewpoint") {
-        const vpName = window.prompt("Viewpoint name (e.g. PC7, PC8):", "PC7") || "PC7";
-        const vpId = `vp-${Date.now()}`;
-        // Camera icon: small square
-        const camSize = 14;
-        const cam = new fabric.Rect({
-          left: pointer.x - camSize / 2, top: pointer.y - camSize / 2,
-          width: camSize, height: camSize,
-          fill: "#6366f1", stroke: "#4f46e5", strokeWidth: 1.5, rx: 3, ry: 3,
-        });
-        (cam as any).id = vpId;
-        (cam as any).elementName = vpName;
-        (cam as any).isViewpoint = true;
-        (cam as any).excludeFromExport = false;
-        canvas.add(cam);
-        // Direction arrow
-        const arrowLen = 40;
-        const arrow = new fabric.Line([pointer.x, pointer.y, pointer.x + arrowLen, pointer.y], {
-          stroke: "#6366f1", strokeWidth: 2.5,
-        });
-        (arrow as any).isMeasurement = true;
-        (arrow as any).parentId = vpId;
-        canvas.add(arrow);
-        // Arrowhead
-        const ah = new fabric.Polygon([
-          { x: pointer.x + arrowLen, y: pointer.y },
-          { x: pointer.x + arrowLen - 8, y: pointer.y - 5 },
-          { x: pointer.x + arrowLen - 8, y: pointer.y + 5 },
-        ], { fill: "#6366f1", selectable: false, evented: false });
-        (ah as any).isMeasurement = true;
-        (ah as any).parentId = vpId;
-        canvas.add(ah);
-        // Label
-        const vpLabel = new fabric.Text(vpName, {
-          left: pointer.x, top: pointer.y - camSize - 10, fontSize: 10, fontFamily: "monospace",
-          fill: "#6366f1", fontWeight: "bold", originX: "center", selectable: false, evented: false,
-        });
-        (vpLabel as any).isMeasurement = true;
-        (vpLabel as any).parentId = vpId;
-        canvas.add(vpLabel);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
+      if (activeTool === "elevation" || activeTool === "vegetation" || activeTool === "viewpoint") {
+        const evt = e.e as MouseEvent | TouchEvent;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const clientX = (evt as MouseEvent).clientX ?? (evt as TouchEvent).touches?.[0]?.clientX ?? 0;
+        const clientY = (evt as MouseEvent).clientY ?? (evt as TouchEvent).touches?.[0]?.clientY ?? 0;
+        const x = rect ? clientX - rect.left : clientX;
+        const y = rect ? clientY - rect.top : clientY;
+        setInlinePrompt({ type: activeTool as "elevation" | "vegetation" | "viewpoint", clientX: x, clientY: y, pointer });
         return;
       }
       if (activeTool === "polygon" || activeTool === "parcel") {
@@ -3146,7 +3187,8 @@ function SitePlanContent() {
     const frontColor = frontRoad ? (COLORS[frontRoad.classification] ?? "#d97706") : "#16a34a";
     const sideColor = "#16a34a"; // private/neighbor = green
 
-    parcels.forEach((parcel: any, pi: number) => {
+    // Skip merged/global boundary polygons — only draw on individual parcels
+    parcels.filter((p: any) => !p.isMerged && !p.processedBoundary).forEach((parcel: any, pi: number) => {
       const pts: { x: number; y: number }[] = parcel.points?.map((p: { x: number; y: number }) => {
         const pt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), parcel.calcTransformMatrix());
         return { x: pt.x, y: pt.y };
@@ -3164,6 +3206,11 @@ function SitePlanContent() {
       pts.forEach((pt, i) => {
         if (i >= pts.length - 1) return;
         const next = pts[i + 1];
+
+        // Skip edges longer than 500px (prevent long diagonal lines from bad data)
+        const edgeLen = Math.sqrt((next.x - pt.x) ** 2 + (next.y - pt.y) ** 2);
+        if (edgeLen > 500) return;
+
         const color = i === frontIdx ? frontColor : sideColor;
         const line = new fabric.Line([pt.x, pt.y, next.x, next.y], {
           stroke: color,
@@ -3435,6 +3482,103 @@ function SitePlanContent() {
   })();
 
   const editorCanProceed = !!currentProjectId && !hasUnnamedElements && greenPct >= (projectData?.minGreenPct ?? 20) && hasContent;
+
+  const handleInlineConfirm = (value: string | null) => {
+    if (!inlinePrompt || !fabricRef.current) return;
+    const canvas = fabricRef.current;
+    const { pointer, type } = inlinePrompt;
+    
+    setInlinePrompt(null);
+    if (!value) return;
+
+    if (type === "elevation") {
+      const v = parseFloat(value.replace(",", ".")) || 0;
+      const id = `elev-${Date.now()}`;
+      setElevationPoints((prev) => [...prev, { id, x: pointer.x, y: pointer.y, value: v }]);
+      const r = 8;
+      const circle = new fabric.Circle({
+        left: pointer.x - r, top: pointer.y - r, radius: r,
+        fill: "#0ea5e9", stroke: "#0284c7", strokeWidth: 1,
+      });
+      (circle as any).id = id;
+      (circle as any).isElevationPoint = true;
+      (circle as any).elevationValue = v;
+      (circle as any).excludeFromExport = false;
+      canvas.add(circle);
+      const label = new fabric.Text(`${v >= 0 ? "+" : ""}${v.toFixed(2)}`, {
+        left: pointer.x, top: pointer.y + r + 2, fontSize: 10, fontFamily: "monospace",
+        fill: "#0ea5e9", originX: "center", originY: "top",
+      });
+      (label as any).isMeasurement = true;
+      (label as any).parentId = id;
+      canvas.add(label);
+    } else if (type === "vegetation") {
+      const treeType = value || "deciduous";
+      const treeId = `tree-${Date.now()}`;
+      const r = 12;
+      const colors: Record<string, string> = { deciduous: "#22c55e", coniferous: "#15803d", shrub: "#65a30d" };
+      const fillColors: Record<string, string> = { deciduous: "rgba(34,197,94,0.5)", coniferous: "rgba(21,128,61,0.5)", shrub: "rgba(101,163,13,0.5)" };
+      const treeColor = colors[treeType] || "#22c55e";
+      const treeFill = fillColors[treeType] || "rgba(34,197,94,0.5)";
+      const circle = new fabric.Circle({
+        left: pointer.x - r, top: pointer.y - r, radius: r,
+        fill: treeFill, stroke: treeColor, strokeWidth: 2,
+      });
+      (circle as any).id = treeId;
+      (circle as any).elementName = `${treeType.charAt(0).toUpperCase() + treeType.slice(1)} tree`;
+      (circle as any).isVegetation = true;
+      (circle as any).vegetationType = treeType;
+      (circle as any).excludeFromExport = false;
+      canvas.add(circle);
+      const label = new fabric.Text(treeType.charAt(0).toUpperCase() + treeType.slice(1), {
+        left: pointer.x, top: pointer.y + r + 4, fontSize: 9, fontFamily: "monospace",
+        fill: treeColor, originX: "center", originY: "top", selectable: false, evented: false,
+      });
+      (label as any).isMeasurement = true;
+      (label as any).parentId = treeId;
+      canvas.add(label);
+    } else if (type === "viewpoint") {
+      const vpName = value || "PC7";
+      const vpId = `vp-${Date.now()}`;
+      const camSize = 14;
+      const cam = new fabric.Rect({
+        left: pointer.x - camSize / 2, top: pointer.y - camSize / 2,
+        width: camSize, height: camSize,
+        fill: "#6366f1", stroke: "#4f46e5", strokeWidth: 1.5, rx: 3, ry: 3,
+      });
+      (cam as any).id = vpId;
+      (cam as any).elementName = vpName;
+      (cam as any).isViewpoint = true;
+      (cam as any).excludeFromExport = false;
+      canvas.add(cam);
+      const arrowLen = 40;
+      const arrow = new fabric.Line([pointer.x, pointer.y, pointer.x + arrowLen, pointer.y], {
+        stroke: "#6366f1", strokeWidth: 2.5,
+      });
+      (arrow as any).isMeasurement = true;
+      (arrow as any).parentId = vpId;
+      canvas.add(arrow);
+      const ah = new fabric.Polygon([
+        { x: pointer.x + arrowLen, y: pointer.y },
+        { x: pointer.x + arrowLen - 8, y: pointer.y - 5 },
+        { x: pointer.x + arrowLen - 8, y: pointer.y + 5 },
+      ], { fill: "#6366f1", selectable: false, evented: false });
+      (ah as any).isMeasurement = true;
+      (ah as any).parentId = vpId;
+      canvas.add(ah);
+      const vpLabel = new fabric.Text(vpName, {
+        left: pointer.x, top: pointer.y - camSize - 10, fontSize: 10, fontFamily: "monospace",
+        fill: "#6366f1", fontWeight: "bold", originX: "center", selectable: false, evented: false,
+      });
+      (vpLabel as any).isMeasurement = true;
+      (vpLabel as any).parentId = vpId;
+      canvas.add(vpLabel);
+    }
+    
+    canvas.renderAll();
+    updateLayers(canvas);
+    pushUndoState();
+  };
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -3879,6 +4023,56 @@ function SitePlanContent() {
             <div className="absolute inset-0 bg-white">
               <canvas ref={canvasRef} />
             </div>
+
+            {inlinePrompt && (
+              <div 
+                className="absolute z-50 bg-white shadow-2xl rounded-xl border border-slate-200 flex flex-col items-start p-3 w-64 animate-in fade-in zoom-in-95 duration-200"
+                style={{
+                  left: Math.min(inlinePrompt.clientX + 10, canvasSize.width - 260),
+                  top: Math.min(inlinePrompt.clientY + 10, canvasSize.height - 100),
+                }}
+              >
+                <p className="text-xs font-semibold text-slate-700 mb-2">
+                  {inlinePrompt.type === 'elevation' ? "Set Elevation (m)" : inlinePrompt.type === 'vegetation' ? "Select Vegetation Type" : "Set Viewpoint Name"}
+                </p>
+                {inlinePrompt.type === 'vegetation' ? (
+                   <select 
+                     autoFocus
+                     className="w-full bg-slate-50 border border-slate-200 rounded-md text-sm p-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                     onKeyDown={(e) => {
+                       if (e.key === "Enter") handleInlineConfirm((e.target as HTMLSelectElement).value);
+                       if (e.key === "Escape") handleInlineConfirm(null);
+                     }}
+                     id="inline-select"
+                   >
+                     <option value="deciduous">Deciduous Tree</option>
+                     <option value="coniferous">Coniferous Tree</option>
+                     <option value="shrub">Shrub</option>
+                   </select>
+                ) : (
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder={inlinePrompt.type === 'elevation' ? "e.g. 0.00 or +1.50" : "e.g. PC7"}
+                    defaultValue={inlinePrompt.type === 'elevation' ? "0.00" : "PC7"}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-md text-sm p-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleInlineConfirm((e.target as HTMLInputElement).value);
+                      if (e.key === "Escape") handleInlineConfirm(null);
+                    }}
+                    id="inline-input"
+                  />
+                )}
+                <div className="flex items-center gap-2 w-full">
+                  <button onClick={() => handleInlineConfirm(null)} className="flex-1 py-1.5 rounded bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200 transition-colors">Cancel</button>
+                  <button onClick={() => {
+                     const el = document.getElementById(inlinePrompt.type === 'vegetation' ? 'inline-select' : 'inline-input') as HTMLInputElement | HTMLSelectElement;
+                     handleInlineConfirm(el.value);
+                  }} className="flex-1 py-1.5 rounded bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors">Confirm</button>
+                </div>
+              </div>
+            )}
+
             <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
 
             {/* ── Element Properties Panel (2D floating overlay) ── */}
