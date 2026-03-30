@@ -73,6 +73,7 @@ import { BuildingDetailPanel,
   createBuildingFromOSM,
 } from "@/components/site-plan/BuildingDetailPanel";
 import { ElementPropertiesPanel } from "@/components/site-plan/ElementPropertiesPanel";
+import Terrain3DRightPanel from "@/components/site-plan/Terrain3DRightPanel";
 
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
@@ -431,6 +432,7 @@ function SitePlanContent() {
 
   // Right panel tabs — Phase 6 adds 'parcel' tab
   const [selectedBuildingId3d, setSelectedBuildingId3d] = useState<string | null>(null);
+  const [zScale, setZScale] = useState(1.0);
   const [customDimensions, setCustomDimensions] = useState({ width: 10, depth: 8, groundHeight: 3 });
 
   // Guided creation (amateur-friendly flow)
@@ -4097,24 +4099,36 @@ function SitePlanContent() {
           </div>
 
           {/* === 3D Viewer Layer (kept mounted to prevent heavy unmount/rebuild lag) === */}
-          <div className={cn("absolute inset-0 bg-white transition-opacity duration-300", viewMode === "3d" ? "opacity-100 z-30 pointer-events-auto" : "opacity-0 -z-10 pointer-events-none")}>
-            {/* userBuildings3d — stable reference so Terrain3DViewer.buildScene only rebuilds
-                when elements actually change, NOT on every React render. We read from
-                buildingDetails (state) and the canvas ref (not reactive) to produce a stable
-                array that only changes when setBuildingDetails is called. */}
-            <Terrain3DViewer
-              key="3d-terrain-stable"
-              processedSiteData={processedSiteData}
-              parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
-              userBuildings={userBuildings3d.length > 0 ? userBuildings3d : undefined}
-              canvasWidth={canvasSize.width}
-              canvasHeight={canvasSize.height}
-              pixelsPerMeter={currentScale.pixelsPerMeter}
-            />
-            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-600 text-sm">
-              <span>Free wall drawing (Line, Rectangle, Polygon) is in <strong className="text-slate-900">2D</strong> view.</span>
-              <button onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }} className="px-3 py-1.5 rounded-lg bg-blue-500 text-slate-900 text-xs font-medium hover:bg-blue-400">Switch to 2D</button>
+          <div className={cn("absolute inset-0 transition-opacity duration-300 flex overflow-hidden", viewMode === "3d" ? "opacity-100 z-30 pointer-events-auto" : "opacity-0 -z-10 pointer-events-none")} style={{ background: "#111827" }}>
+            {/* 3D canvas — fills remaining width */}
+            <div className="flex-1 relative min-w-0 overflow-hidden" style={{ background: "#c8ddf0" }}>
+              <Terrain3DViewer
+                key="3d-terrain-stable"
+                processedSiteData={processedSiteData}
+                parcelGeoJSON={projectData?.parcelsGeoJSON || projectData?.parcelGeometry || null}
+                userBuildings={userBuildings3d.length > 0 ? userBuildings3d : undefined}
+                canvasWidth={canvasSize.width}
+                canvasHeight={canvasSize.height}
+                pixelsPerMeter={currentScale.pixelsPerMeter}
+                zScale={zScale}
+              />
+              {/* Switch to 2D bottom hint */}
+              <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-900/80 border border-slate-700 text-slate-300 text-sm backdrop-blur-sm">
+                <span>Wall drawing is in <strong className="text-white">2D</strong> view.</span>
+                <button
+                  onClick={() => { setViewMode("2d"); setSelectedBuildingId3d(null); setTimeout(() => fabricRef.current?.requestRenderAll(), 50); }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-400 transition-colors"
+                >
+                  Switch to 2D
+                </button>
+              </div>
             </div>
+
+            {/* ── Right Sidebar Panel ── */}
+            <Terrain3DRightPanel
+              zScale={zScale}
+              setZScale={setZScale}
+            />
           </div>
         </div>
 
