@@ -17,7 +17,7 @@ import { attachSculptHandlers, createSculptCursorMeshes, applyStoredDeltas, getV
 import { useSculptStore } from "@/store/useSculptStore";
 import dynamic from "next/dynamic";
 
-const AltimetryUI = dynamic(() => import("@/components/editor3d/AltimetryUI"), { ssr: false });
+// AltimetryUI moved to the right sidebar panel in page.tsx
 
 // ─── Realistic Procedural Sky (matches 3D-Mapper HDRI-like sky with clouds) ───
 
@@ -237,6 +237,8 @@ interface Terrain3DViewerProps {
   canvasWidth?: number;
   canvasHeight?: number;
   pixelsPerMeter?: number;
+  /** Terrain vertical exaggeration — controlled from parent right panel */
+  zScale?: number;
 }
 
 // ─── Elevation fetcher (via our proxy to avoid CORS) ────────────────────────
@@ -681,7 +683,7 @@ function buildPremiumCarport(ub:UBLike,gY:number,lx:number,lz:number,ry:number):
 
 
 
-export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter }: Terrain3DViewerProps) {
+export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter, zScale: zScaleProp = 1.0 }: Terrain3DViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
@@ -699,7 +701,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   const [status, setStatus] = useState("Initializing...");
   const [isReady, setIsReady] = useState(false);
   const sculptCleanupRef = useRef<(() => void) | null>(null);
-  const [zScale, setZScale] = useState(1.0);
+  // zScale is now controlled by the parent right panel via prop
+  const zScale = zScaleProp;
   // Store terrain build data for dynamic z-exaggeration
   const terrainDataRef = useRef<{
     baseExag: number;
@@ -1559,20 +1562,6 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     <div className="relative w-full h-full" style={{ minHeight: 300, background: "#c8ddf0" }}>
       <div ref={containerRef} className="w-full h-full" />
 
-      {/* ── Altimetry FAB — single clean entry point for terrain editing ── */}
-      {isReady && (
-        <AltimetryUI
-          getVertexNGF={terrainDataRef.current
-            ? (idx: number) => getVertexElevation(
-                sceneRef.current!.terrainMesh!,
-                idx,
-                terrainDataRef.current!.baseExag,
-                terrainDataRef.current!.minE
-              )
-            : undefined
-          }
-        />
-      )}
 
       {/* ── Loading Overlay ── */}
       {(!isReady || status) && (
