@@ -425,9 +425,9 @@ export default function SitePlanEditorV2({
         </button>
       </div>
 
-      {/* MAIN BODY: Canvas + Right Toolbar */}
+      {/* MAIN BODY: Canvas fills full space; ProjectToolbar floats over it */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Canvas Host — never re-renders because it has no reactive state */}
+        {/* Canvas Host — floating toolbar renders INSIDE here as absolute child */}
         <div
           ref={canvasHostRef}
           className="flex-1 relative flex items-center justify-center bg-slate-100 overflow-auto p-6"
@@ -438,10 +438,10 @@ export default function SitePlanEditorV2({
 
           {/* Guided Placement Overlay — zero cost when idle */}
           <PlacementGuideOverlay />
-        </div>
 
-        {/* RIGHT TOOLBAR — React.memo'd → 0ms re-render on tool switch */}
-        <ProjectToolbar />
+          {/* Floating Left Toolbar — absolute over canvas host */}
+          <ProjectToolbar />
+        </div>
       </div>
     </div>
   );

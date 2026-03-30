@@ -45,7 +45,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
-  Box,
   Building2,
   CuboidIcon,
   LayoutGrid,
@@ -61,18 +60,12 @@ import {
   Mountain,
   Pencil,
   MessageSquare,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  Bold,
-  Italic,
   ChevronRight,
-  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
 
-const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
+
 const Terrain3DViewer = dynamic(() => import("@/components/three/Terrain3DViewer"), { ssr: false });
 import type { UserBuilding3D } from "@/components/three/Terrain3DViewer";
 import { BuildingDetailPanel,
@@ -83,11 +76,10 @@ import { ElementPropertiesPanel } from "@/components/site-plan/ElementProperties
 
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
-import { GuidedCreation } from "@/components/site-plan/GuidedCreation";
-import { ParcelManagementPanel, type DetectedRoad, type ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
-import { ShowDataPanel } from "@/components/site-plan/ShowDataPanel";
+
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
+import type { DetectedRoad, ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
 import { getPresetById, type ProjectPreset } from "@/lib/projectPresets";
 // parcelGeometryToShapes REMOVED — compute shift: all data comes pre-processed from DB
 import { renderProcessedSite, clearProcessedLayers, type SetbackConfig } from "@/lib/renderProcessedSite";
@@ -113,6 +105,13 @@ import VrdToolbar from "@/components/editor/VrdToolbar";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+type InlinePromptState = {
+  type: "elevation" | "vegetation" | "viewpoint";
+  clientX: number;
+  clientY: number;
+  pointer: { x: number; y: number };
+} | null;
 
 type Tool =
   | "select"
@@ -317,7 +316,7 @@ function SitePlanContent() {
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
-  const [showDataModal, setShowDataModal] = useState(false);
+
   const setbackSegmentsRef = useRef<SetbackSegment[]>([]);
   const [scene3dVersion, setScene3dVersion] = useState(0);
   const [zoom, setZoom] = useState(95);
@@ -329,7 +328,7 @@ function SitePlanContent() {
   snapEnabledRef.current = snapEnabled;
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const [selectedObject, setSelectedObject] = useState<fabric.FabricObject | null>(null);
-  const [canvasSize] = useState({ width: 1400, height: 900 });
+  const [canvasSize, setCanvasSize] = useState({ width: 1400, height: 900 });
   const [currentScale, setCurrentScale] = useState(SCALES[1]);
   const [isDrawing, setIsDrawing] = useState(false);
   const isDrawingRef = useRef(false);
@@ -341,6 +340,7 @@ function SitePlanContent() {
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
   const [activeSurfaceType, setActiveSurfaceType] = useState(SURFACE_TYPES[4]);
   const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
+  const [inlinePrompt, setInlinePrompt] = useState<InlinePromptState>(null);
 
   // Project state
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -423,16 +423,13 @@ function SitePlanContent() {
   const [loadingEditorData, setLoadingEditorData] = useState(true);
   /** Fully pre-processed site data (boundary, edges, elevations) from process-geometry API */
   const [processedSiteData, setProcessedSiteData] = useState<ProcessedSiteData | null>(null);
-  /** Show Data panel visibility */
-  const [showDataPanel, setShowDataPanel] = useState(false);
+
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
-  const [showCompliance, setShowCompliance] = useState(false);
   const [unnamedElementsWarning, setUnnamedElementsWarning] = useState<{ index: number; type: string }[] | null>(null);
 
   // Right panel tabs — Phase 6 adds 'parcel' tab
-  const [rightTab, setRightTab] = useState<"layers" | "buildings" | "footprint" | "parcel">("layers");
   const [selectedBuildingId3d, setSelectedBuildingId3d] = useState<string | null>(null);
   const [customDimensions, setCustomDimensions] = useState({ width: 10, depth: 8, groundHeight: 3 });
 
@@ -446,8 +443,6 @@ function SitePlanContent() {
 
   // Phase 6: Parcel Management state
   const [parcelRoads, setParcelRoads] = useState<DetectedRoad[]>([]);
-  const [isLoadingRoads, setIsLoadingRoads] = useState(false);
-  const [isMergingParcels, setIsMergingParcels] = useState(false);
 
   // Full-screen mode & paper size (Step 2 spec: full-screen, A4/A3 validation)
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -818,7 +813,7 @@ function SitePlanContent() {
           body: JSON.stringify({ projectId: currentProjectId, elements }),
         });
         const d = await r.json();
-        if (d.checks) { setComplianceChecks(d.checks); setShowCompliance(true); }
+        if (d.checks) { setComplianceChecks(d.checks); }
       } catch { /* ignore */ }
     }, 1500); // 1.5s debounce — compliance is an API call, no need to hammer on every keystroke
   }, [currentProjectId, currentScale.pixelsPerMeter]);
@@ -1280,16 +1275,83 @@ function SitePlanContent() {
             lengthMeters: e.length || e.lengthMeters || 0,
           }));
         }
-        // Normalize parcels: if parcels are in ParcelInput format (raw GeoJSON features),
-        // convert to ProcessedParcel format with coordinates array
-        if (normalized.parcels?.length > 0 && normalized.parcels[0].geometry && !normalized.parcels[0].coordinates) {
-          normalized.parcels = normalized.parcels.map((p: any) => ({
-            id: p.properties?.id || p.id || "unknown",
-            section: p.properties?.section || p.section || "",
-            number: p.properties?.number || p.number || "",
-            area: p.properties?.area || p.area || 0,
-            coordinates: p.geometry?.coordinates || [],
-          }));
+        // Normalize parcels: convert from any DB/API format to ProcessedParcel[]
+        // Known input formats:
+        //   A) ProcessedParcel: { id, section, number, area, coordinates: number[][][] }
+        //   B) ParcelInput (GeoJSON Feature): { type:"Feature", properties:{id,...}, geometry:{type:"Polygon",coordinates:[...]}}
+        //   C) Raw geometry: { type:"Polygon", coordinates: [...] }
+        if (normalized.parcels?.length > 0) {
+          normalized.parcels = normalized.parcels.map((p: any, idx: number) => {
+            // ── Format A: already a ProcessedParcel ──
+            // Has top-level coordinates AND no geometry wrapper
+            if (
+              Array.isArray(p.coordinates) &&
+              p.coordinates.length > 0 &&
+              !p.geometry &&
+              p.type !== "Feature"
+            ) {
+              return {
+                id: p.id || `parcel-${idx}`,
+                section: p.section || "",
+                number: p.number || "",
+                area: typeof p.area === "number" ? p.area : 0,
+                coordinates: p.coordinates,
+              };
+            }
+
+            // ── Format B: GeoJSON Feature ──
+            // { type: "Feature", properties: {...}, geometry: { type: "Polygon", coordinates: [...] } }
+            const geom = p.geometry ?? (p.type === "Polygon" || p.type === "MultiPolygon" ? p : null);
+            if (geom?.coordinates) {
+              let coordinates: number[][][] = [];
+              if (geom.type === "Polygon") {
+                coordinates = geom.coordinates as number[][][];
+              } else if (geom.type === "MultiPolygon") {
+                // Find the ring with the most vertices (largest polygon)
+                let bestRings: number[][][] = (geom.coordinates as number[][][][])?.[0] || [];
+                let bestLen = 0;
+                for (const poly of (geom.coordinates as number[][][][])) {
+                  const ringLen = poly?.[0]?.length ?? 0;
+                  if (ringLen > bestLen) { bestLen = ringLen; bestRings = poly; }
+                }
+                coordinates = bestRings;
+              }
+
+              // Validate: outer ring must have ≥3 WGS84 points
+              // France is roughly lng: -5..10, lat: 41..52
+              const outerRing = coordinates[0];
+              if (!Array.isArray(outerRing) || outerRing.length < 3) return null;
+              const sampleLng = outerRing[0]?.[0];
+              const sampleLat = outerRing[0]?.[1];
+              if (!Number.isFinite(sampleLng) || !Number.isFinite(sampleLat)) return null;
+              // Reject obviously swapped coordinates (lat stored as lng would be ~44, not ~2)
+              if (Math.abs(sampleLng) > 180 || Math.abs(sampleLat) > 90) return null;
+
+              const props = p.properties ?? {};
+              return {
+                id: props.id || props.IDU || p.id || `parcel-${idx}`,
+                section: String(props.section ?? props.SEC ?? p.section ?? ""),
+                number: String(props.number ?? props.NUM ?? p.number ?? ""),
+                area: Number(props.area ?? props.contenance ?? p.area ?? 0),
+                coordinates,
+              };
+            }
+
+            // ── Fallback: use whatever coordinates exist raw ──
+            if (Array.isArray(p.coordinates) && p.coordinates.length > 0) {
+              return {
+                id: p.id || `parcel-${idx}`,
+                section: p.section || "",
+                number: p.number || "",
+                area: typeof p.area === "number" ? p.area : 0,
+                coordinates: p.coordinates,
+              };
+            }
+
+            // Cannot extract geometry — drop this parcel
+            console.warn(`[site-plan] Could not extract coordinates for parcel ${idx}`, p);
+            return null;
+          }).filter(Boolean);
         }
         // Ensure topographyGrid and stats have expected fields
         if (!normalized.topographyGrid) normalized.topographyGrid = [];
@@ -1338,40 +1400,68 @@ function SitePlanContent() {
           if (pts.length > 0) setElevationPoints(pts);
         }
 
-        // ── Auto-zoom-to-fit the projected boundary ────────────────────────
-        const boundary = projected.boundary;
-        if (boundary && boundary.points.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boundary.points.forEach((p) => {
-            const px = boundary.left + p.x;
-            const py = boundary.top + p.y;
-            minX = Math.min(minX, px);
-            minY = Math.min(minY, py);
-            maxX = Math.max(maxX, px);
-            maxY = Math.max(maxY, py);
-          });
-          if (minX !== Infinity) {
-            const parcelsW = maxX - minX;
-            const parcelsH = maxY - minY;
-            const containerEl = containerRef?.current;
-            const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
-            const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
-            const padding = 60;
-            const zoomX = parcelsW > 0 ? (viewW - padding * 2) / parcelsW : 1;
-            const zoomY = parcelsH > 0 ? (viewH - padding * 2) / parcelsH : 1;
-            const targetZoom = Math.max(0.3, Math.min(zoomX, zoomY, 0.95));
-            if (targetZoom > 0 && isFinite(targetZoom)) {
-              const centerPX = (minX + maxX) / 2;
-              const centerPY = (minY + maxY) / 2;
-              canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-              const vpt: [number, number, number, number, number, number] = [
-                targetZoom, 0, 0, targetZoom,
-                viewW / 2 - centerPX * targetZoom,
-                viewH / 2 - centerPY * targetZoom,
-              ];
-              canvas.setViewportTransform(vpt);
-              setZoom(Math.round(targetZoom * 100));
+        // ── Auto-zoom-to-fit: use ALL parcel absolute canvas points ──────────
+        // This replaces the old approach of using the merged boundary polygon,
+        // which was inaccurate when parcels were small or the boundary was a
+        // simplified union. We compute bbox from every corner of every parcel.
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        // Primary: walk all parcel absolutePoints (real projected corner coords)
+        if (projected.parcels && projected.parcels.length > 0) {
+          projected.parcels.forEach((parcel) => {
+            if (parcel.absolutePoints) {
+              parcel.absolutePoints.forEach((pt) => {
+                if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+              });
+            } else {
+              // Fallback: centroid + relative points
+              parcel.points.forEach((p) => {
+                const px = parcel.left + p.x;
+                const py = parcel.top + p.y;
+                if (px < minX) minX = px; if (px > maxX) maxX = px;
+                if (py < minY) minY = py; if (py > maxY) maxY = py;
+              });
             }
+          });
+        }
+
+        // Fallback to merged boundary if no parcel points available
+        if (!Number.isFinite(minX)) {
+          const boundary = projected.boundary;
+          if (boundary && boundary.points.length > 0) {
+            boundary.points.forEach((p) => {
+              const px = boundary.left + p.x;
+              const py = boundary.top + p.y;
+              if (px < minX) minX = px; if (px > maxX) maxX = px;
+              if (py < minY) minY = py; if (py > maxY) maxY = py;
+            });
+          }
+        }
+
+        if (Number.isFinite(minX) && maxX > minX && maxY > minY) {
+          const parcelsW = maxX - minX;
+          const parcelsH = maxY - minY;
+          const containerEl = containerRef?.current;
+          const viewW = containerEl ? containerEl.clientWidth : canvasSize.width;
+          const viewH = containerEl ? containerEl.clientHeight : canvasSize.height;
+          const padding = 80;
+          const zoomX = (viewW - padding * 2) / parcelsW;
+          const zoomY = (viewH - padding * 2) / parcelsH;
+          // Allow full zoom range: 0.1 (very large site) to 20 (small parcel)
+          // 0.95 cap was wrong — it prevented seeing small parcels correctly
+          const targetZoom = Math.max(0.1, Math.min(zoomX, zoomY, 20));
+          if (isFinite(targetZoom)) {
+            const centerPX = (minX + maxX) / 2;
+            const centerPY = (minY + maxY) / 2;
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+            const vpt: [number, number, number, number, number, number] = [
+              targetZoom, 0, 0, targetZoom,
+              viewW / 2 - centerPX * targetZoom,
+              viewH / 2 - centerPY * targetZoom,
+            ];
+            canvas.setViewportTransform(vpt);
+            setZoom(Math.round(targetZoom * 100));
           }
         }
       } else {
@@ -1475,9 +1565,17 @@ function SitePlanContent() {
                 // We delete them so they don't pollute the canvas or trigger the naming warning.
                 const toRemove = canvas.getObjects().filter((o: any) => {
                   if (o.isGrid || o.isPolygonPreview) return false; // keep explicit grid
+                  
+                  // Aggressive purge for objects that were accidentally serialized 
+                  // to the database due to CANVAS_PROPS including their flags.
+                  const eName = String(o.elementName ?? o.name ?? "").trim();
+                  if (o.isParcel || o.isBoundaryOverlay || o.isRegulatoryFootprint || o.isMeasurement || eName.startsWith("Parcelle")) {
+                    return true;
+                  }
+
                   if (o.selectable === false && o.evented === false) {
                     const name = String(o.elementName ?? o.name ?? "").trim();
-                    const hasUserMeaning = name || o.surfaceType || o.isParcel || o.isElevationPoint;
+                    const hasUserMeaning = name || o.surfaceType || o.isElevationPoint;
                     if (!hasUserMeaning) return true; // orphaned measurement object → delete
                   }
                   return false;
@@ -1703,7 +1801,7 @@ function SitePlanContent() {
           body: JSON.stringify({ projectId: currentProjectId, elements: elementsToSend }),
         });
         const compData = await compRes.json();
-        if (compData.checks) { setComplianceChecks(compData.checks); setShowCompliance(true); }
+        if (compData.checks) { setComplianceChecks(compData.checks); }
         setSaving(false);
         return true;
       }
@@ -1724,6 +1822,31 @@ function SitePlanContent() {
     const t = setInterval(() => saveSitePlan(), 45000);
     return () => clearInterval(t);
   }, [isDirty, currentProjectId, saveSitePlan]);
+
+  // ── Auto-save on unmount (router navigation away from the page) ──────────
+  // Next.js SPA router does NOT trigger beforeunload, so we save in cleanup.
+  // Refs capture the latest state without stale closures.
+  const isDirtyAutosaveRef = useRef(false);
+  useEffect(() => { isDirtyAutosaveRef.current = isDirty; }, [isDirty]);
+  const saveSitePlanAutosaveRef = useRef(saveSitePlan);
+  useEffect(() => { saveSitePlanAutosaveRef.current = saveSitePlan; }, [saveSitePlan]);
+  const projectIdAutosaveRef = useRef(currentProjectId);
+  useEffect(() => { projectIdAutosaveRef.current = currentProjectId; }, [currentProjectId]);
+
+  useEffect(() => {
+    return () => {
+      // Only fire if: load completed AND project exists AND unsaved changes
+      if (
+        initialLoadCompleteRef.current &&
+        projectIdAutosaveRef.current &&
+        isDirtyAutosaveRef.current
+      ) {
+        // Fire-and-forget (can't await in cleanup function)
+        saveSitePlanAutosaveRef.current().catch(() => {/* silent */});
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally empty: mount/unmount only
+
 
   // ─── Guided placement & preset helpers (must be before canvas mouse handlers) ─
   const addBuildingToCanvasAt = useCallback(
@@ -1835,7 +1958,6 @@ function SitePlanContent() {
       setLastPlacedBuildingId(b.id);
       setPlacementMode(false);
       setGuidedStep(3);
-      setRightTab("buildings");
     },
     [selectedPreset, customDimensions, buildingDetailFromPreset, metersToPixels, addRectMeasurements, updateLayers, addBuildingToCanvasAt]
   );
@@ -1844,7 +1966,25 @@ function SitePlanContent() {
     placeGuidedBuildingAtRef.current = placeGuidedBuildingAt;
   }, [placeGuidedBuildingAt]);
 
-  // ─── Canvas init ───────────────────────────────────────────────────────────
+  // ─── Canvas init & resize ──────────────────────────────────────────────────
+  
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setCanvasSize({ width, height });
+        if (fabricRef.current) {
+          fabricRef.current.setDimensions({ width, height });
+        }
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     // CRITICAL: Do NOT include viewMode in deps — canvas must persist across 2D/3D switches
@@ -1945,7 +2085,7 @@ function SitePlanContent() {
 
     return () => { setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasSize]);
+  }, []);
 
   // ─── Mouse handlers ────────────────────────────────────────────────────────
 
@@ -2074,114 +2214,19 @@ function SitePlanContent() {
       }
 
       // Phase 8: Arrow annotation — handled in mouseUp (needs start+end drag)
-      if (activeTool === "arrow" || activeTool === "elevation") {
-        if (activeTool === "arrow") {
-          // Arrow drawn on mouseUp from drawingStart - handled in mouseUp block
-          setIsDrawing(true);
-          return;
-        }
+      if (activeTool === "arrow") {
+        setIsDrawing(true);
+        return;
+      }
 
-        // If not arrow, then it must be elevation (due to the outer if condition)
-        const raw = window.prompt("Elevation (m), e.g. 0.00 or +1.50 or -0.20:", "0.00");
-        if (raw == null) return;
-        const value = parseFloat(raw.replace(",", ".")) || 0;
-        const id = `elev-${Date.now()}`;
-        setElevationPoints((prev) => [...prev, { id, x: pointer.x, y: pointer.y, value }]);
-        const r = 8;
-        const circle = new fabric.Circle({
-          left: pointer.x - r, top: pointer.y - r, radius: r,
-          fill: "#0ea5e9", stroke: "#0284c7", strokeWidth: 1,
-        });
-        (circle as any).id = id;
-        (circle as any).isElevationPoint = true;
-        (circle as any).elevationValue = value;
-        (circle as any).excludeFromExport = false;
-        canvas.add(circle);
-        const label = new fabric.Text(`${value >= 0 ? "+" : ""}${value.toFixed(2)}`, {
-          left: pointer.x, top: pointer.y + r + 2, fontSize: 10, fontFamily: "monospace",
-          fill: "#0ea5e9", originX: "center", originY: "top",
-        });
-        (label as any).isMeasurement = true;
-        (label as any).parentId = id;
-        canvas.add(label);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
-        return;
-      }
-      if (activeTool === "vegetation") {
-        const treeType = window.prompt("Tree type (deciduous / coniferous / shrub):", "deciduous") || "deciduous";
-        const treeId = `tree-${Date.now()}`;
-        const r = 12;
-        const colors: Record<string, string> = { deciduous: "#22c55e", coniferous: "#15803d", shrub: "#65a30d" };
-        const fillColors: Record<string, string> = { deciduous: "rgba(34,197,94,0.5)", coniferous: "rgba(21,128,61,0.5)", shrub: "rgba(101,163,13,0.5)" };
-        const treeColor = colors[treeType] || "#22c55e";
-        const treeFill = fillColors[treeType] || "rgba(34,197,94,0.5)";
-        const circle = new fabric.Circle({
-          left: pointer.x - r, top: pointer.y - r, radius: r,
-          fill: treeFill, stroke: treeColor, strokeWidth: 2,
-        });
-        (circle as any).id = treeId;
-        (circle as any).elementName = `${treeType.charAt(0).toUpperCase() + treeType.slice(1)} tree`;
-        (circle as any).isVegetation = true;
-        (circle as any).vegetationType = treeType;
-        (circle as any).excludeFromExport = false;
-        canvas.add(circle);
-        const label = new fabric.Text(treeType.charAt(0).toUpperCase() + treeType.slice(1), {
-          left: pointer.x, top: pointer.y + r + 4, fontSize: 9, fontFamily: "monospace",
-          fill: treeColor, originX: "center", originY: "top", selectable: false, evented: false,
-        });
-        (label as any).isMeasurement = true;
-        (label as any).parentId = treeId;
-        canvas.add(label);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
-        return;
-      }
-      if (activeTool === "viewpoint") {
-        const vpName = window.prompt("Viewpoint name (e.g. PC7, PC8):", "PC7") || "PC7";
-        const vpId = `vp-${Date.now()}`;
-        // Camera icon: small square
-        const camSize = 14;
-        const cam = new fabric.Rect({
-          left: pointer.x - camSize / 2, top: pointer.y - camSize / 2,
-          width: camSize, height: camSize,
-          fill: "#6366f1", stroke: "#4f46e5", strokeWidth: 1.5, rx: 3, ry: 3,
-        });
-        (cam as any).id = vpId;
-        (cam as any).elementName = vpName;
-        (cam as any).isViewpoint = true;
-        (cam as any).excludeFromExport = false;
-        canvas.add(cam);
-        // Direction arrow
-        const arrowLen = 40;
-        const arrow = new fabric.Line([pointer.x, pointer.y, pointer.x + arrowLen, pointer.y], {
-          stroke: "#6366f1", strokeWidth: 2.5,
-        });
-        (arrow as any).isMeasurement = true;
-        (arrow as any).parentId = vpId;
-        canvas.add(arrow);
-        // Arrowhead
-        const ah = new fabric.Polygon([
-          { x: pointer.x + arrowLen, y: pointer.y },
-          { x: pointer.x + arrowLen - 8, y: pointer.y - 5 },
-          { x: pointer.x + arrowLen - 8, y: pointer.y + 5 },
-        ], { fill: "#6366f1", selectable: false, evented: false });
-        (ah as any).isMeasurement = true;
-        (ah as any).parentId = vpId;
-        canvas.add(ah);
-        // Label
-        const vpLabel = new fabric.Text(vpName, {
-          left: pointer.x, top: pointer.y - camSize - 10, fontSize: 10, fontFamily: "monospace",
-          fill: "#6366f1", fontWeight: "bold", originX: "center", selectable: false, evented: false,
-        });
-        (vpLabel as any).isMeasurement = true;
-        (vpLabel as any).parentId = vpId;
-        canvas.add(vpLabel);
-        canvas.renderAll();
-        updateLayers(canvas);
-        pushUndoState();
+      if (activeTool === "elevation" || activeTool === "vegetation" || activeTool === "viewpoint") {
+        const evt = e.e as MouseEvent | TouchEvent;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const clientX = (evt as MouseEvent).clientX ?? (evt as TouchEvent).touches?.[0]?.clientX ?? 0;
+        const clientY = (evt as MouseEvent).clientY ?? (evt as TouchEvent).touches?.[0]?.clientY ?? 0;
+        const x = rect ? clientX - rect.left : clientX;
+        const y = rect ? clientY - rect.top : clientY;
+        setInlinePrompt({ type: activeTool as "elevation" | "vegetation" | "viewpoint", clientX: x, clientY: y, pointer });
         return;
       }
       if (activeTool === "polygon" || activeTool === "parcel") {
@@ -2477,7 +2522,6 @@ function SitePlanContent() {
         setPolygonPoints([]);
         // Phase 6: Auto-switch to parcel management tab when parcel drawn
         if (activeTool === "parcel" && creationMode === "free") {
-          setRightTab("parcel");
         }
       }
     };
@@ -3095,7 +3139,6 @@ function SitePlanContent() {
       alert("No parcel location found. Ensure your project has an address and parcel geometry.");
       return;
     }
-    setIsLoadingRoads(true);
     try {
       const res = await fetch("/api/cadastre/road-type", {
         method: "POST",
@@ -3111,7 +3154,6 @@ function SitePlanContent() {
     } catch (err) {
       console.error("Road type fetch error:", err);
     } finally {
-      setIsLoadingRoads(false);
     }
   };
 
@@ -3143,7 +3185,8 @@ function SitePlanContent() {
     const frontColor = frontRoad ? (COLORS[frontRoad.classification] ?? "#d97706") : "#16a34a";
     const sideColor = "#16a34a"; // private/neighbor = green
 
-    parcels.forEach((parcel: any, pi: number) => {
+    // Skip merged/global boundary polygons — only draw on individual parcels
+    parcels.filter((p: any) => !p.isMerged && !p.processedBoundary).forEach((parcel: any, pi: number) => {
       const pts: { x: number; y: number }[] = parcel.points?.map((p: { x: number; y: number }) => {
         const pt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), parcel.calcTransformMatrix());
         return { x: pt.x, y: pt.y };
@@ -3161,6 +3204,11 @@ function SitePlanContent() {
       pts.forEach((pt, i) => {
         if (i >= pts.length - 1) return;
         const next = pts[i + 1];
+
+        // Skip edges longer than 500px (prevent long diagonal lines from bad data)
+        const edgeLen = Math.sqrt((next.x - pt.x) ** 2 + (next.y - pt.y) ** 2);
+        if (edgeLen > 500) return;
+
         const color = i === frontIdx ? frontColor : sideColor;
         const line = new fabric.Line([pt.x, pt.y, next.x, next.y], {
           stroke: color,
@@ -3205,7 +3253,6 @@ function SitePlanContent() {
     const summary = getParcelSummary();
     if (summary.count < 2) return;
 
-    setIsMergingParcels(true);
     try {
       // Use project parcelIds from the DB if available
       const projectParcelIds = (projectData as any)?.parcelIds
@@ -3285,7 +3332,6 @@ function SitePlanContent() {
     } catch (err) {
       console.error("Parcel merge error:", err);
     } finally {
-      setIsMergingParcels(false);
     }
   };
 
@@ -3300,14 +3346,12 @@ function SitePlanContent() {
     const b = createDefaultBuilding({ isExisting: true, name: "Existing Building", color: "#6b7280" });
     setBuildingDetails((prev) => [...prev, b]);
     addBuildingToCanvas(b, true);
-    setRightTab("buildings");
   };
 
   const addNewBuilding = () => {
     const b = createDefaultBuilding({ name: "New Construction", color: "#3b82f6" });
     setBuildingDetails((prev) => [...prev, b]);
     addBuildingToCanvas(b, false);
-    setRightTab("buildings");
   };
 
   // ─── Computed values ───────────────────────────────────────────────────────
@@ -3437,9 +3481,105 @@ function SitePlanContent() {
 
   const editorCanProceed = !!currentProjectId && !hasUnnamedElements && greenPct >= (projectData?.minGreenPct ?? 20) && hasContent;
 
+  const handleInlineConfirm = (value: string | null) => {
+    if (!inlinePrompt || !fabricRef.current) return;
+    const canvas = fabricRef.current;
+    const { pointer, type } = inlinePrompt;
+    
+    setInlinePrompt(null);
+    if (!value) return;
+
+    if (type === "elevation") {
+      const v = parseFloat(value.replace(",", ".")) || 0;
+      const id = `elev-${Date.now()}`;
+      setElevationPoints((prev) => [...prev, { id, x: pointer.x, y: pointer.y, value: v }]);
+      const r = 8;
+      const circle = new fabric.Circle({
+        left: pointer.x - r, top: pointer.y - r, radius: r,
+        fill: "#0ea5e9", stroke: "#0284c7", strokeWidth: 1,
+      });
+      (circle as any).id = id;
+      (circle as any).isElevationPoint = true;
+      (circle as any).elevationValue = v;
+      (circle as any).excludeFromExport = false;
+      canvas.add(circle);
+      const label = new fabric.Text(`${v >= 0 ? "+" : ""}${v.toFixed(2)}`, {
+        left: pointer.x, top: pointer.y + r + 2, fontSize: 10, fontFamily: "monospace",
+        fill: "#0ea5e9", originX: "center", originY: "top",
+      });
+      (label as any).isMeasurement = true;
+      (label as any).parentId = id;
+      canvas.add(label);
+    } else if (type === "vegetation") {
+      const treeType = value || "deciduous";
+      const treeId = `tree-${Date.now()}`;
+      const r = 12;
+      const colors: Record<string, string> = { deciduous: "#22c55e", coniferous: "#15803d", shrub: "#65a30d" };
+      const fillColors: Record<string, string> = { deciduous: "rgba(34,197,94,0.5)", coniferous: "rgba(21,128,61,0.5)", shrub: "rgba(101,163,13,0.5)" };
+      const treeColor = colors[treeType] || "#22c55e";
+      const treeFill = fillColors[treeType] || "rgba(34,197,94,0.5)";
+      const circle = new fabric.Circle({
+        left: pointer.x - r, top: pointer.y - r, radius: r,
+        fill: treeFill, stroke: treeColor, strokeWidth: 2,
+      });
+      (circle as any).id = treeId;
+      (circle as any).elementName = `${treeType.charAt(0).toUpperCase() + treeType.slice(1)} tree`;
+      (circle as any).isVegetation = true;
+      (circle as any).vegetationType = treeType;
+      (circle as any).excludeFromExport = false;
+      canvas.add(circle);
+      const label = new fabric.Text(treeType.charAt(0).toUpperCase() + treeType.slice(1), {
+        left: pointer.x, top: pointer.y + r + 4, fontSize: 9, fontFamily: "monospace",
+        fill: treeColor, originX: "center", originY: "top", selectable: false, evented: false,
+      });
+      (label as any).isMeasurement = true;
+      (label as any).parentId = treeId;
+      canvas.add(label);
+    } else if (type === "viewpoint") {
+      const vpName = value || "PC7";
+      const vpId = `vp-${Date.now()}`;
+      const camSize = 14;
+      const cam = new fabric.Rect({
+        left: pointer.x - camSize / 2, top: pointer.y - camSize / 2,
+        width: camSize, height: camSize,
+        fill: "#6366f1", stroke: "#4f46e5", strokeWidth: 1.5, rx: 3, ry: 3,
+      });
+      (cam as any).id = vpId;
+      (cam as any).elementName = vpName;
+      (cam as any).isViewpoint = true;
+      (cam as any).excludeFromExport = false;
+      canvas.add(cam);
+      const arrowLen = 40;
+      const arrow = new fabric.Line([pointer.x, pointer.y, pointer.x + arrowLen, pointer.y], {
+        stroke: "#6366f1", strokeWidth: 2.5,
+      });
+      (arrow as any).isMeasurement = true;
+      (arrow as any).parentId = vpId;
+      canvas.add(arrow);
+      const ah = new fabric.Polygon([
+        { x: pointer.x + arrowLen, y: pointer.y },
+        { x: pointer.x + arrowLen - 8, y: pointer.y - 5 },
+        { x: pointer.x + arrowLen - 8, y: pointer.y + 5 },
+      ], { fill: "#6366f1", selectable: false, evented: false });
+      (ah as any).isMeasurement = true;
+      (ah as any).parentId = vpId;
+      canvas.add(ah);
+      const vpLabel = new fabric.Text(vpName, {
+        left: pointer.x, top: pointer.y - camSize - 10, fontSize: 10, fontFamily: "monospace",
+        fill: "#6366f1", fontWeight: "bold", originX: "center", selectable: false, evented: false,
+      });
+      (vpLabel as any).isMeasurement = true;
+      (vpLabel as any).parentId = vpId;
+      canvas.add(vpLabel);
+    }
+    
+    canvas.renderAll();
+    updateLayers(canvas);
+    pushUndoState();
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  const violationChecks = complianceChecks.filter((c) => c.status === "violation");
 
   return (
     <div className={cn("bg-white flex flex-col overflow-hidden", isFullScreen ? "fixed inset-0 z-50 h-screen" : "h-screen")}>
@@ -3475,13 +3615,6 @@ function SitePlanContent() {
             {currentScale.label}
           </span>
 
-          {/* ShowData Button */}
-          <button
-            onClick={() => setShowDataModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/25 transition-all shrink-0"
-          >
-            🔍 ShowData
-          </button>
 
           {/* 2D / 3D Toggle */}
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
@@ -3574,19 +3707,7 @@ function SitePlanContent() {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
-              <button
-                onClick={() => setShowDataPanel(!showDataPanel)}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                  showDataPanel
-                    ? "bg-indigo-500 text-white shadow-md"
-                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
-                )}
-                title="Show all processed site data"
-              >
-                <Database className="w-4 h-4" />
-                Show Data
-              </button>
+
               {saveStatus === 'saved' && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
@@ -3659,13 +3780,7 @@ function SitePlanContent() {
 
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Show Data Panel (overlay) */}
-        {showDataPanel && (
-          <ShowDataPanel
-            data={processedSiteData}
-            onClose={() => setShowDataPanel(false)}
-          />
-        )}
+
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
           <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">
@@ -3721,11 +3836,11 @@ function SitePlanContent() {
               <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest py-1">Buildings</p>
             </div>
             <div className="px-1.5 space-y-0.5">
-              <button onClick={() => { addExistingBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200" title="Add Existing Building">
+              <button onClick={() => { addExistingBuilding(); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200" title="Add Existing Building">
                 <Building2 className="w-4 h-4 shrink-0 text-gray-500" />
                 <span className="text-[11px] font-medium">Existing Building</span>
               </button>
-              <button onClick={() => { addNewBuilding(); setRightTab("buildings"); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all border border-transparent hover:border-blue-200" title="Add New Construction">
+              <button onClick={() => { addNewBuilding(); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all border border-transparent hover:border-blue-200" title="Add New Construction">
                 <Plus className="w-4 h-4 shrink-0" />
                 <span className="text-[11px] font-medium">New Construction</span>
               </button>
@@ -3760,12 +3875,7 @@ function SitePlanContent() {
                   <span className="text-[11px] font-medium">Terrain IGN</span>
                 </button>
               )}
-              {currentProjectId && (
-                <Link href={`/building-3d?project=${currentProjectId}`} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-violet-500 hover:bg-violet-50 transition-all" title="Full 3D Editor">
-                  <Box className="w-4 h-4 shrink-0" />
-                  <span className="text-[11px] font-medium">Full 3D Editor</span>
-                </Link>
-              )}
+
             </div>
 
             {/* Spacer + Delete at bottom */}
@@ -3883,9 +3993,59 @@ function SitePlanContent() {
                 <span className="text-[10px] text-slate-400 ml-1">5 m</span>
               </div>
             </div>
-            <div className="absolute inset-0 flex items-center justify-center bg-white">
-              <canvas ref={canvasRef} className="shadow-2xl" />
+            <div className="absolute inset-0 bg-white">
+              <canvas ref={canvasRef} />
             </div>
+
+            {inlinePrompt && (
+              <div 
+                className="absolute z-50 bg-white shadow-2xl rounded-xl border border-slate-200 flex flex-col items-start p-3 w-64 animate-in fade-in zoom-in-95 duration-200"
+                style={{
+                  left: Math.min(inlinePrompt.clientX + 10, canvasSize.width - 260),
+                  top: Math.min(inlinePrompt.clientY + 10, canvasSize.height - 100),
+                }}
+              >
+                <p className="text-xs font-semibold text-slate-700 mb-2">
+                  {inlinePrompt.type === 'elevation' ? "Set Elevation (m)" : inlinePrompt.type === 'vegetation' ? "Select Vegetation Type" : "Set Viewpoint Name"}
+                </p>
+                {inlinePrompt.type === 'vegetation' ? (
+                   <select 
+                     autoFocus
+                     className="w-full bg-slate-50 border border-slate-200 rounded-md text-sm p-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                     onKeyDown={(e) => {
+                       if (e.key === "Enter") handleInlineConfirm((e.target as HTMLSelectElement).value);
+                       if (e.key === "Escape") handleInlineConfirm(null);
+                     }}
+                     id="inline-select"
+                   >
+                     <option value="deciduous">Deciduous Tree</option>
+                     <option value="coniferous">Coniferous Tree</option>
+                     <option value="shrub">Shrub</option>
+                   </select>
+                ) : (
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder={inlinePrompt.type === 'elevation' ? "e.g. 0.00 or +1.50" : "e.g. PC7"}
+                    defaultValue={inlinePrompt.type === 'elevation' ? "0.00" : "PC7"}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-md text-sm p-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleInlineConfirm((e.target as HTMLInputElement).value);
+                      if (e.key === "Escape") handleInlineConfirm(null);
+                    }}
+                    id="inline-input"
+                  />
+                )}
+                <div className="flex items-center gap-2 w-full">
+                  <button onClick={() => handleInlineConfirm(null)} className="flex-1 py-1.5 rounded bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200 transition-colors">Cancel</button>
+                  <button onClick={() => {
+                     const el = document.getElementById(inlinePrompt.type === 'vegetation' ? 'inline-select' : 'inline-input') as HTMLInputElement | HTMLSelectElement;
+                     handleInlineConfirm(el.value);
+                  }} className="flex-1 py-1.5 rounded bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors">Confirm</button>
+                </div>
+              </div>
+            )}
+
             <SitePlanLegend isOpen={showLegend} onToggle={() => setShowLegend(false)} />
 
             {/* ── Element Properties Panel (2D floating overlay) ── */}
@@ -3958,333 +4118,6 @@ function SitePlanContent() {
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div className="w-80 bg-white border-l border-slate-200 flex flex-col">
-          {creationMode === "guided" ? (
-            <GuidedCreation
-              step={guidedStep}
-              onStepChange={setGuidedStep}
-              selectedPreset={selectedPreset}
-              onSelectPreset={setSelectedPreset}
-              placementMode={placementMode}
-              onStartPlacement={() => { setPlacementMode(true); setGuidedStep(2); }}
-              onCancelPlacement={() => { setPlacementMode(false); }}
-              lastPlacedBuilding={lastPlacedBuildingId ? buildingDetails.find((b) => b.id === lastPlacedBuildingId) ?? null : null}
-              onSizeChange={(buildingId, patch) => {
-                setBuildingDetails((prev) => {
-                  const next = prev.map((bd) =>
-                    bd.id === buildingId
-                      ? {
-                        ...bd,
-                        ...(patch.width != null && { width: patch.width }),
-                        ...(patch.depth != null && { depth: patch.depth }),
-                        ...(patch.wallHeights != null && { wallHeights: patch.wallHeights }),
-                        ...(patch.altitudeM !== undefined && { altitudeM: patch.altitudeM }),
-                      }
-                      : bd
-                  );
-                  const updated = next.find((b) => b.id === buildingId);
-                  const canvas = fabricRef.current;
-                  if (canvas && updated && (patch.width != null || patch.depth != null)) {
-                    const obj = canvas.getObjects().find((o: any) => o.id === buildingId);
-                    if (obj && obj.type === "rect") {
-                      const wPx = metersToPixels(updated.width);
-                      const dPx = metersToPixels(updated.depth);
-                      obj.set({ width: wPx, height: dPx });
-                      removeMeasurements(buildingId);
-                      addRectMeasurements(obj as fabric.Rect, buildingId);
-                      canvas.renderAll();
-                      updateLayers(canvas);
-                    }
-                  }
-                  return next;
-                });
-              }}
-              onRoofChange={(buildingId, roof) => {
-                setBuildingDetails((prev) =>
-                  prev.map((bd) => (bd.id === buildingId ? { ...bd, roof: { ...bd.roof, ...roof } } : bd))
-                );
-              }}
-              customDimensions={customDimensions}
-              onCustomDimensionsChange={setCustomDimensions}
-              onAddAnother={() => { setGuidedStep(1); setSelectedPreset(null); setLastPlacedBuildingId(null); }}
-              onAddGreenSpace={() => {
-                const greenPreset = getPresetById("green");
-                if (greenPreset) {
-                  setSelectedPreset(greenPreset);
-                  setGuidedStep(2);
-                  setPlacementMode(true);
-                }
-              }}
-              onDone={() => { setCreationMode("free"); setRightTab("buildings"); }}
-              buildingCount={buildingDetails.length + (placementMode ? 0 : 0)}
-              onSwitchToFreeDesign={() => { setCreationMode("free"); setPlacementMode(false); setRightTab("buildings"); }}
-            />
-          ) : (
-            <>
-              <div className="flex border-b border-slate-200 overflow-x-auto">
-                {([
-                  { id: "layers" as const, label: "Layers", icon: Layers },
-                  { id: "buildings" as const, label: "Buildings", icon: Building2 },
-                  { id: "footprint" as const, label: "Footprint", icon: LayoutGrid },
-                  { id: "parcel" as const, label: "Parcel", icon: MapPin },
-                ]).map((tab) => (
-                  <button key={tab.id} onClick={() => setRightTab(tab.id)}
-                    className={cn("flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap",
-                      rightTab === tab.id ? "text-slate-900 border-b-2 border-blue-500 bg-white" : "text-slate-400 hover:text-slate-900"
-                    )}>
-                    <tab.icon className="w-3.5 h-3.5" />{tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Compliance */}
-              {currentProjectId && (
-                <div className="border-b border-slate-200">
-                  <button onClick={() => setShowCompliance(!showCompliance)} className="w-full flex items-center justify-between p-3 text-left hover:bg-white">
-                    <span className="text-sm font-medium text-slate-900 flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Compliance</span>
-                    <ChevronDown className={cn("w-4 h-4 transition-transform", showCompliance && "rotate-180")} />
-                  </button>
-                  {showCompliance && complianceChecks.length > 0 && (
-                    <div className="p-3 pt-0 max-h-32 overflow-y-auto space-y-1.5">
-                      {complianceChecks.map((c, i) => (
-                        <div key={i} className={cn("p-2 rounded-lg text-xs",
-                          c.status === "compliant" && "bg-emerald-50 text-emerald-600",
-                          c.status === "warning" && "bg-amber-50 text-amber-600",
-                          c.status === "violation" && "bg-red-50 text-red-600"
-                        )}><span className="font-medium">{c.rule}</span>: {c.message}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Tab Content */}
-              <div className="flex-1 overflow-y-auto">
-                {rightTab === "layers" && (
-                  <div className="p-3">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Layers className="w-4 h-4" />Layers</h3>
-                      <span className="text-xs text-slate-500">{layers.length}</span>
-                    </div>
-                    {layers.length === 0 ? (
-                      <p className="text-center py-6 text-slate-500 text-sm">No objects yet. Draw shapes or add buildings.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {layers.map((layer) => (
-                          <div key={layer.id} className="flex items-center gap-2 p-2 rounded-lg bg-white hover:bg-slate-100">
-                            <div className={cn("w-7 h-7 rounded flex items-center justify-center",
-                              layer.name === "Land Parcel" ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600"
-                            )}>
-                              {layer.name === "Land Parcel" ? <MapPin className="w-3 h-3" /> :
-                                layer.type === "rect" ? <Square className="w-3 h-3" /> :
-                                  layer.type === "circle" ? <Circle className="w-3 h-3" /> :
-                                    layer.type === "line" ? <Minus className="w-3 h-3" /> :
-                                      <Pentagon className="w-3 h-3" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs text-slate-900 truncate capitalize">{layer.name}</p>
-                              <p className="text-[10px] text-slate-500">{layer.type}</p>
-                            </div>
-                            <button className="p-1 text-slate-400 hover:text-slate-900">
-                              {layer.visible ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {rightTab === "buildings" && (
-                  <div className="p-3 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-slate-900">Building Details</h3>
-                      <span className="text-xs text-slate-500">{buildingDetails.length}</span>
-                    </div>
-                    {buildingDetails.length === 0 ? (
-                      <div className="text-center py-6 space-y-3">
-                        <p className="text-sm text-slate-500">No buildings yet.</p>
-                        <div className="flex flex-col gap-2">
-                          <button onClick={addExistingBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
-                            <Building2 className="w-3 h-3" />Add Existing Building
-                          </button>
-                          <button onClick={addNewBuilding} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
-                            <Plus className="w-3 h-3" />Add New Construction
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {buildingDetails.map((b) => (
-                          <BuildingDetailPanel
-                            key={b.id}
-                            building={b}
-                            highlight={viewMode === "3d" && selectedBuildingId3d === b.id}
-                            onChange={(updated) => {
-                              setBuildingDetails((prev) => prev.map((bd) => (bd.id === updated.id ? updated : bd)));
-                              const canvas = fabricRef.current;
-                              if (canvas) {
-                                const obj = canvas.getObjects().find((o: any) => o.id === updated.id);
-                                if (obj && obj.type === "rect") {
-                                  const wPx = metersToPixels(updated.width), dPx = metersToPixels(updated.depth);
-                                  obj.set({ width: wPx, height: dPx });
-                                  (obj as any).elementName = updated.name;
-                                  removeMeasurements(updated.id);
-                                  addRectMeasurements(obj as fabric.Rect, updated.id);
-                                  canvas.renderAll();
-                                  updateLayers(canvas);
-                                }
-                              }
-                            }}
-                            onRemove={() => {
-                              setBuildingDetails((prev) => prev.filter((bd) => bd.id !== b.id));
-                              const canvas = fabricRef.current;
-                              if (canvas) {
-                                const obj = canvas.getObjects().find((o: any) => o.id === b.id);
-                                if (obj) { removeMeasurements(b.id); canvas.remove(obj); canvas.renderAll(); }
-                              }
-                            }}
-                          />
-                        ))}
-                        <div className="flex gap-2">
-                          <button onClick={addExistingBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-slate-200 text-slate-400 hover:text-slate-900 text-xs">
-                            <Building2 className="w-3 h-3" />Existing
-                          </button>
-                          <button onClick={addNewBuilding} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-blue-200 text-blue-600 hover:text-blue-700 text-xs">
-                            <Plus className="w-3 h-3" />New
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {rightTab === "footprint" && (
-                  <div className="p-3">
-                    <FootprintTable data={footprintData} />
-                  </div>
-                )}
-
-                {/* Phase 6: Parcel Management Tab */}
-                {rightTab === "parcel" && (
-                  <div className="flex-1 overflow-y-auto">
-                    <ParcelManagementPanel
-                      parcelSummary={getParcelSummary()}
-                      roads={parcelRoads}
-                      isLoadingRoads={isLoadingRoads}
-                      isMerging={isMergingParcels}
-                      onClassifyBoundaries={fetchParcelRoads}
-                      onMergeParcels={handleMergeParcels}
-                      onAddDimensions={autoAddBoundaryDimensions}
-                      projectId={currentProjectId}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Bottom Properties */}
-              <div className="border-t border-slate-200 p-3">
-                <h3 className="text-sm font-semibold text-slate-900 mb-2 flex items-center gap-2"><Settings className="w-4 h-4" />Properties</h3>
-                {selectedObject ? (
-                  <div className="space-y-2">
-                    <div>
-                      <label className="text-xs text-slate-500 block mb-1">Name</label>
-                      <input type="text" value={String((selectedObject as any).elementName ?? (selectedObject as any).name ?? "")}
-                        onChange={(e) => {
-                          (selectedObject as any).elementName = e.target.value;
-                          (selectedObject as any).name = e.target.value;
-                          fabricRef.current?.requestRenderAll();
-                          updateLayers(fabricRef.current!);
-                          forceUpdate((n) => n + 1);
-                        }}
-                        placeholder="e.g. Main building"
-                        className="w-full px-2 py-1.5 rounded bg-slate-100 border border-slate-200 text-slate-900 text-sm" />
-                    </div>
-                    {/* Phase 8: Text formatting panel */}
-                    {(selectedObject as any).type === "i-text" || (selectedObject as any).type === "text" ? (
-                      <div className="space-y-2 pt-1 border-t border-slate-100">
-                        <label className="text-xs text-slate-500 block">Text Formatting</label>
-                        {/* Font size */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-slate-500 w-14">Size</span>
-                          <input type="range" min={8} max={72} step={1}
-                            value={(selectedObject as any).fontSize || 16}
-                            onChange={(e) => {
-                              (selectedObject as any).set({ fontSize: Number(e.target.value) });
-                              fabricRef.current?.requestRenderAll();
-                              forceUpdate((n) => n + 1);
-                            }}
-                            className="flex-1 accent-blue-500" />
-                          <span className="text-[10px] font-mono text-slate-700 w-6">{(selectedObject as any).fontSize || 16}</span>
-                        </div>
-                        {/* Bold / Italic / Align */}
-                        <div className="flex gap-1">
-                          <button onClick={() => { (selectedObject as any).set({ fontWeight: (selectedObject as any).fontWeight === "bold" ? "normal" : "bold" }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
-                            className={cn("flex-1 h-7 rounded text-xs font-bold border transition-colors", (selectedObject as any).fontWeight === "bold" ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
-                            <Bold className="w-3 h-3 mx-auto" />
-                          </button>
-                          <button onClick={() => { (selectedObject as any).set({ fontStyle: (selectedObject as any).fontStyle === "italic" ? "normal" : "italic" }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
-                            className={cn("flex-1 h-7 rounded text-xs border transition-colors", (selectedObject as any).fontStyle === "italic" ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
-                            <Italic className="w-3 h-3 mx-auto" />
-                          </button>
-                          {(["left", "center", "right"] as const).map((align, i) => {
-                            const IconC = [AlignLeft, AlignCenter, AlignRight][i];
-                            return (
-                              <button key={align} onClick={() => { (selectedObject as any).set({ textAlign: align }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
-                                className={cn("flex-1 h-7 rounded text-xs border transition-colors", (selectedObject as any).textAlign === align ? "bg-blue-500 text-white border-blue-500" : "border-slate-200 text-slate-500 hover:bg-slate-100")}>
-                                <IconC className="w-3 h-3 mx-auto" />
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {/* Font family */}
-                        <select value={(selectedObject as any).fontFamily || "sans-serif"}
-                          onChange={(e) => { (selectedObject as any).set({ fontFamily: e.target.value }); fabricRef.current?.requestRenderAll(); forceUpdate((n) => n + 1); }}
-                          className="w-full text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-700">
-                          {["sans-serif", "serif", "monospace", "Georgia", "Arial Black"].map((f) => (
-                            <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">Select an object</p>
-                )}
-                <div className="mt-3">
-                  <label className="text-xs text-slate-500 block mb-1.5">Surface</label>
-                  <div className="flex flex-wrap gap-1">
-                    {SURFACE_TYPES.map((st) => (
-                      <button key={st.id} onClick={() => setActiveSurfaceType(st)}
-                        className={cn("px-2 py-0.5 rounded text-[10px] font-medium", activeSurfaceType.id === st.id ? "ring-2 ring-white/50" : "opacity-70 hover:opacity-100")}
-                        style={{ backgroundColor: st.color + "40", color: st.color }}
-                        title={(st as { tooltip?: string }).tooltip || st.label}>{st.label}</button>
-                    ))}
-                  </div>
-                </div>
-                {activeTool === "vrd" && (
-                  <div className="mt-3">
-                    <VrdToolbar vrdDrawing={vrdDrawing} />
-                  </div>
-                )}
-                <div className="mt-3 flex items-center gap-3">
-                  <div className="flex flex-wrap gap-1">
-                    {paletteColors.slice(0, 6).map((c) => (
-                      <button key={c} onClick={() => setActiveColor(c)}
-                        className={cn("w-5 h-5 rounded", activeColor === c && "ring-2 ring-white ring-offset-1 ring-offset-slate-900")}
-                        style={{ backgroundColor: c }} />
-                    ))}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Stroke: {strokeWidth}px
-                    <input type="range" min={1} max={10} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-16 accent-blue-500 ml-1" />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       {/* Tutorial modal + Load example (spec UX) */}

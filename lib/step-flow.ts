@@ -7,7 +7,7 @@
  */
 
 /** Paths that accept ?project= for project context (without being under /projects/[id]) */
-const PROJECT_QUERY_PATHS = ["/site-plan", "/location-plan", "/terrain", "/building-3d", "/landscape", "/statement", "/export"];
+const PROJECT_QUERY_PATHS = ["/site-plan", "/location-plan", "/terrain", "/landscape", "/statement", "/export"];
 
 export function getProjectIdFromRoute(pathname: string, projectParam: string | null): string | null {
   // /projects/new is step 1 — no project ID yet
