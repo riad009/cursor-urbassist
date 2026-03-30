@@ -61,12 +61,11 @@ import {
   Pencil,
   MessageSquare,
   ChevronRight,
-  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
 
-const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
+
 const Terrain3DViewer = dynamic(() => import("@/components/three/Terrain3DViewer"), { ssr: false });
 import type { UserBuilding3D } from "@/components/three/Terrain3DViewer";
 import { BuildingDetailPanel,
@@ -77,7 +76,7 @@ import { ElementPropertiesPanel } from "@/components/site-plan/ElementProperties
 
 import { FootprintTable } from "@/components/site-plan/FootprintTable";
 import { SitePlanLegend } from "@/components/site-plan/SitePlanLegend";
-import { ShowDataPanel } from "@/components/site-plan/ShowDataPanel";
+
 import type { BuildingDetail } from "@/components/site-plan/BuildingDetailPanel";
 import type { FootprintData } from "@/components/site-plan/FootprintTable";
 import type { DetectedRoad, ParcelSummary } from "@/components/site-plan/ParcelManagementPanel";
@@ -317,7 +316,7 @@ function SitePlanContent() {
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<ViewMode>("2d");
-  const [showDataModal, setShowDataModal] = useState(false);
+
   const setbackSegmentsRef = useRef<SetbackSegment[]>([]);
   const [scene3dVersion, setScene3dVersion] = useState(0);
   const [zoom, setZoom] = useState(95);
@@ -424,8 +423,7 @@ function SitePlanContent() {
   const [loadingEditorData, setLoadingEditorData] = useState(true);
   /** Fully pre-processed site data (boundary, edges, elevations) from process-geometry API */
   const [processedSiteData, setProcessedSiteData] = useState<ProcessedSiteData | null>(null);
-  /** Show Data panel visibility */
-  const [showDataPanel, setShowDataPanel] = useState(false);
+
 
   // Compliance
   const [complianceChecks, setComplianceChecks] = useState<{ rule: string; status: string; message: string }[]>([]);
@@ -3617,13 +3615,6 @@ function SitePlanContent() {
             {currentScale.label}
           </span>
 
-          {/* ShowData Button */}
-          <button
-            onClick={() => setShowDataModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/25 transition-all shrink-0"
-          >
-            🔍 ShowData
-          </button>
 
           {/* 2D / 3D Toggle */}
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
@@ -3716,19 +3707,7 @@ function SitePlanContent() {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
-              <button
-                onClick={() => setShowDataPanel(!showDataPanel)}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                  showDataPanel
-                    ? "bg-indigo-500 text-white shadow-md"
-                    : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
-                )}
-                title="Show all processed site data"
-              >
-                <Database className="w-4 h-4" />
-                Show Data
-              </button>
+
               {saveStatus === 'saved' && (
                 <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
@@ -3801,13 +3780,7 @@ function SitePlanContent() {
 
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Show Data Panel (overlay) */}
-        {showDataPanel && (
-          <ShowDataPanel
-            data={processedSiteData}
-            onClose={() => setShowDataPanel(false)}
-          />
-        )}
+
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
           <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">
