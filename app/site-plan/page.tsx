@@ -97,6 +97,7 @@ import {
 } from "@/lib/buildingCanvasOverlays";
 import { calculateRoofData } from "@/lib/roofCalculations";
 import { useEditorStore } from "@/store/editorStore";
+import { useUrbAssistProjectStore } from "@/store/useUrbAssistProjectStore";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { usePluCompliance } from "@/hooks/usePluCompliance";
 import PluAlertBanner from "@/components/editor/PluAlertBanner";
@@ -3762,29 +3763,73 @@ function SitePlanContent() {
                 </span>
               )}
               {(() => {
-                const nextHref = `/terrain?project=${currentProjectId}`;
-                const nextLabel = "Next: Terrain";
-                if (editorCanProceed) {
-                  return (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (isDirty && currentProjectId) await saveSitePlan();
-                        router.push(nextHref);
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sky-500 hover:bg-sky-600 text-slate-900 transition-colors"
-                    >
-                      {nextLabel}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  );
-                }
+                const nextHref = returnToUrl ? decodeURIComponent(returnToUrl) : `/projects/${currentProjectId}/project-description?designed=1`;
+                const nextLabel = "Continue to Complete File";
+                
                 return (
-                  <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-100" title="Name all elements, meet green %, and add at least one footprint">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isDirty && currentProjectId) await saveSitePlan();
+
+                      // ── Enterprise Document Capture Engine ─────────────────
+                      // All captures complete BEFORE navigation (no race condition).
+                      // All results stored as memory-safe Blob URLs (not raw Base64).
+                      const { setGeneratedDocument } = useUrbAssistProjectStore.getState();
+                      const { captureFabricCanvas, capture3DOrthographic, getStaticMapUrl, extractCentroid } = await import('@/lib/captureEngine');
+                      const { getActive3DContext } = await import('@/components/three/Terrain3DViewer');
+
+                      const capturePromises: Promise<void>[] = [];
+
+                      // PC1: Static OSM neighborhood map (NOT a canvas screenshot)
+                      capturePromises.push((async () => {
+                        try {
+                          const boundary = useUrbAssistProjectStore.getState().parcelBoundary;
+                          const centroid = extractCentroid(boundary);
+                          if (centroid) {
+                            const mapUrl = getStaticMapUrl(centroid.lat, centroid.lng, 15, 800, 500);
+                            setGeneratedDocument('PC1', mapUrl);
+                          }
+                        } catch (e) { console.warn('[capture] PC1 static map failed:', e); }
+                      })());
+
+                      // PC2: 2D Fabric.js canvas → Blob URL
+                      capturePromises.push((async () => {
+                        try {
+                          const canvas2d = fabricRef.current;
+                          if (canvas2d) {
+                            const blobUrl = await captureFabricCanvas(canvas2d, 1.5);
+                            setGeneratedDocument('PC2', blobUrl);
+                          }
+                        } catch (e) { console.warn('[capture] PC2 fabric capture failed:', e); }
+                      })());
+
+                      // PC3 + PC5.2: Real 3D WebGL orthographic captures
+                      capturePromises.push((async () => {
+                        try {
+                          const ctx = getActive3DContext();
+                          if (ctx) {
+                            // PC3: Side orthographic (cross-section view)
+                            const pc3Blob = await capture3DOrthographic(ctx, 'side');
+                            setGeneratedDocument('PC3', pc3Blob);
+
+                            // PC5.2: Front orthographic (facade view)
+                            const pc52Blob = await capture3DOrthographic(ctx, 'front');
+                            setGeneratedDocument('PC5.2', pc52Blob);
+                          }
+                        } catch (e) { console.warn('[capture] PC3/PC5.2 3D capture failed:', e); }
+                      })());
+
+                      // Await ALL captures before navigating (fixes race condition)
+                      await Promise.allSettled(capturePromises);
+
+                      router.push(nextHref);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors shadow-sm"
+                  >
                     {nextLabel}
-                    <ArrowRight className="w-4 h-4 opacity-60" />
-                    <span className="text-xs font-normal text-slate-500 ml-1">(complete required fields)</span>
-                  </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 );
               })()}
             </>

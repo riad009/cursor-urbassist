@@ -124,3 +124,72 @@ body {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MANDATE 5: Print Styles — Full Dossier PDF Export
+   Applied when body has .printing-dossier class (added by Download button)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media print {
+  /* Hide ALL navigation, toolbars, sidebars, and non-document UI */
+  body.printing-dossier nav,
+  body.printing-dossier header,
+  body.printing-dossier footer,
+  body.printing-dossier [data-sidebar],
+  body.printing-dossier .no-print,
+  body.printing-dossier button,
+  body.printing-dossier select,
+  body.printing-dossier [role="navigation"],
+  body.printing-dossier [role="banner"],
+  body.printing-dossier [role="complementary"] {
+    display: none !important;
+  }
+
+  /* Reset layout for print */
+  body.printing-dossier {
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Allow page breaks between document sections */
+  body.printing-dossier .bg-white {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Each document card should start on a new page */
+  body.printing-dossier [class*="rounded-2xl"] {
+    break-before: page;
+    page-break-before: always;
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  /* Ensure images are visible and properly sized */
+  body.printing-dossier img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Remove gradients for cleaner print output */
+  body.printing-dossier [style*="gradient"] {
+    background: #334155 !important;
+    color: white !important;
+  }
+
+  /* Ensure text is readable */
+  body.printing-dossier * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+}

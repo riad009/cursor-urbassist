@@ -682,12 +682,26 @@ function buildPremiumCarport(ub:UBLike,gY:number,lx:number,lz:number,ry:number):
 }
 
 
+// ─── Module-Level 3D Context Registry (for cross-module capture access) ─────
+// Only one Terrain3DViewer exists at a time. This singleton exposes the active
+// renderer/scene/camera so the captureEngine can grab them without prop-drilling.
+let _active3DContext: {
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  buildingsGroup?: THREE.Group;
+} | null = null;
+
+/** Returns the active Three.js context, or null if the viewer is unmounted. */
+export function getActive3DContext() { return _active3DContext; }
+
 
 export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, width, height, userBuildings, canvasWidth, canvasHeight, pixelsPerMeter, zScale: zScaleProp = 1.0 }: Terrain3DViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
     scene: THREE.Scene;
+    camera: THREE.PerspectiveCamera;
     normPts: Array<{ x: number; z: number; y: number }>;
     controls: OrbitControls;
     animId: number;
@@ -958,7 +972,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     camera.position.set(cX + cd * 0.55, targetH + cd * 0.65, cZ + cd * 0.55);
     camera.lookAt(cX, hasElev ? targetH * 0.3 : 0, cZ);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
     renderer.setSize(W, H);
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     renderer.shadowMap.enabled = true;
@@ -969,6 +983,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     container.innerHTML = "";
     const cvs = renderer.domElement;
+    cvs.setAttribute('data-terrain-3d', 'true');
     cvs.style.cursor = "grab";
     cvs.style.touchAction = "none";
     cvs.addEventListener("pointerdown", () => (cvs.style.cursor = "grabbing"));
@@ -1281,6 +1296,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     sceneRef.current = {
       renderer,
       scene,
+      camera,
       normPts,
       controls,
       animId,
@@ -1291,6 +1307,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
       cX,
       cZ,
     };
+    // Publish to module-level registry for cross-module capture access
+    _active3DContext = { renderer, scene, camera, buildingsGroup };
     // Store exag for buildings effect
     exagRef.current = exag;
 
@@ -1334,6 +1352,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
         sceneRef.current.renderer.dispose();
         sceneRef.current.controls.dispose();
       }
+      // Clear module-level registry on unmount
+      _active3DContext = null;
       if (sculptCleanupRef.current) {
         sculptCleanupRef.current();
         sculptCleanupRef.current = null;

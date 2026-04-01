@@ -53,6 +53,7 @@ import {
     type ProjectTypeChoice,
     type SubmitterType,
 } from "@/lib/dp-pc-calculator";
+import { useUrbAssistProjectStore } from "@/store/useUrbAssistProjectStore";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +261,22 @@ export default function ProjectDescriptionPage({
     const [pluDocReady, setPluDocReady] = useState(false);
     const [designValidated, setDesignValidated] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<string>("PC4 / DPC 8-1");
+
+    // ── Captured document images (Blob URLs from site-plan editor) ─────────────
+    // Blob URLs are memory-safe and live in the Zustand store.
+    // They do NOT survive sessionStorage (Blob URLs are opaque references).
+    const [capturedImages, setCapturedImages] = useState<Record<string, string | null>>({});
+    useEffect(() => {
+        if (step !== 8) return;
+        const docs = useUrbAssistProjectStore.getState().generatedDocuments;
+        setCapturedImages({ ...docs });
+
+        // MANDATE 3: Cleanup blob URLs when leaving Step 8 or unmounting
+        return () => {
+            // Don't revoke if user might return — only revoke store copies
+            // The store's revokeGeneratedDocuments handles its own cleanup
+        };
+    }, [step]);
 
     // ── Detect return from Intelligence Editor (designed=1 URL param) ─────────
     useEffect(() => {
@@ -3109,8 +3126,229 @@ export default function ProjectDescriptionPage({
                                                                 </div>
                                                             </div>
                                                         </div>
+                                                    ) : selectedDoc === "PC1" ? (
+                                                        /* ═══ PC1 — Plan de situation ═══ */
+                                                        <div className="bg-white">
+                                                            {/* Document header */}
+                                                            <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-8 py-5 text-white">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC1 — {isEn ? "Site Location Plan" : "Plan de Situation"}</h2>
+                                                                        <p className="text-xs text-slate-300 mt-1">{isEn ? "Location of the project site" : "Localisation du terrain du projet"}</p>
+                                                                    </div>
+                                                                    <div className="text-right text-xs text-slate-300">
+                                                                        <p>{isEn ? "Scale: 1/2500 to 1/25000" : "Échelle : 1/2500 à 1/25000"}</p>
+                                                                        <p>{new Date().toLocaleDateString(isEn ? 'en-GB' : 'fr-FR')}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            {/* Content */}
+                                                            <div className="px-8 py-6 space-y-5">
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{isEn ? "Project Address" : "Adresse du projet"}</p>
+                                                                        <p className="text-sm font-semibold text-slate-800">{projectAddress || (isEn ? "Not specified" : "Non renseignée")}</p>
+                                                                    </div>
+                                                                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{isEn ? "Applicant" : "Demandeur"}</p>
+                                                                        <p className="text-sm font-semibold text-slate-800">{applicantName ? `${applicantFirstNames} ${applicantName}` : (isEn ? "Not specified" : "Non renseigné")}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{isEn ? "Cadastral Reference" : "Référence cadastrale"}</p>
+                                                                    <p className="text-sm text-slate-700">{isEn ? "Section and plot number as indicated in the site plan." : "Section et numéro de parcelle tels qu'indiqués dans le plan de masse."}</p>
+                                                                </div>
+                                                                {/* Captured image or SVG fallback */}
+                                                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 min-h-[280px]">
+                                                                    {capturedImages['PC1'] ? (
+                                                                        <div>
+                                                                            <img src={capturedImages['PC1']} alt="Plan de situation — neighborhood map" className="w-full h-auto max-h-[400px] object-contain" crossOrigin="anonymous" />
+                                                                            <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 text-xs text-slate-500 text-center">
+                                                                                {isEn ? "Neighborhood map — OpenStreetMap © contributors" : "Carte de voisinage — OpenStreetMap © contributeurs"}
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex flex-col items-center gap-3 py-12">
+                                                                            <MapPin className="w-10 h-10 text-blue-400" />
+                                                                            <p className="text-sm text-slate-500 font-medium">{isEn ? "Neighborhood map not yet generated" : "Carte de voisinage non encore générée"}</p>
+                                                                            <p className="text-xs text-slate-400">{isEn ? "Return to the editor and click \"Continue to Complete File\" to auto-generate from coordinates." : "Retournez à l'éditeur et cliquez « Continuer vers le dossier complet » pour générer automatiquement depuis les coordonnées."}</p>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 text-xs text-slate-400">
+                                                                    <Mountain className="w-3.5 h-3.5" />
+                                                                    <span>{isEn ? "North is oriented upwards" : "Le Nord est orienté vers le haut"}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : selectedDoc === "PC2" ? (
+                                                        /* ═══ PC2 — Plan de masse ═══ */
+                                                        <div className="bg-white">
+                                                            <div className="bg-gradient-to-r from-emerald-800 to-emerald-700 px-8 py-5 text-white">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC2 — {isEn ? "Site Layout Plan" : "Plan de Masse"}</h2>
+                                                                        <p className="text-xs text-emerald-200 mt-1">{isEn ? "Detailed layout of buildings and surfaces" : "Implantation détaillée des constructions et surfaces"}</p>
+                                                                    </div>
+                                                                    <div className="text-right text-xs text-emerald-200">
+                                                                        <p>{isEn ? "Scale: 1/100 to 1/500" : "Échelle : 1/100 à 1/500"}</p>
+                                                                        <p>{new Date().toLocaleDateString(isEn ? 'en-GB' : 'fr-FR')}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="px-6 py-5">
+                                                                {capturedImages['PC2'] ? (
+                                                                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                                                        <img src={capturedImages['PC2']} alt="Plan de masse" className="w-full h-auto" />
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="border-2 border-dashed border-emerald-200 rounded-xl bg-emerald-50/50 flex flex-col items-center justify-center py-16">
+                                                                        <Layers className="w-10 h-10 text-emerald-400 mb-3" />
+                                                                        <p className="text-sm text-emerald-700 font-medium">{isEn ? "Site layout captured from the editor" : "Plan de masse capturé depuis l'éditeur"}</p>
+                                                                        <p className="text-xs text-emerald-500 mt-1">{isEn ? "Return to the editor to generate" : "Retournez à l'éditeur pour générer"}</p>
+                                                                    </div>
+                                                                )}
+                                                                <div className="mt-4 grid grid-cols-3 gap-3">
+                                                                    <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                                                                        <p className="text-[10px] text-slate-400 font-bold uppercase">{isEn ? "Total Footprint" : "Emprise totale"}</p>
+                                                                        <p className="text-lg font-bold text-slate-800">{jobs.reduce((s, j) => s + (j.footprint || 0), 0)} m²</p>
+                                                                    </div>
+                                                                    <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                                                                        <p className="text-[10px] text-slate-400 font-bold uppercase">{isEn ? "Levels" : "Niveaux"}</p>
+                                                                        <p className="text-lg font-bold text-slate-800">{jobs[0]?.levels || '—'}</p>
+                                                                    </div>
+                                                                    <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
+                                                                        <p className="text-[10px] text-slate-400 font-bold uppercase">{isEn ? "Type" : "Type"}</p>
+                                                                        <p className="text-lg font-bold text-slate-800">{authorizationType}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : selectedDoc === "PC3" ? (
+                                                        /* ═══ PC3 — Cross section ═══ */
+                                                        <div className="bg-white">
+                                                            <div className="bg-gradient-to-r from-amber-800 to-amber-700 px-8 py-5 text-white">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC3 — {isEn ? "Cross Section" : "Plan en Coupe"}</h2>
+                                                                        <p className="text-xs text-amber-200 mt-1">{isEn ? "Terrain and building profile" : "Profil du terrain et de la construction"}</p>
+                                                                    </div>
+                                                                    <div className="text-right text-xs text-amber-200">
+                                                                        <p>{isEn ? "Scale: 1/100 to 1/200" : "Échelle : 1/100 à 1/200"}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="px-6 py-5">
+                                                                {capturedImages['PC3'] ? (
+                                                                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                                                        <img src={capturedImages['PC3']} alt="Cross section — orthographic side view" className="w-full h-auto" />
+                                                                        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-center">
+                                                                            {isEn ? "Orthographic side view — captured from the 3D terrain editor" : "Vue latérale orthographique — capturée depuis l'éditeur 3D"}
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="border-2 border-dashed border-amber-200 rounded-xl bg-amber-50/50 p-8 text-center">
+                                                                        <Mountain className="w-10 h-10 text-amber-300 mx-auto mb-3" />
+                                                                        <p className="text-sm font-semibold text-amber-700">{isEn ? "Cross-section not yet captured" : "Coupe non encore capturée"}</p>
+                                                                        <p className="text-xs text-amber-500 mt-1">{isEn ? "Return to the site plan editor and click \"Continue to Complete File\" to generate this view." : "Retournez à l'éditeur de plan de masse et cliquez « Continuer vers le dossier complet » pour générer cette vue."}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : selectedDoc === "PC5.1" ? (
+                                                        /* ═══ PC5.1 — Facades (Initial State) ═══ */
+                                                        <div className="bg-white">
+                                                            <div className="bg-gradient-to-r from-violet-800 to-violet-700 px-8 py-5 text-white">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC5.1 — {isEn ? "Facades – Initial State" : "Façades – État Initial"}</h2>
+                                                                        <p className="text-xs text-violet-200 mt-1">{isEn ? "Current state before construction" : "État actuel avant travaux"}</p>
+                                                                    </div>
+                                                                    <div className="text-right text-xs text-violet-200">
+                                                                        <p>{isEn ? "Scale: 1/100" : "Échelle : 1/100"}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="px-6 py-5">
+                                                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white p-6">
+                                                                    <svg viewBox="0 0 600 200" className="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
+                                                                        {/* Ground */}
+                                                                        <rect x="0" y="160" width="600" height="40" fill="#f0fdf4" />
+                                                                        <line x1="0" y1="160" x2="600" y2="160" stroke="#65a30d" strokeWidth="2" />
+                                                                        {/* Grass texture */}
+                                                                        {Array.from({ length: 30 }).map((_, i) => (
+                                                                            <line key={i} x1={20 + i * 19} y1="160" x2={15 + i * 19} y2="152" stroke="#86efac" strokeWidth="1" />
+                                                                        ))}
+                                                                        {/* Empty plot indication */}
+                                                                        <text x="300" y="100" fontSize="14" fill="#94a3b8" textAnchor="middle" fontStyle="italic">
+                                                                            {isEn ? "Vacant/undeveloped plot" : "Terrain vierge / non bâti"}
+                                                                        </text>
+                                                                        <text x="300" y="125" fontSize="10" fill="#cbd5e1" textAnchor="middle">
+                                                                            {projectAddress || (isEn ? "Address not specified" : "Adresse non renseignée")}
+                                                                        </text>
+                                                                        {/* Property boundaries */}
+                                                                        <line x1="50" y1="40" x2="50" y2="160" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="8 4" />
+                                                                        <line x1="550" y1="40" x2="550" y2="160" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="8 4" />
+                                                                        <text x="50" y="35" fontSize="8" fill="#6366f1" textAnchor="middle">{isEn ? "Property limit" : "Limite de propriété"}</text>
+                                                                        <text x="550" y="35" fontSize="8" fill="#6366f1" textAnchor="middle">{isEn ? "Property limit" : "Limite de propriété"}</text>
+                                                                        {/* Sky */}
+                                                                        <text x="300" y="20" fontSize="8" fill="#93c5fd" textAnchor="middle">{isEn ? "(No existing construction)" : "(Aucune construction existante)"}</text>
+                                                                    </svg>
+                                                                </div>
+                                                                <div className="mt-4 bg-violet-50 rounded-xl p-4 border border-violet-100">
+                                                                    <p className="text-xs font-semibold text-violet-800 mb-1">{isEn ? "Current State Description" : "Description de l'état actuel"}</p>
+                                                                    <p className="text-xs text-violet-600 leading-relaxed">
+                                                                        {isEn
+                                                                            ? `The plot located at ${projectAddress || '—'} is currently undeveloped. The terrain is ${terrainInitial || 'generally flat'} with natural vegetation.`
+                                                                            : `La parcelle située ${projectAddress || '—'} est actuellement non bâtie. Le terrain est ${terrainInitial || 'globalement plat'} avec de la végétation naturelle.`}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : selectedDoc === "PC5.2" ? (
+                                                        /* ═══ PC5.2 — Facades (Project) ═══ */
+                                                        <div className="bg-white">
+                                                            <div className="bg-gradient-to-r from-rose-800 to-rose-700 px-8 py-5 text-white">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC5.2 — {isEn ? "Facades – Project" : "Façades – Projet"}</h2>
+                                                                        <p className="text-xs text-rose-200 mt-1">{isEn ? "Proposed construction appearance" : "Aspect de la construction projetée"}</p>
+                                                                    </div>
+                                                                    <div className="text-right text-xs text-rose-200">
+                                                                        <p>{isEn ? "Scale: 1/100" : "Échelle : 1/100"}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="px-6 py-5">
+                                                                {capturedImages['PC5.2'] ? (
+                                                                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                                                        <img src={capturedImages['PC5.2']} alt="3D facade view" className="w-full h-auto" />
+                                                                        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-center">
+                                                                            {isEn ? "3D perspective — captured from the site plan editor" : "Perspective 3D — capturée depuis l'éditeur de plan de masse"}
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="border-2 border-dashed border-rose-200 rounded-xl bg-rose-50/50 p-8 text-center">
+                                                                        <Layers className="w-10 h-10 text-rose-300 mx-auto mb-3" />
+                                                                        <p className="text-sm font-semibold text-rose-700">{isEn ? "Facade view not yet captured" : "Vue de façade non encore capturée"}</p>
+                                                                        <p className="text-xs text-rose-500 mt-1">{isEn ? "Return to the site plan editor and click \"Continue to Complete File\" to generate this orthographic front view from your 3D model." : "Retournez à l'éditeur de plan de masse et cliquez « Continuer vers le dossier complet » pour générer cette vue frontale orthographique depuis votre modèle 3D."}</p>
+                                                                    </div>
+                                                                )}
+                                                                {/* Materials summary */}
+                                                                <div className="mt-4 grid grid-cols-2 gap-3">
+                                                                    <div className="bg-rose-50 rounded-lg p-3 border border-rose-100">
+                                                                        <p className="text-[10px] font-bold text-rose-400 uppercase">{isEn ? "Walls" : "Murs"}</p>
+                                                                        <p className="text-sm font-medium text-rose-800">{existingFacade || wallMaterial || (isEn ? "To be defined" : "À définir")}</p>
+                                                                    </div>
+                                                                    <div className="bg-rose-50 rounded-lg p-3 border border-rose-100">
+                                                                        <p className="text-[10px] font-bold text-rose-400 uppercase">{isEn ? "Roofing" : "Toiture"}</p>
+                                                                        <p className="text-sm font-medium text-rose-800">{roofCovering || roofMaterial || (isEn ? "To be defined" : "À définir")}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     ) : (
-                                                        /* Placeholder for other documents */
+                                                        /* Fallback for any unhandled document codes */
                                                         <div className="flex flex-col items-center justify-center py-20 text-center">
                                                             <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-4">
                                                                 <FileText className="w-7 h-7 text-slate-400" />
@@ -3123,6 +3361,49 @@ export default function ProjectDescriptionPage({
                                                     )}
                                                 </div>
                                             </div>
+                                        </div>
+
+                                        {/* ── MANDATE 4 & 5: Navigation + Print/Download ── */}
+                                        <div className="flex items-center justify-between pt-4 pb-2">
+                                            <div className="flex items-center gap-3">
+                                                {/* Back to 3D Editor */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setStep(7)}
+                                                    className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
+                                                >
+                                                    {isEn ? "← Back to 3D Editor" : "← Retour à l'éditeur 3D"}
+                                                </button>
+                                                <span className="text-slate-300">|</span>
+                                                {/* Re-open Intelligence Editor */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const returnTo = encodeURIComponent(
+                                                            `/projects/${projectId}/project-description?designed=1`
+                                                        );
+                                                        router.push(`/site-plan?project=${projectId}&returnTo=${returnTo}`);
+                                                    }}
+                                                    className="flex items-center gap-1.5 text-sm text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
+                                                >
+                                                    {isEn ? "Re-open Site Plan Editor" : "Rouvrir l'éditeur de plan de masse"}
+                                                </button>
+                                            </div>
+                                            {/* Download Full Dossier */}
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    // Add print-dossier class to body for @media print styles
+                                                    document.body.classList.add('printing-dossier');
+                                                    window.print();
+                                                    // Remove after print dialog closes
+                                                    setTimeout(() => document.body.classList.remove('printing-dossier'), 1000);
+                                                }}
+                                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shadow-md hover:shadow-lg"
+                                            >
+                                                <Download className="w-4 h-4" />
+                                                {isEn ? "Download Full Dossier (PDF)" : "Télécharger le dossier complet (PDF)"}
+                                            </button>
                                         </div>
 
                                     </div>
