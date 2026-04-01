@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, use, useEffect, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navigation from "@/components/layout/Navigation";
 import {
     ChevronRight,
@@ -34,6 +34,11 @@ import {
     TreePine,
     Car,
     Shield,
+    Layers,
+    ExternalLink,
+    Cpu,
+    Mountain,
+    ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import MaterialsStep from "@/components/project-description/MaterialsStep";
@@ -134,6 +139,7 @@ export default function ProjectDescriptionPage({
     const { id: projectId } = use(params);
     const { t } = useLanguage();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const isEn = t("auth.next") === "Next";
 
     const [step, setStep] = useState<WizardStep>(0);
@@ -254,6 +260,15 @@ export default function ProjectDescriptionPage({
     const [pluDocReady, setPluDocReady] = useState(false);
     const [designValidated, setDesignValidated] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<string>("PC4 / DPC 8-1");
+
+    // ── Detect return from Intelligence Editor (designed=1 URL param) ─────────
+    useEffect(() => {
+        const designed = searchParams.get("designed");
+        if (designed === "1") {
+            setDesignValidated(true);
+            setStep(7);
+        }
+    }, [searchParams]);
 
     // Confirmation modal & generation tracking
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -2654,41 +2669,229 @@ export default function ProjectDescriptionPage({
 
                                 {/* ══ STEP 7: Conception 3D ══ */}
                                 {step === 7 && (
-                                    <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                                        <div className="flex flex-col items-center justify-center py-16 space-y-6">
-                                            <div className="relative">
-                                                <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center">
-                                                    <Box className="w-8 h-8 text-indigo-500" />
-                                                </div>
-                                                {designValidated && (
-                                                    <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shadow-md animate-bounce">
-                                                        <Check className="w-3.5 h-3.5 text-white" />
+                                    <div className="space-y-5">
+
+                                        {/* ── Header card ── */}
+                                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                                            {/* Gradient banner */}
+                                            <div style={{
+                                                background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 45%, #4c1d95 100%)",
+                                                padding: "32px 32px 28px",
+                                                position: "relative",
+                                                overflow: "hidden",
+                                            }}>
+                                                {/* Decorative grid pattern */}
+                                                <div style={{
+                                                    position: "absolute", inset: 0,
+                                                    backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)",
+                                                    backgroundSize: "24px 24px",
+                                                }} />
+                                                {/* Decorative glow */}
+                                                <div style={{
+                                                    position: "absolute", top: "-40px", right: "-40px",
+                                                    width: 220, height: 220,
+                                                    borderRadius: "50%",
+                                                    background: "radial-gradient(circle, rgba(167,139,250,0.25) 0%, transparent 70%)",
+                                                }} />
+
+                                                <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24 }}>
+                                                    <div>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                                                            <div style={{
+                                                                width: 42, height: 42, borderRadius: 12,
+                                                                background: "rgba(167,139,250,0.2)",
+                                                                border: "1px solid rgba(167,139,250,0.4)",
+                                                                display: "flex", alignItems: "center", justifyContent: "center",
+                                                            }}>
+                                                                <Cpu style={{ width: 20, height: 20, color: "#c4b5fd" }} />
+                                                            </div>
+                                                            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#a78bfa" }}>
+                                                                Intelligence Editor
+                                                            </span>
+                                                        </div>
+                                                        <h2 style={{ fontSize: 26, fontWeight: 800, color: "#fff", margin: 0, lineHeight: 1.2 }}>
+                                                            {isEn ? "2D + 3D Design Workspace" : "Espace de conception 2D + 3D"}
+                                                        </h2>
+                                                        <p style={{ marginTop: 8, fontSize: 13, color: "rgba(196,181,253,0.9)", maxWidth: 420, lineHeight: 1.5 }}>
+                                                            {isEn
+                                                                ? "Design your site plan on a satellite base, sculpt the terrain in 3D, place buildings and validate PLU compliance — all in one professional workspace."
+                                                                : "Dessinez votre plan de masse sur fond satellite, sculptez le terrain en 3D, posez les bâtiments et validez la conformité PLU — dans un seul espace professionnel."}
+                                                        </p>
                                                     </div>
-                                                )}
-                                            </div>
-                                            <div className="text-center">
-                                                <h2 className="text-2xl font-bold text-slate-900 mb-2">
-                                                    {isEn ? "3D Design" : "Conception 3D"}
-                                                </h2>
-                                                <p className="text-sm text-slate-500 max-w-sm mx-auto">
-                                                    {isEn
-                                                        ? "The satellite drawing interface would be loaded here."
-                                                        : "L'interface de dessin sur plan satellite serait chargée ici."}
-                                                </p>
-                                            </div>
-                                            {designValidated ? (
-                                                <div className="flex items-center gap-2 px-6 py-3 rounded-xl bg-green-100 text-green-700 font-bold text-base">
-                                                    <Check className="w-5 h-5" />
-                                                    {isEn ? "Design Validated" : "Conception Validée"}
+
+                                                    {/* Validated badge */}
+                                                    {designValidated && (
+                                                        <div style={{
+                                                            display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                                                            background: "rgba(74,222,128,0.12)",
+                                                            border: "1px solid rgba(74,222,128,0.35)",
+                                                            borderRadius: 14, padding: "12px 18px",
+                                                            animation: "fadeIn 0.4s ease",
+                                                        }}>
+                                                            <div style={{
+                                                                width: 36, height: 36, borderRadius: "50%",
+                                                                background: "rgba(74,222,128,0.2)",
+                                                                display: "flex", alignItems: "center", justifyContent: "center",
+                                                            }}>
+                                                                <Check style={{ width: 18, height: 18, color: "#4ade80" }} />
+                                                            </div>
+                                                            <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80", textAlign: "center", lineHeight: 1.3 }}>
+                                                                {isEn ? "Design\nSaved" : "Conception\nSauvegardée"}
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={handleValidateDesign}
-                                                    className="flex items-center gap-2 px-8 py-4 rounded-xl bg-indigo-600 text-white font-bold text-base hover:bg-indigo-700 transition-all shadow-lg"
-                                                >
-                                                    {isEn ? "Simulate: Validate Design" : "Simuler : Valider la conception"}
-                                                </button>
+                                            </div>
+
+                                            {/* Feature grid */}
+                                            <div style={{ padding: "24px 28px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                                                {([
+                                                    {
+                                                        icon: <Layers style={{ width: 15, height: 15, color: "#6366f1" }} />,
+                                                        color: "rgba(99,102,241,0.08)",
+                                                        border: "rgba(99,102,241,0.18)",
+                                                        title: isEn ? "2D Site Plan" : "Plan de masse 2D",
+                                                        desc: isEn ? "Draw on satellite imagery, snap-to-grid, dimension labels, parcel outlines, VRD networks" : "Dessin sur fond satellite, grille magnétique, cotations, parcelles cadastrales, réseaux VRD",
+                                                    },
+                                                    {
+                                                        icon: <Mountain style={{ width: 15, height: 15, color: "#7c3aed" }} />,
+                                                        color: "rgba(124,58,237,0.08)",
+                                                        border: "rgba(124,58,237,0.18)",
+                                                        title: isEn ? "3D Terrain Viewer" : "Visualisation 3D du terrain",
+                                                        desc: isEn ? "Real IGN RGE Alti® elevation data, sculpt terrain, height exaggeration, shadow & lighting" : "Données IGN RGE Alti® réelles, sculpture du terrain, exagération de hauteur, ombres",
+                                                    },
+                                                    {
+                                                        icon: <Building2 style={{ width: 15, height: 15, color: "#0891b2" }} />,
+                                                        color: "rgba(8,145,178,0.08)",
+                                                        border: "rgba(8,145,178,0.18)",
+                                                        title: isEn ? "Smart Building Placement" : "Placement intelligent des bâtiments",
+                                                        desc: isEn ? "Guided & free creation modes, roof configurator, wall heights, building openings & overhang" : "Modes guidé & libre, configurateur de toiture, hauteurs, ouvertures & débords",
+                                                    },
+                                                    {
+                                                        icon: <Shield style={{ width: 15, height: 15, color: "#16a34a" }} />,
+                                                        color: "rgba(22,163,74,0.08)",
+                                                        border: "rgba(22,163,74,0.18)",
+                                                        title: isEn ? "Live PLU Compliance" : "Conformité PLU en temps réel",
+                                                        desc: isEn ? "Real-time setback, coverage & green space checks against your extracted PLU rules" : "Vérification en temps réel des reculs, CES et espaces verts selon les règles PLU extraites",
+                                                    },
+                                                ] as const).map((feat, fi) => (
+                                                    <div key={fi} style={{
+                                                        background: feat.color,
+                                                        border: `1px solid ${feat.border}`,
+                                                        borderRadius: 12,
+                                                        padding: "14px 16px",
+                                                    }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                                                            {feat.icon}
+                                                            <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>{feat.title}</span>
+                                                        </div>
+                                                        <p style={{ fontSize: 11, color: "#64748b", lineHeight: 1.5, margin: 0 }}>{feat.desc}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            {/* CTA footer */}
+                                            <div style={{
+                                                padding: "0 28px 24px",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "space-between",
+                                                gap: 16,
+                                            }}>
+                                                <div>
+                                                    {designValidated ? (
+                                                        <p style={{ fontSize: 12, color: "#16a34a", fontWeight: 600, margin: 0 }}>
+                                                            ✓ {isEn ? "Your design has been saved. You can re-open the editor at any time." : "Votre conception a été sauvegardée. Vous pouvez rouvrir l\'éditeur à tout moment."}
+                                                        </p>
+                                                    ) : (
+                                                        <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>
+                                                            {isEn
+                                                                ? "Click \"Open Editor\" to launch the full 2D & 3D workspace. Your work is auto-saved."
+                                                                : "Cliquez sur \"Ouvrir l\'éditeur\" pour lancer l\'espace de travail 2D & 3D complet. Votre travail est sauvegardé automatiquement."}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                                                    {/* Open editor button */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const returnTo = encodeURIComponent(
+                                                                `/projects/${projectId}/project-description?designed=1`
+                                                            );
+                                                            router.push(`/site-plan?project=${projectId}&returnTo=${returnTo}`);
+                                                        }}
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 8,
+                                                            padding: "11px 22px",
+                                                            background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+                                                            color: "#fff",
+                                                            fontWeight: 700,
+                                                            fontSize: 13,
+                                                            borderRadius: 12,
+                                                            border: "none",
+                                                            cursor: "pointer",
+                                                            boxShadow: "0 4px 16px rgba(79,70,229,0.4)",
+                                                            transition: "all 0.18s ease",
+                                                            letterSpacing: "0.01em",
+                                                            whiteSpace: "nowrap",
+                                                        }}
+                                                        onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-1px)")}
+                                                        onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
+                                                    >
+                                                        <ExternalLink style={{ width: 14, height: 14 }} />
+                                                        {designValidated
+                                                            ? (isEn ? "Re-open Editor" : "Rouvrir l\'éditeur")
+                                                            : (isEn ? "Open Intelligence Editor" : "Ouvrir l\'éditeur Intelligence")}
+                                                    </button>
+
+                                                    {/* Continue to complete file — only shown when validated */}
+                                                    {designValidated && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleValidateDesign}
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                gap: 8,
+                                                                padding: "11px 22px",
+                                                                background: "#16a34a",
+                                                                color: "#fff",
+                                                                fontWeight: 700,
+                                                                fontSize: 13,
+                                                                borderRadius: 12,
+                                                                border: "none",
+                                                                cursor: "pointer",
+                                                                boxShadow: "0 4px 16px rgba(22,163,74,0.3)",
+                                                                transition: "all 0.18s ease",
+                                                                whiteSpace: "nowrap",
+                                                            }}
+                                                            onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-1px)")}
+                                                            onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
+                                                        >
+                                                            <Check style={{ width: 14, height: 14 }} />
+                                                            {isEn ? "Continue to Complete File →" : "Continuer vers le dossier complet →"}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* ── Back navigation ── */}
+                                        <div className="flex items-center justify-between pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setStep(6)}
+                                                className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
+                                            >
+                                                {isEn ? "← Back to Analysis" : "← Retour à l'analyse"}
+                                            </button>
+                                            {!designValidated && (
+                                                <p className="text-xs text-slate-400 italic">
+                                                    {isEn ? "Open the editor and return here to continue" : "Ouvrez l'éditeur et revenez ici pour continuer"}
+                                                </p>
                                             )}
                                         </div>
                                     </div>

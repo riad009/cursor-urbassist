@@ -1,12 +1,17 @@
 /**
- * renderProcessedSite — Fabric.js rendering of ProcessedSiteData (v5)
+ * renderProcessedSite — Fabric.js rendering of ProcessedSiteData (v6)
  *
- * KEY CHANGES in v5:
- *   - Each parcel is rendered as a single fabric.Group containing the polygon,
- *     all dimension labels, vertex markers, and "Limite de propriété" text.
- *     This means the ENTIRE parcel moves as one atomic unit when dragged.
- *   - Groups are non-selectable/non-evented (system overlays), tagged for clearing.
- *   - Auto-zoom is now driven by actual parcel absolutePoints, not merged boundary.
+ * KEY CHANGES in v6:
+ *   - REMOVED fabric.Group wrapper for parcels. Groups computed their
+ *     bounding box from ALL children (polygon + labels + markers).
+ *     Labels extending beyond the polygon shifted the group's bbox center
+ *     away from the polygon's bbox center, causing each parcel to be
+ *     displaced by a different amount → visible gaps between adjacent parcels.
+ *   - Each parcel polygon is now placed DIRECTLY on the canvas at its
+ *     mathematically correct bbox-center position.  Labels and markers are
+ *     separate objects at absolute canvas coordinates.
+ *   - All parcel-related objects are tagged with processedParcelGroup for
+ *     selective clearing and excludeFromExport to skip serialization.
  *
  * AESTHETIC (French cadastral "Plan de masse"):
  *   - Light mint green fill per parcel
@@ -99,6 +104,7 @@ interface FabricCanvas {
   setViewportTransform(matrix: number[]): void;
   getWidth(): number;
   getHeight(): number;
+  sendObjectToBack(object: FabricObject): void;
 }
 
 interface FabricObject {
@@ -185,16 +191,29 @@ export function renderProcessedSite(
   // ── Step 2: Clear any previous processed layers ───────────────────────────
   clearProcessedLayers(canvas);
 
-  // ── Step 3: Build and add one Group per parcel ────────────────────────────
+  // ── Step 3: Render each parcel as standalone objects (NO group wrapper) ──────
+  // WHY NOT fabric.Group? Groups compute their bounding box from ALL children
+  // (polygon + labels + markers). Labels extend beyond the polygon, shifting
+  // the group's bbox center away from the polygon's bbox center. When the group
+  // is positioned at (parcel.left, parcel.top), the polygon INSIDE is displaced
+  // because group_center ≠ polygon_center. Each parcel gets displaced by a
+  // different amount (depending on label positions), creating visible gaps
+  // between adjacent parcels that should be flush.
+  //
+  // Since parcels are selectable:false + evented:false (system overlays),
+  // the group wrapper served no interactive purpose. Rendering each element
+  // directly on the canvas at its ABSOLUTE position guarantees zero displacement.
   projected.parcels.forEach((parcel, idx) => {
     if (parcel.points.length < 3) return;
 
-    const groupObjects: FabricObject[] = [];
+    const parcelName = parcel.section && parcel.number
+      ? `Parcelle ${parcel.section} ${parcel.number}`
+      : `Parcelle ${idx + 1}`;
 
-    // 3a: The parcel polygon (points are centroid-relative for Fabric)
+    // 3a: The parcel polygon — placed directly at its bbox-center position
     const parcelPoly = new fabric.Polygon(parcel.points, {
-      left: 0,
-      top: 0,
+      left: parcel.left,
+      top: parcel.top,
       originX: "center",
       originY: "center",
       fill: PARCEL_FILL,
@@ -207,27 +226,31 @@ export function renderProcessedSite(
       objectCaching: false,
       selectable: false,
       evented: false,
+      [TAG_PARCEL_GROUP]: true,
+      excludeFromExport: true,
+      isParcel: true,
+      elementType: "parcel",
+      elementName: parcelName,
     });
-    groupObjects.push(parcelPoly);
+    canvas.add(parcelPoly);
 
-    // 3b: Per-parcel edge dimension labels
+    // 3b: Per-parcel edge dimension labels — at absolute canvas positions
     if (parcel.edgeLabels && parcel.edgeLabels.length > 0) {
       parcel.edgeLabels.forEach((edgeLabel) => {
-        // Convert absolute canvas coords to group-relative (centroid-relative)
-        const localX = edgeLabel.position.x - parcel.left;
-        const localY = edgeLabel.position.y - parcel.top;
-
         const textObj = new fabric.Text(edgeLabel.text, {
-          left: localX,
-          top: localY,
+          left: edgeLabel.position.x,
+          top: edgeLabel.position.y,
           ...DIMENSION_LABEL,
           angle: (edgeLabel.angle * 180) / Math.PI,
           originX: "center",
           originY: "center",
           selectable: false,
           evented: false,
+          [TAG_PARCEL_GROUP]: true,
+          excludeFromExport: true,
+          isMeasurement: true,
         });
-        groupObjects.push(textObj);
+        canvas.add(textObj);
 
         // 3c: "Limite de propriété" text — only on longer edges (> 8m)
         if (edgeLabel.lengthMeters >= 8) {
@@ -238,25 +261,26 @@ export function renderProcessedSite(
           const dy = edgeLabel.position.y - midY;
           const outAbsX = midX + dx * offsetFactor;
           const outAbsY = midY + dy * offsetFactor;
-          const outLocalX = outAbsX - parcel.left;
-          const outLocalY = outAbsY - parcel.top;
 
           const limiteText = new fabric.Text("Limite de propriété", {
-            left: outLocalX,
-            top: outLocalY,
+            left: outAbsX,
+            top: outAbsY,
             ...BOUNDARY_LABEL,
             angle: (edgeLabel.angle * 180) / Math.PI,
             originX: "center",
             originY: "center",
             selectable: false,
             evented: false,
+            [TAG_PARCEL_GROUP]: true,
+            excludeFromExport: true,
+            isMeasurement: true,
           });
-          groupObjects.push(limiteText);
+          canvas.add(limiteText);
         }
       });
     }
 
-    // 3d: Vertex markers at parcel corners
+    // 3d: Vertex markers at parcel corners — at absolute canvas positions
     if (parcel.absolutePoints && parcel.absolutePoints.length > 0) {
       const drawnKeys = new Set<string>();
       parcel.absolutePoints.forEach((pt) => {
@@ -264,13 +288,11 @@ export function renderProcessedSite(
         if (drawnKeys.has(key)) return;
         drawnKeys.add(key);
 
-        const localX = pt.x - parcel.left;
-        const localY = pt.y - parcel.top;
         const armLen = 5;
 
         const marker = new fabric.Circle({
-          left: localX,
-          top: localY,
+          left: pt.x,
+          top: pt.y,
           radius: VERTEX_MARKER.radius,
           fill: VERTEX_MARKER.fill,
           stroke: VERTEX_MARKER.stroke,
@@ -279,53 +301,59 @@ export function renderProcessedSite(
           originY: "center",
           selectable: false,
           evented: false,
+          [TAG_PARCEL_GROUP]: true,
+          excludeFromExport: true,
+          isMeasurement: true,
         });
-        groupObjects.push(marker);
+        canvas.add(marker);
 
         const hLine = new fabric.Line(
-          [localX - armLen, localY, localX + armLen, localY],
+          [pt.x - armLen, pt.y, pt.x + armLen, pt.y],
           {
             stroke: VERTEX_MARKER.stroke,
             strokeWidth: 1,
             selectable: false,
             evented: false,
+            [TAG_PARCEL_GROUP]: true,
+            excludeFromExport: true,
+            isMeasurement: true,
           }
         );
         const vLine = new fabric.Line(
-          [localX, localY - armLen, localX, localY + armLen],
+          [pt.x, pt.y - armLen, pt.x, pt.y + armLen],
           {
             stroke: VERTEX_MARKER.stroke,
             strokeWidth: 1,
             selectable: false,
             evented: false,
+            [TAG_PARCEL_GROUP]: true,
+            excludeFromExport: true,
+            isMeasurement: true,
           }
         );
-        groupObjects.push(hLine, vLine);
+        canvas.add(hLine, vLine);
       });
-    }
-
-    // 3e: Build the group — positioned at the parcel centroid
-    if (groupObjects.length > 0) {
-      const group = new fabric.Group(groupObjects, {
-        left: parcel.left,
-        top: parcel.top,
-        originX: "center",
-        originY: "center",
-        selectable: false,
-        evented: false,
-        objectCaching: false,
-        [TAG_PARCEL_GROUP]: true,
-        excludeFromExport: true,
-        isParcel: true,
-        elementType: "parcel",
-        elementName: parcel.section && parcel.number
-          ? `Parcelle ${parcel.section} ${parcel.number}`
-          : `Parcelle ${idx + 1}`,
-      });
-      canvas.add(group);
     }
   });
 
+  // ── Step 3e: Z-ORDER — send parcel objects behind user elements ─────────
+  // Parcels are system overlays that must render BEHIND user elements (houses,
+  // garages, etc.) so user elements remain clickable and visually on top.
+  // Order from back to front: grid → parcels/decorations → user elements
+  const allObjects = canvas.getObjects();
+  for (let i = allObjects.length - 1; i >= 0; i--) {
+    const obj = allObjects[i] as any;
+    if (obj[TAG_PARCEL_GROUP]) {
+      canvas.sendObjectToBack(obj);
+    }
+  }
+  // Grid must be behind everything including parcels
+  for (let i = allObjects.length - 1; i >= 0; i--) {
+    const obj = allObjects[i] as any;
+    if (obj.isGrid) {
+      canvas.sendObjectToBack(obj);
+    }
+  }
   // ── Step 4: Setback computation (for snap engine only — NOT drawn) ─────────
   let setbackSegments: SetbackSegment[] = [];
   let setbackResult: SetbackResult | null = null;
