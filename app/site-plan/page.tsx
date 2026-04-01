@@ -97,6 +97,7 @@ import {
 } from "@/lib/buildingCanvasOverlays";
 import { calculateRoofData } from "@/lib/roofCalculations";
 import { useEditorStore } from "@/store/editorStore";
+import { useUrbAssistProjectStore } from "@/store/useUrbAssistProjectStore";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { usePluCompliance } from "@/hooks/usePluCompliance";
 import PluAlertBanner from "@/components/editor/PluAlertBanner";
@@ -291,6 +292,7 @@ const paletteColors = [
 function SitePlanContent() {
   const searchParams = useSearchParams();
   const projectIdFromUrl = searchParams.get("project");
+  const returnToUrl = searchParams.get("returnTo");
 
   // ── Editor Store: initialize for this project (hydrates from sessionStorage) ──
   const editorStoreInit = useEditorStore((s) => s.initProject);
@@ -338,6 +340,9 @@ function SitePlanContent() {
   const tempShapeRef = useRef<fabric.FabricObject | null>(null);
   const [currentMeasurement, setCurrentMeasurement] = useState("");
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  // Ref holds the latest canvas pointer position without triggering re-renders.
+  // The polygon-preview effect reads from this ref so it is NOT in any dep array.
+  const mousePosRef = useRef({ x: 0, y: 0 });
   const [polygonPoints, setPolygonPoints] = useState<{ x: number; y: number }[]>([]);
   const [activeSurfaceType, setActiveSurfaceType] = useState(SURFACE_TYPES[4]);
   const [activeVrdType, setActiveVrdType] = useState(VRD_TYPES[0]);
@@ -1163,11 +1168,18 @@ function SitePlanContent() {
     const canvas = fabricRef.current;
     if (!canvas || !currentProjectId) return;
     if (!processedSiteData && !projectData?.parcelsGeoJSON && !projectData?.parcelGeometry) return;
-    if (parcelsDrawnFromGeometryRef.current === currentProjectId) return;
+    // Check canvas state first — physical parcel presence is the ground truth
     const hasParcel = canvas.getObjects().some((o: any) =>
       o.isParcel || (o as any).processedBoundary || (o as any).processedParcel
     );
-    if (hasParcel) return;
+    if (hasParcel) {
+      // Parcels exist on canvas — mark as drawn and skip
+      parcelsDrawnFromGeometryRef.current = currentProjectId;
+      return;
+    }
+    // Only block if ref says we already drew AND parcels exist (handled above).
+    // If ref is set but no parcels on canvas, a previous attempt failed — allow retry.
+    if (parcelsDrawnFromGeometryRef.current === currentProjectId) return;
 
     parcelsDrawnFromGeometryRef.current = currentProjectId;
     setLoadingParcelsGeoJSON(true);
@@ -1567,11 +1579,13 @@ function SitePlanContent() {
                 // We delete them so they don't pollute the canvas or trigger the naming warning.
                 const toRemove = canvas.getObjects().filter((o: any) => {
                   if (o.isGrid || o.isPolygonPreview) return false; // keep explicit grid
+                  // Parcels are system overlays with excludeFromExport=true — they won't
+                  // be in the loaded JSON. If one IS present (edge case), keep it; the
+                  // drawParcelsFromProjectData hasParcel guard will skip re-rendering.
+                  if (o.isParcel) return false;
                   
-                  // Aggressive purge for objects that were accidentally serialized 
-                  // to the database due to CANVAS_PROPS including their flags.
-                  const eName = String(o.elementName ?? o.name ?? "").trim();
-                  if (o.isParcel || o.isBoundaryOverlay || o.isRegulatoryFootprint || o.isMeasurement || eName.startsWith("Parcelle")) {
+                  // Clean up system-generated overlays that shouldn't persist
+                  if (o.isBoundaryOverlay || o.isRegulatoryFootprint || o.isMeasurement) {
                     return true;
                   }
 
@@ -1623,6 +1637,10 @@ function SitePlanContent() {
     if (currentProjectId && canvasReady) {
       setLoadingEditorData(true);
       loadSitePlanRef.current(currentProjectId, () => {
+        // After loadFromJSON replaces the entire canvas, any previously-drawn
+        // parcels (e.g. from the retry effect) are wiped. Reset the guard so
+        // drawParcels isn't blocked by a stale ref from a prior draw attempt.
+        parcelsDrawnFromGeometryRef.current = null;
         drawParcelsRef.current();
         const canvas = fabricRef.current;
         if (canvas) {
@@ -1635,6 +1653,11 @@ function SitePlanContent() {
           });
           setElevationPoints(pts);
         }
+        // Bump canvasVersion so the userBuildings3d useMemo recomputes now
+        // that canvas objects (with buildingDetailId) are actually present.
+        // Without this, the memo fires when buildingDetails is set (before
+        // loadFromJSON completes) → empty result → 3D view shows nothing.
+        setCanvasVersion((v) => v + 1);
         setIsDirty(false);
         setLoadingEditorData(false);
         // Mark initial load as complete — enable undo/redo tracking from this point
@@ -1672,17 +1695,17 @@ function SitePlanContent() {
   // Guards inside drawParcelsFromProjectData (parcelsDrawnFromGeometryRef, hasParcel)
   // prevent double-drawing when data arrives in the correct order.
   useEffect(() => {
-    if (canvasReady && currentProjectId && (processedSiteData || projectData?.parcelsGeoJSON)) {
-      // Only trigger if parcels haven't been drawn yet for this project
-      if (parcelsDrawnFromGeometryRef.current !== currentProjectId) {
-        const canvas = fabricRef.current;
-        const hasParcel = canvas?.getObjects().some((o: any) => (o as any).isParcel);
-        if (!hasParcel) {
-          drawParcelsRef.current();
-        }
+    if (canvasReady && currentProjectId && (processedSiteData || projectData?.parcelsGeoJSON || projectData?.parcelGeometry)) {
+      // Check canvas state as the authority — not the ref guard
+      const canvas = fabricRef.current;
+      const hasParcel = canvas?.getObjects().some((o: any) => (o as any).isParcel);
+      if (!hasParcel) {
+        // Reset the guard so drawParcels can actually execute (previous attempt may have failed)
+        parcelsDrawnFromGeometryRef.current = null;
+        drawParcelsRef.current();
       }
     }
-  }, [canvasReady, currentProjectId, processedSiteData, projectData?.parcelsGeoJSON]);
+  }, [canvasReady, currentProjectId, processedSiteData, projectData?.parcelsGeoJSON, projectData?.parcelGeometry]);
 
   // Warn when leaving the tab with unsaved changes
   useEffect(() => {
@@ -2413,12 +2436,23 @@ function SitePlanContent() {
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
+    let rafId = 0;
     const trackPos = (e: fabric.TPointerEventInfo) => {
       const p = e.scenePoint || e.viewportPoint || { x: 0, y: 0 };
-      setMousePos({ x: p.x, y: p.y });
+      // Write to ref synchronously — zero re-renders, available instantly in polygon preview.
+      mousePosRef.current = { x: p.x, y: p.y };
+      // Throttle the display-only state update to one per animation frame.
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        setMousePos({ x: p.x, y: p.y });
+      });
     };
     canvas.on("mouse:move", trackPos);
-    return () => { canvas.off("mouse:move", trackPos); };
+    return () => {
+      canvas.off("mouse:move", trackPos);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — register once and never re-register
 
@@ -2571,17 +2605,20 @@ function SitePlanContent() {
       });
 
       const last = polygonPoints[polygonPoints.length - 1];
-      const l = new fabric.Line([last.x, last.y, mousePos.x, mousePos.y], {
+      // Read from ref — no state dependency, no re-render cascade.
+      const mp = mousePosRef.current;
+      const l = new fabric.Line([last.x, last.y, mp.x, mp.y], {
         stroke: activeTool === "parcel" ? "#22c55e" : activeColor,
         strokeWidth: 1, strokeDashArray: [3, 3], selectable: false, evented: false,
       });
       (l as any).isPolygonPreview = true;
       canvas.add(l);
-      const dist = calculateDistance(last.x, last.y, mousePos.x, mousePos.y);
+      const dist = calculateDistance(last.x, last.y, mp.x, mp.y);
       setCurrentMeasurement(formatMeasurement(dist));
       canvas.renderAll();
     }
-  }, [polygonPoints, mousePos, activeTool, activeColor, calculateDistance, formatMeasurement, viewMode]);
+  // mousePos (state) intentionally removed — use mousePosRef.current to avoid render cascade.
+  }, [polygonPoints, activeTool, activeColor, calculateDistance, formatMeasurement, viewMode]);
 
   // ─── Actions ───────────────────────────────────────────────────────────────
 
@@ -3592,7 +3629,7 @@ function SitePlanContent() {
       <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           {(() => {
-            const backHref = currentProjectId ? `/projects/${currentProjectId}/dashboard` : "/projects";
+            const backHref = returnToUrl || (currentProjectId ? `/projects/${currentProjectId}/dashboard` : "/projects");
             return (
               <button
                 type="button"
@@ -3604,7 +3641,7 @@ function SitePlanContent() {
               >
                 <ArrowLeft className="w-5 h-5" />
                 <span className="text-sm font-medium hidden sm:block">
-                  Back to Dashboard
+                  {returnToUrl ? "Back to Project" : "Back to Dashboard"}
                 </span>
               </button>
             );
@@ -3726,29 +3763,73 @@ function SitePlanContent() {
                 </span>
               )}
               {(() => {
-                const nextHref = `/terrain?project=${currentProjectId}`;
-                const nextLabel = "Next: Terrain";
-                if (editorCanProceed) {
-                  return (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (isDirty && currentProjectId) await saveSitePlan();
-                        router.push(nextHref);
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sky-500 hover:bg-sky-600 text-slate-900 transition-colors"
-                    >
-                      {nextLabel}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  );
-                }
+                const nextHref = returnToUrl ? decodeURIComponent(returnToUrl) : `/projects/${currentProjectId}/project-description?designed=1`;
+                const nextLabel = "Continue to Complete File";
+                
                 return (
-                  <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-100" title="Name all elements, meet green %, and add at least one footprint">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isDirty && currentProjectId) await saveSitePlan();
+
+                      // ── Enterprise Document Capture Engine ─────────────────
+                      // All captures complete BEFORE navigation (no race condition).
+                      // All results stored as memory-safe Blob URLs (not raw Base64).
+                      const { setGeneratedDocument } = useUrbAssistProjectStore.getState();
+                      const { captureFabricCanvas, capture3DOrthographic, getStaticMapUrl, extractCentroid } = await import('@/lib/captureEngine');
+                      const { getActive3DContext } = await import('@/components/three/Terrain3DViewer');
+
+                      const capturePromises: Promise<void>[] = [];
+
+                      // PC1: Static OSM neighborhood map (NOT a canvas screenshot)
+                      capturePromises.push((async () => {
+                        try {
+                          const boundary = useUrbAssistProjectStore.getState().parcelBoundary;
+                          const centroid = extractCentroid(boundary);
+                          if (centroid) {
+                            const mapUrl = getStaticMapUrl(centroid.lat, centroid.lng, 15, 800, 500);
+                            setGeneratedDocument('PC1', mapUrl);
+                          }
+                        } catch (e) { console.warn('[capture] PC1 static map failed:', e); }
+                      })());
+
+                      // PC2: 2D Fabric.js canvas → Blob URL
+                      capturePromises.push((async () => {
+                        try {
+                          const canvas2d = fabricRef.current;
+                          if (canvas2d) {
+                            const blobUrl = await captureFabricCanvas(canvas2d, 1.5);
+                            setGeneratedDocument('PC2', blobUrl);
+                          }
+                        } catch (e) { console.warn('[capture] PC2 fabric capture failed:', e); }
+                      })());
+
+                      // PC3 + PC5.2: Real 3D WebGL orthographic captures
+                      capturePromises.push((async () => {
+                        try {
+                          const ctx = getActive3DContext();
+                          if (ctx) {
+                            // PC3: Side orthographic (cross-section view)
+                            const pc3Blob = await capture3DOrthographic(ctx, 'side');
+                            setGeneratedDocument('PC3', pc3Blob);
+
+                            // PC5.2: Front orthographic (facade view)
+                            const pc52Blob = await capture3DOrthographic(ctx, 'front');
+                            setGeneratedDocument('PC5.2', pc52Blob);
+                          }
+                        } catch (e) { console.warn('[capture] PC3/PC5.2 3D capture failed:', e); }
+                      })());
+
+                      // Await ALL captures before navigating (fixes race condition)
+                      await Promise.allSettled(capturePromises);
+
+                      router.push(nextHref);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors shadow-sm"
+                  >
                     {nextLabel}
-                    <ArrowRight className="w-4 h-4 opacity-60" />
-                    <span className="text-xs font-normal text-slate-500 ml-1">(complete required fields)</span>
-                  </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 );
               })()}
             </>

@@ -116,6 +116,12 @@ export interface UrbAssistProjectState {
   updateObject: (id: string, updates: Partial<ProjectObject>) => void;
   removeObject: (id: string) => void;
   clearObjects: () => void;
+
+  // ── Generated Document Captures (Blob URLs for Step 4 viewer) ──
+  // IMPORTANT: stores `blob:` URLs, NOT raw Base64 — memory-safe.
+  generatedDocuments: Record<string, string | null>;
+  setGeneratedDocument: (docId: string, blobUrl: string) => void;
+  revokeGeneratedDocuments: () => void;
 }
 
 // ─── Tool → SurfaceType Mapping ─────────────────────────────────────────────
@@ -141,6 +147,7 @@ export const useUrbAssistProjectStore = create<UrbAssistProjectState>((set) => (
   pixelsPerMeter: 10,
   projectObjects: [],
   complianceReport: null,
+  generatedDocuments: {},
 
   // UI Slice
   activeTool: 'select',
@@ -208,7 +215,28 @@ export const useUrbAssistProjectStore = create<UrbAssistProjectState>((set) => (
     projectObjects: state.projectObjects.filter(obj => obj.id !== id)
   })),
 
-  clearObjects: () => set({ projectObjects: [] })
+  clearObjects: () => set({ projectObjects: [] }),
+
+  // ── Generated Document Capture (Blob URLs — memory-safe) ──
+  setGeneratedDocument: (docId, blobUrl) => set((state) => {
+    // Revoke previous blob URL for this doc to prevent memory leaks
+    const prev = state.generatedDocuments[docId];
+    if (prev && prev.startsWith('blob:')) {
+      try { URL.revokeObjectURL(prev); } catch { /* already revoked */ }
+    }
+    return {
+      generatedDocuments: { ...state.generatedDocuments, [docId]: blobUrl },
+    };
+  }),
+
+  revokeGeneratedDocuments: () => set((state) => {
+    for (const url of Object.values(state.generatedDocuments)) {
+      if (url && url.startsWith('blob:')) {
+        try { URL.revokeObjectURL(url); } catch { /* already revoked */ }
+      }
+    }
+    return { generatedDocuments: {} };
+  }),
 }));
 
 // ─── Selector Hooks (useShallow for render isolation) ────────────────────────
@@ -268,3 +296,10 @@ export const usePlacementSlice = () =>
       cancelPlacement: s.cancelPlacement,
     }))
   );
+
+/**
+ * Generated document captures — for Step 4 document viewer.
+ * ONLY re-renders when a new document capture is added.
+ */
+export const useGeneratedDocumentsSlice = () =>
+  useUrbAssistProjectStore(useShallow((s) => s.generatedDocuments));
