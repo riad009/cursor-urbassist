@@ -2,6 +2,7 @@
 
 import React, { useState, use, useEffect, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import Navigation from "@/components/layout/Navigation";
 import {
     ChevronRight,
@@ -129,6 +130,11 @@ const PC_DOCS: DocEntry[] = [
     { code: "PCMI", labelEn: "PCMI - Materials notice", labelFr: "PCMI - Notice matériaux", unlocked: false },
     { code: "CERFA", labelEn: "Pre-filled CERFA form", labelFr: "Formulaire CERFA pré-rempli", unlocked: false },
 ];
+
+const PC1LocationPlan = dynamic(
+    () => import("@/components/project-description/PC1LocationPlan"),
+    { ssr: false }
+);
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
@@ -307,6 +313,8 @@ export default function ProjectDescriptionPage({
     const [projectName, setProjectName] = useState<string>("");
     const [projectZoneType, setProjectZoneType] = useState<string>("");
     const [projectProtectedAreas, setProjectProtectedAreas] = useState<{ type: string; name: string }[]>([]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [projectData, setProjectData] = useState<Record<string, any> | null>(null);
 
     // ── Auto-compile brief when entering Step 5 (Regulation Analysis) ──────
     useEffect(() => {
@@ -334,6 +342,7 @@ export default function ProjectDescriptionPage({
                 if (d.project?.protectedAreas) setProjectProtectedAreas(d.project.protectedAreas);
                 if (d.project?.pluAnalysisCount) setGenerationCount(d.project.pluAnalysisCount);
                 if (d.project?.authorizationType) setAuthorizationType(d.project.authorizationType);
+                setProjectData(d.project);
 
                 // ── PLU PDF URL — strict fallback chain ──────────────────
                 // Priority 1: Direct PDF URL from regulatoryAnalysis (stored by GPU API)
@@ -3127,60 +3136,8 @@ export default function ProjectDescriptionPage({
                                                             </div>
                                                         </div>
                                                     ) : selectedDoc === "PC1" ? (
-                                                        /* ═══ PC1 — Plan de situation ═══ */
-                                                        <div className="bg-white">
-                                                            {/* Document header */}
-                                                            <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-8 py-5 text-white">
-                                                                <div className="flex items-center justify-between">
-                                                                    <div>
-                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC1 — {isEn ? "Site Location Plan" : "Plan de Situation"}</h2>
-                                                                        <p className="text-xs text-slate-300 mt-1">{isEn ? "Location of the project site" : "Localisation du terrain du projet"}</p>
-                                                                    </div>
-                                                                    <div className="text-right text-xs text-slate-300">
-                                                                        <p>{isEn ? "Scale: 1/2500 to 1/25000" : "Échelle : 1/2500 à 1/25000"}</p>
-                                                                        <p>{new Date().toLocaleDateString(isEn ? 'en-GB' : 'fr-FR')}</p>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            {/* Content */}
-                                                            <div className="px-8 py-6 space-y-5">
-                                                                <div className="grid grid-cols-2 gap-4">
-                                                                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{isEn ? "Project Address" : "Adresse du projet"}</p>
-                                                                        <p className="text-sm font-semibold text-slate-800">{projectAddress || (isEn ? "Not specified" : "Non renseignée")}</p>
-                                                                    </div>
-                                                                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{isEn ? "Applicant" : "Demandeur"}</p>
-                                                                        <p className="text-sm font-semibold text-slate-800">{applicantName ? `${applicantFirstNames} ${applicantName}` : (isEn ? "Not specified" : "Non renseigné")}</p>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{isEn ? "Cadastral Reference" : "Référence cadastrale"}</p>
-                                                                    <p className="text-sm text-slate-700">{isEn ? "Section and plot number as indicated in the site plan." : "Section et numéro de parcelle tels qu'indiqués dans le plan de masse."}</p>
-                                                                </div>
-                                                                {/* Captured image or SVG fallback */}
-                                                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 min-h-[280px]">
-                                                                    {capturedImages['PC1'] ? (
-                                                                        <div>
-                                                                            <img src={capturedImages['PC1']} alt="Plan de situation — neighborhood map" className="w-full h-auto max-h-[400px] object-contain" crossOrigin="anonymous" />
-                                                                            <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 text-xs text-slate-500 text-center">
-                                                                                {isEn ? "Neighborhood map — OpenStreetMap © contributors" : "Carte de voisinage — OpenStreetMap © contributeurs"}
-                                                                            </div>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="flex flex-col items-center gap-3 py-12">
-                                                                            <MapPin className="w-10 h-10 text-blue-400" />
-                                                                            <p className="text-sm text-slate-500 font-medium">{isEn ? "Neighborhood map not yet generated" : "Carte de voisinage non encore générée"}</p>
-                                                                            <p className="text-xs text-slate-400">{isEn ? "Return to the editor and click \"Continue to Complete File\" to auto-generate from coordinates." : "Retournez à l'éditeur et cliquez « Continuer vers le dossier complet » pour générer automatiquement depuis les coordonnées."}</p>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex items-center gap-2 text-xs text-slate-400">
-                                                                    <Mountain className="w-3.5 h-3.5" />
-                                                                    <span>{isEn ? "North is oriented upwards" : "Le Nord est orienté vers le haut"}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                        /* ═══ PC1 — Interactive Plan de Situation ═══ */
+                                                        <PC1LocationPlan project={projectData} projectId={projectId} />
                                                     ) : selectedDoc === "PC2" ? (
                                                         /* ═══ PC2 — Plan de masse ═══ */
                                                         <div className="bg-white">
