@@ -26,6 +26,7 @@ interface PC1Project {
     parcelIds?: string | null;
     authorizationType?: string | null;
     name?: string | null;
+    municipality?: string | null;
 }
 
 interface PC1LocationPlanProps {
@@ -156,121 +157,130 @@ function NorthArrow() {
     );
 }
 
-// ─── PDF Cartouche Drawer ───────────────────────────────────────────────────
+// ─── PDF: Draw compass rose ─────────────────────────────────────────────────
 
-function drawPDFCartouche(
+function drawCompassRose(doc: jsPDF, cx: number, cy: number, r: number) {
+    doc.setFillColor(26, 26, 46);
+    doc.triangle(cx, cy - r, cx - r * 0.15, cy, cx + r * 0.15, cy, "F");
+    doc.setFillColor(160, 160, 160);
+    doc.triangle(cx, cy + r, cx - r * 0.15, cy, cx + r * 0.15, cy, "F");
+    doc.setFillColor(26, 26, 46);
+    doc.triangle(cx + r * 0.7, cy, cx, cy - r * 0.1, cx, cy + r * 0.1, "F");
+    doc.setFillColor(160, 160, 160);
+    doc.triangle(cx - r * 0.7, cy, cx, cy - r * 0.1, cx, cy + r * 0.1, "F");
+    doc.setDrawColor(26, 26, 46);
+    doc.setLineWidth(0.5);
+    doc.circle(cx, cy, r * 0.12);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(26, 26, 46);
+    doc.text("N", cx, cy - r - 3, { align: "center" });
+    doc.text("S", cx, cy + r + 6, { align: "center" });
+    doc.text("E", cx + r * 0.7 + 5, cy + 2.5);
+    doc.text("O", cx - r * 0.7 - 8, cy + 2.5);
+}
+
+// ─── PDF: Draw map header bar ───────────────────────────────────────────────
+
+function drawMapHeader(
+    doc: jsPDF,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    text: string,
+    fontSize: number = 7
+) {
+    doc.setFillColor(26, 26, 46);
+    doc.rect(x, y, w, h, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fontSize);
+    doc.text(text, x + 3, y + h - 2);
+}
+
+// ─── PDF: Draw title block ──────────────────────────────────────────────────
+
+function drawTitleBlock(
     doc: jsPDF,
     address: string,
     parcelRef: string,
-    authType: string,
-    layerLabel: string,
-    pageIndex: number
+    commune: string,
+    authType: string
 ) {
     const W = 420;
-    const cartY = 245;
-    const cartH = 45;
-    const margin = 10;
 
-    // Background
-    doc.setFillColor(31, 41, 55);
-    doc.rect(margin, cartY, W - margin * 2, cartH, "F");
+    doc.setFillColor(26, 26, 46);
+    doc.rect(0, 255, W, 42, "F");
 
-    // Title
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("PC1 \u2014 PLAN DE SITUATION DU TERRAIN", margin + 8, cartY + 10);
-
-    // Layer + page
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Vue : ${layerLabel}  |  Page ${pageIndex + 1}/3`, W - margin - 8, cartY + 10, { align: "right" });
-
-    // Details row
-    const detY = cartY + 20;
-    const col1X = margin + 8;
-    doc.setFontSize(7);
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Adresse :", col1X, detY);
-    doc.setFont("helvetica", "normal");
-    doc.text(address || "\u2014", col1X + 20, detY);
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Parcelle :", col1X, detY + 6);
-    doc.setFont("helvetica", "normal");
-    doc.text(parcelRef || "\u2014", col1X + 20, detY + 6);
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Type :", col1X, detY + 12);
-    doc.setFont("helvetica", "normal");
-    doc.text(authType === "DP" ? "D\u00e9claration Pr\u00e9alable (DP)" : "Permis de Construire (PC)", col1X + 20, detY + 12);
-
-    // Scale
-    const col2X = W / 2 - 20;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("\u00c9chelle 1 : 2 500", col2X, detY);
-
-    // Graphic scale bar
-    const barX = col2X;
-    const barY = detY + 6;
-    // At 1:2500, 40mm on paper = 100m real
-    doc.setDrawColor(255, 255, 255);
-    doc.setLineWidth(0.5);
-    doc.line(barX, barY, barX + 80, barY);
-    const scaleTicks = [
-        { m: 0, x: 0 },
-        { m: 100, x: 40 },
-        { m: 500, x: 80 },
+    // Row 1: info columns
+    const cols = [8, 115, 225, 330];
+    const labels = ["ADRESSE", "PARCELLE", "COMMUNE", "AUTORISATION"];
+    const values = [
+        address || "Non renseigné",
+        parcelRef || "Non renseigné",
+        commune || "Non renseigné",
+        authType === "DP" ? "Déclaration Préalable" : "Permis de Construire",
     ];
-    doc.setFontSize(5);
-    for (const t of scaleTicks) {
-        doc.line(barX + t.x, barY - 1.5, barX + t.x, barY + 1.5);
-        doc.text(`${t.m}m`, barX + t.x, barY + 5, { align: "center" });
-    }
 
-    // Date + north arrow
-    const col3X = W - margin - 55;
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "bold");
-    doc.text("Date :", col3X, detY);
+    doc.setFontSize(5.5);
+    doc.setTextColor(180, 180, 180);
     doc.setFont("helvetica", "normal");
-    doc.text(formatDateFR(), col3X + 13, detY);
-
-    // North arrow triangle
-    const naX = W - margin - 18;
-    const naY = detY + 6;
-    doc.setFillColor(255, 255, 255);
-    doc.triangle(naX, naY - 6, naX - 3, naY + 2, naX + 3, naY + 2, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(6);
-    doc.text("N", naX, naY - 8, { align: "center" });
-}
-
-// ─── Server-side map image fetcher ──────────────────────────────────────────
-
-async function fetchComposedMapImage(
-    lat: number,
-    lng: number,
-    layer: MapLayer,
-    zoom: number,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    parcelGeoJson?: any
-): Promise<string> {
-    const res = await fetch("/api/location-plan/export-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat, lng, zoom, layer, parcelGeoJson }),
+    cols.forEach((x, i) => {
+        doc.text(labels[i], x, 261);
     });
 
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Server returned ${res.status}: ${text}`);
-    }
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    cols.forEach((x, i) => {
+        doc.text(values[i], x, 267);
+    });
 
-    const data = await res.json();
-    return data.image;
+    // Divider
+    doc.setDrawColor(100, 100, 120);
+    doc.setLineWidth(0.2);
+    doc.line(8, 271, W - 8, 271);
+
+    // INDICE
+    doc.setFontSize(7);
+    doc.setTextColor(180, 180, 180);
+    doc.setFont("helvetica", "normal");
+    doc.text("INDICE", 8, 277);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(255, 255, 255);
+    doc.text("0", 8, 284);
+
+    // Date
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(180, 180, 180);
+    doc.text(formatDateFR(), 30, 277);
+
+    // Document title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(255, 255, 255);
+    doc.text("PLAN DE SITUATION", W / 2, 282, { align: "center" });
+
+    // PCMI number
+    doc.setFontSize(14);
+    doc.text("PCMI 1", W - 12, 282, { align: "right" });
+
+    // Fine print
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(4.5);
+    doc.setTextColor(120, 120, 140);
+    doc.text(
+        "Document ne pouvant servir à l'exécution des travaux — Il appartient au maître d'œuvre de réaliser toutes les études techniques nécessaires.",
+        8,
+        293
+    );
+    doc.setFontSize(4);
+    doc.text(`Généré par Urbassist — urbassist.com — ${formatDateFR()}`, W - 8, 293, {
+        align: "right",
+    });
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -304,72 +314,121 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
 
     const parcelRef = useMemo(() => {
         const ids = project?.parcelIds;
-        if (!ids) return isEn ? "Not specified" : "Non renseign\u00e9e";
+        if (!ids) return isEn ? "Not specified" : "Non renseignée";
         return ids;
     }, [project?.parcelIds, isEn]);
 
-    const address = project?.address || (isEn ? "Not specified" : "Non renseign\u00e9e");
+    const address = project?.address || (isEn ? "Not specified" : "Non renseignée");
     const authType = project?.authorizationType || "PC";
 
-    // ── PDF Export (server-side tile composition) ────────────────────────
+    // ── PDF Export — SINGLE PAGE with all 3 views ───────────────────────
     const handlePDFExport = useCallback(async () => {
         if (!center) return;
         setPdfGenerating(true);
+        setPdfProgress(isEn ? "Composing map views..." : "Composition des vues cartographiques...");
 
         try {
+            // Fetch all 3 map images in one API call
+            const response = await fetch("/api/location-plan/export-pdf", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    lat: center[0],
+                    lng: center[1],
+                    parcelGeoJson: parseGeoJSON(project?.parcelGeometry),
+                    projectData: {
+                        address: project?.address,
+                        parcelRef: project?.parcelIds,
+                        commune: project?.municipality ?? "",
+                        authorizationType: project?.authorizationType ?? "PC",
+                    },
+                }),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Server returned ${response.status}: ${text}`);
+            }
+
+            const { ignImage, cadastreImage, aerialImage } = await response.json();
+
+            setPdfProgress(isEn ? "Assembling PDF..." : "Assemblage du PDF...");
+
+            // Create single A3 landscape PDF
             const doc = new jsPDF({
                 orientation: "landscape",
                 unit: "mm",
                 format: [420, 297],
             });
 
-            const PDF_ZOOM = 16;
-            const parcelGeo = parseGeoJSON(project?.parcelGeometry);
-
-            const layers: { key: MapLayer; label: string }[] = [
-                { key: "AERIAL", label: "Vue A\u00e9rienne (Orthophoto)" },
-                { key: "IGN", label: "IGN Plan Topographique" },
-                { key: "CADASTRE", label: "Cadastre (Parcellaire)" },
-            ];
-
-            for (let i = 0; i < layers.length; i++) {
-                const { key, label } = layers[i];
-                setPdfProgress(isEn
-                    ? `Composing ${label} (${i + 1}/3)...`
-                    : `Composition ${label} (${i + 1}/3)...`);
-
-                if (i > 0) doc.addPage([420, 297], "landscape");
-
-                // Fetch composed map image from server
-                const mapImage = await fetchComposedMapImage(
-                    center[0],
-                    center[1],
-                    key,
-                    PDF_ZOOM,
-                    parcelGeo
-                );
-
-                // Place map image — x=10, y=10, width=400, height=230 (mm)
-                doc.addImage(mapImage, "JPEG", 10, 10, 400, 230);
-
-                // Draw cartouche below at y=245
-                drawPDFCartouche(
-                    doc,
-                    project?.address || "",
-                    project?.parcelIds || "",
-                    authType,
-                    label,
-                    i
-                );
+            // ── IGN map — left half ─────────────────────────────────────
+            drawMapHeader(doc, 10, 10, 200, 8, "PLAN IGN — 1/5000ème", 7);
+            if (ignImage) {
+                try {
+                    doc.addImage(`data:image/jpeg;base64,${ignImage}`, "JPEG", 10, 18, 200, 235);
+                } catch {
+                    drawPlaceholder(doc, 10, 18, 200, 235, "IGN Plan indisponible");
+                }
+            } else {
+                drawPlaceholder(doc, 10, 18, 200, 235, "IGN Plan indisponible");
             }
 
+            // ── Compass rose ────────────────────────────────────────────
+            drawCompassRose(doc, 250, 38, 18);
+
+            // ── Cadastre — top right ────────────────────────────────────
+            drawMapHeader(doc, 215, 75, 195, 8, "PLAN DE COMPOSITION CADASTRALE — 1/2000ème", 6);
+            if (cadastreImage) {
+                try {
+                    doc.addImage(`data:image/jpeg;base64,${cadastreImage}`, "JPEG", 215, 83, 195, 80);
+                } catch {
+                    drawPlaceholder(doc, 215, 83, 195, 80, "Cadastre indisponible");
+                }
+            } else {
+                drawPlaceholder(doc, 215, 83, 195, 80, "Cadastre indisponible");
+            }
+
+            // ── Aerial — bottom right ───────────────────────────────────
+            drawMapHeader(doc, 215, 168, 195, 7, "VUE AÉRIENNE — 1/2000ème", 6);
+            if (aerialImage) {
+                try {
+                    doc.addImage(`data:image/jpeg;base64,${aerialImage}`, "JPEG", 215, 175, 195, 78);
+                } catch {
+                    drawPlaceholder(doc, 215, 175, 195, 78, "Vue aérienne indisponible");
+                }
+            } else {
+                drawPlaceholder(doc, 215, 175, 195, 78, "Vue aérienne indisponible");
+            }
+
+            // ── Border + dividers ───────────────────────────────────────
+            doc.setDrawColor(0, 0, 0);
+            doc.setLineWidth(0.5);
+            doc.rect(10, 10, 400, 243);
+
+            doc.setDrawColor(80, 80, 80);
+            doc.setLineWidth(0.3);
+            doc.line(210, 10, 210, 253);
+            doc.line(215, 163, 410, 163);
+
+            // ── Title block ─────────────────────────────────────────────
+            drawTitleBlock(
+                doc,
+                project?.address || "",
+                project?.parcelIds || "",
+                project?.municipality || "",
+                authType
+            );
+
+            // ── Save — ONE PAGE only ────────────────────────────────────
             const filename = `PC1_Plan_Situation_${sanitizeFilename(project?.address || "projet")}.pdf`;
             doc.save(filename);
         } catch (err) {
-            console.error("PDF generation error:", err);
-            alert(isEn
-                ? "PDF generation failed. Please try again."
-                : "La g\u00e9n\u00e9ration du PDF a \u00e9chou\u00e9. Veuillez r\u00e9essayer.");
+            console.error("PC1 PDF generation error:", err);
+            alert(
+                isEn
+                    ? "PDF generation failed. Please try again."
+                    : "La génération du PDF a échoué. Veuillez réessayer."
+            );
         } finally {
             setPdfGenerating(false);
             setPdfProgress("");
@@ -390,10 +449,10 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
             <div className="bg-white px-8 py-12 text-center space-y-3">
                 <MapIcon className="w-10 h-10 text-slate-300 mx-auto" />
                 <p className="text-sm font-semibold text-slate-600">
-                    {isEn ? "No coordinates available for this project" : "Aucune coordonn\u00e9e disponible pour ce projet"}
+                    {isEn ? "No coordinates available for this project" : "Aucune coordonnée disponible pour ce projet"}
                 </p>
                 <p className="text-xs text-slate-400">
-                    {isEn ? "Please ensure the project has valid parcel data." : "Veuillez v\u00e9rifier que le projet dispose de donn\u00e9es parcellaires valides."}
+                    {isEn ? "Please ensure the project has valid parcel data." : "Veuillez vérifier que le projet dispose de données parcellaires valides."}
                 </p>
                 <button
                     type="button"
@@ -401,7 +460,7 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                     className="inline-flex items-center gap-2 px-4 py-2 mt-3 rounded-lg bg-indigo-50 text-indigo-600 text-sm font-semibold hover:bg-indigo-100 transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
-                    {isEn ? "Back to editor" : "Retour \u00e0 l'\u00e9diteur"}
+                    {isEn ? "Back to editor" : "Retour à l'éditeur"}
                 </button>
             </div>
         );
@@ -421,7 +480,7 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                         </p>
                     </div>
                     <div className="text-right text-xs text-slate-300">
-                        <p>{isEn ? "Scale: 1 : 2 500" : "\u00c9chelle : 1 : 2 500"}</p>
+                        <p>{isEn ? "Scale: 1 : 2 500" : "Échelle : 1 : 2 500"}</p>
                         <p>{formatDateFR()}</p>
                     </div>
                 </div>
@@ -458,7 +517,7 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                     )}
                 >
                     {pdfGenerating ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {isEn ? "Generating..." : "G\u00e9n\u00e9ration..."}</>
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {isEn ? "Generating..." : "Génération..."}</>
                     ) : (
                         <><Download className="w-3.5 h-3.5" /> {isEn ? "Export PDF" : "Exporter PDF"}</>
                     )}
@@ -483,10 +542,6 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                     attributionControl={false}
                     whenReady={() => setMapReady(true)}
                 >
-                    {/*
-                      BUG 2 FIX: key={activeLayer} forces full TileLayer remount
-                      when the tab changes, so the URL actually updates.
-                    */}
                     <TileLayer
                         key={activeLayer}
                         url={getTileUrl(activeLayer)}
@@ -506,7 +561,7 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                     )}
                     <ScaleControl position="bottomleft" metric={true} imperial={false} />
                 </MapContainer>
-                {/* Static north arrow — always points up, no interaction */}
+                {/* Static north arrow */}
                 <NorthArrow />
                 {!mapReady && (
                     <div className="absolute inset-0 z-[1000] bg-white/80 flex items-center justify-center">
@@ -529,7 +584,7 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                             {isEn ? "Authorization Type" : "Type d'autorisation"}
                         </p>
                         <p className="text-sm font-semibold text-slate-800">
-                            {authType === "DP" ? "D\u00e9claration Pr\u00e9alable (DP)" : "Permis de Construire (PC)"}
+                            {authType === "DP" ? "Déclaration Préalable (DP)" : "Permis de Construire (PC)"}
                         </p>
                     </div>
                 </div>
@@ -549,13 +604,13 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                             </p>
                             <p className="text-xs font-semibold text-slate-800 leading-tight">{address}</p>
                             <p className="text-[10px] font-bold text-slate-400 uppercase mt-2">
-                                {isEn ? "Cadastral Reference" : "R\u00e9f\u00e9rence cadastrale"}
+                                {isEn ? "Cadastral Reference" : "Référence cadastrale"}
                             </p>
                             <p className="text-xs text-slate-700">{parcelRef}</p>
                         </div>
                         {/* Center */}
                         <div className="px-4 py-3 flex flex-col items-center justify-center">
-                            <p className="text-base font-black text-slate-900">{"\u00c9chelle 1 : 2 500"}</p>
+                            <p className="text-base font-black text-slate-900">{"Échelle 1 : 2 500"}</p>
                             <div className="mt-2 flex items-end gap-0">
                                 <div className="flex flex-col items-center">
                                     <div className="w-px h-2 bg-slate-800" />
@@ -608,10 +663,27 @@ export default function PC1LocationPlan({ project, projectId }: PC1LocationPlanP
                         className="inline-flex items-center gap-1.5 text-sm text-indigo-600 font-semibold hover:text-indigo-800 transition-colors"
                     >
                         <ArrowLeft className="w-4 h-4" />
-                        {isEn ? "Back to editor" : "\u2190 Retour \u00e0 l'\u00e9diteur"}
+                        {isEn ? "Back to editor" : "← Retour à l'éditeur"}
                     </button>
                 </div>
             </div>
         </div>
     );
+}
+
+// ─── Placeholder helper ─────────────────────────────────────────────────────
+
+function drawPlaceholder(
+    doc: jsPDF,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    text: string
+) {
+    doc.setFillColor(248, 250, 252);
+    doc.rect(x, y, w, h, "F");
+    doc.setTextColor(107, 114, 128);
+    doc.setFontSize(9);
+    doc.text(text, x + w / 2, y + h / 2, { align: "center" });
 }

@@ -49,6 +49,13 @@ import type { FeasibilityReport } from "@/lib/feasibility-matrix";
 import { compileProjectBrief } from "@/lib/prompt-compiler";
 import { cn } from "@/lib/utils";
 import {
+    assembleDossier,
+    fetchDossierData,
+    generateSingleDocument,
+} from "@/lib/pdf/dossier-assembler";
+import type { CapturedImages as DossierCapturedImages } from "@/lib/pdf/types";
+import { sanitizeFilename } from "@/lib/pdf/shared";
+import {
     calculateDpPc,
     estimateFloorAreaCreated,
     type ProjectTypeChoice,
@@ -133,7 +140,7 @@ const PC_DOCS: DocEntry[] = [
 
 const PC1LocationPlan = dynamic(
     () => import("@/components/project-description/PC1LocationPlan"),
-    { ssr: false }
+    { ssr: false, loading: () => <div className="h-64 bg-gray-100 animate-pulse rounded" /> }
 );
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -267,6 +274,8 @@ export default function ProjectDescriptionPage({
     const [pluDocReady, setPluDocReady] = useState(false);
     const [designValidated, setDesignValidated] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<string>("PC4 / DPC 8-1");
+    const [dossierGenerating, setDossierGenerating] = useState(false);
+    const [dossierProgress, setDossierProgress] = useState({ msg: "", pct: 0 });
 
     // ── Captured document images (Blob URLs from site-plan editor) ─────────────
     // Blob URLs are memory-safe and live in the Zustand store.
@@ -2927,6 +2936,25 @@ export default function ProjectDescriptionPage({
                                 {step === 8 && (
                                     <div className="space-y-0">
 
+                                        {/* Dossier generation progress banner */}
+                                        {dossierGenerating && (
+                                            <div className="mb-4 bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-200 rounded-xl p-4">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                                                    <span className="text-sm font-semibold text-indigo-800">
+                                                        {dossierProgress.msg || (isEn ? "Generating dossier..." : "Génération du dossier...")}
+                                                    </span>
+                                                    <span className="text-xs text-indigo-500 ml-auto">{Math.round(dossierProgress.pct)}%</span>
+                                                </div>
+                                                <div className="w-full bg-indigo-100 rounded-full h-2 overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all duration-500 ease-out"
+                                                        style={{ width: `${Math.min(dossierProgress.pct, 100)}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Full-width two panel layout */}
                                         <div className="flex gap-4">
                                             {/* Left: Document grid */}
@@ -3007,13 +3035,44 @@ export default function ProjectDescriptionPage({
                                                         <div className="flex items-center gap-2">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => window.print()}
-                                                                className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                                                                disabled={dossierGenerating}
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        setDossierGenerating(true);
+                                                                        const baseUrl = window.location.origin;
+                                                                        const data = await fetchDossierData(projectId, baseUrl);
+                                                                        const docCode = selectedDoc === 'PC4 / DPC 8-1' ? 'PC4' : selectedDoc.replace('.', '');
+                                                                        const normalizedCode = docCode === 'PC51' ? 'PC5' : docCode === 'PC52' ? 'PC5' : docCode;
+                                                                        const imgs: DossierCapturedImages = {
+                                                                            PC2: capturedImages['PC2'] || undefined,
+                                                                            PC3: capturedImages['PC3'] || undefined,
+                                                                            'PC5.2': capturedImages['PC5.2'] || undefined,
+                                                                        };
+                                                                        const doc = await generateSingleDocument(
+                                                                            normalizedCode,
+                                                                            data,
+                                                                            baseUrl,
+                                                                            imgs
+                                                                        );
+                                                                        doc.save(`${selectedDoc.replace(/[^a-zA-Z0-9.]/g, '_')}_${sanitizeFilename(projectData?.address || 'projet')}.pdf`);
+                                                                    } catch (err) {
+                                                                        console.error('[PDF] Single doc generation failed:', err);
+                                                                        alert(isEn ? 'PDF generation failed.' : 'Échec de la génération PDF.');
+                                                                    } finally {
+                                                                        setDossierGenerating(false);
+                                                                    }
+                                                                }}
+                                                                className={cn(
+                                                                    "p-1.5 rounded-lg transition-colors",
+                                                                    dossierGenerating ? "opacity-50 cursor-wait" : "hover:bg-slate-100"
+                                                                )}
+                                                                title={isEn ? `Download ${selectedDoc} as PDF` : `Télécharger ${selectedDoc} en PDF`}
                                                             >
-                                                                <Printer className="w-4 h-4 text-slate-500" />
-                                                            </button>
-                                                            <button className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                                                                <Download className="w-4 h-4 text-slate-500" />
+                                                                {dossierGenerating ? (
+                                                                    <Loader2 className="w-4 h-4 text-slate-500 animate-spin" />
+                                                                ) : (
+                                                                    <Download className="w-4 h-4 text-slate-500" />
+                                                                )}
                                                             </button>
                                                         </div>
                                                     </div>
@@ -3182,36 +3241,120 @@ export default function ProjectDescriptionPage({
                                                             </div>
                                                         </div>
                                                     ) : selectedDoc === "PC3" ? (
-                                                        /* ═══ PC3 — Cross section ═══ */
-                                                        <div className="bg-white">
-                                                            <div className="bg-gradient-to-r from-amber-800 to-amber-700 px-8 py-5 text-white">
-                                                                <div className="flex items-center justify-between">
-                                                                    <div>
-                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC3 — {isEn ? "Cross Section" : "Plan en Coupe"}</h2>
-                                                                        <p className="text-xs text-amber-200 mt-1">{isEn ? "Terrain and building profile" : "Profil du terrain et de la construction"}</p>
-                                                                    </div>
-                                                                    <div className="text-right text-xs text-amber-200">
-                                                                        <p>{isEn ? "Scale: 1/100 to 1/200" : "Échelle : 1/100 à 1/200"}</p>
+                                                        /* ═══ PC3 — Cross section (technical drawing) ═══ */
+                                                        (() => {
+                                                            // Pre-compute values ONCE outside JSX to avoid re-render lag
+                                                            const ngfVal = (() => { try { const td = projectData?.terrainData?.elevationPoints; if (Array.isArray(td) && td.length > 0) { const e = td.find((p: Record<string, unknown>) => typeof p.elevation === 'number'); if (e) return Number(e.elevation).toFixed(2); } return '64.75'; } catch { return '64.75'; } })();
+                                                            const parcelW = projectData?.parcelGeometry ? (() => { try { const g = JSON.parse(projectData.parcelGeometry as string); const cs = (g.type === 'Feature' ? g.geometry : g)?.coordinates?.[0] || []; if (cs.length > 1) { const lngs = cs.map((c: number[]) => c[0]); const lats = cs.map((c: number[]) => c[1]); const midLat = (Math.min(...lats) + Math.max(...lats)) / 2; return ((Math.max(...lngs) - Math.min(...lngs)) * 111320 * Math.cos(midLat * Math.PI / 180)).toFixed(2); } return null; } catch { return null; } })() : null;
+                                                            const plotWidth = parcelW || (projectData?.parcelArea ? Math.sqrt(projectData.parcelArea * 1.3).toFixed(2) : '20.00');
+                                                            const j0 = jobs[0] as unknown as Record<string, unknown>;
+                                                            const wallH = String(j0?.wallHeight ?? '2.50');
+                                                            const ridgeH = String(j0?.ridgeHeight ?? '3.20');
+                                                            const buildingW = String(jobs[0]?.footprint ? Math.sqrt(Number(jobs[0].footprint)).toFixed(2) : '8.00');
+
+                                                            // Single reusable panel renderer (no code duplication)
+                                                            const renderPanel = (panelId: string, panelLabel: string, showBuilding: boolean) => (
+                                                                <div className="border border-slate-200 rounded overflow-hidden" key={panelId}>
+                                                                    <svg viewBox="0 0 800 200" className="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
+                                                                        <defs>
+                                                                            <pattern id={`hatch-${panelId}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                                                                                <line x1="0" y1="0" x2="0" y2="6" stroke="#999" strokeWidth="0.7"/>
+                                                                            </pattern>
+                                                                        </defs>
+                                                                        {/* Underground hatch (thin strip) */}
+                                                                        <rect x="0" y="155" width="800" height="22" fill={`url(#hatch-${panelId})`}/>
+                                                                        {/* Ground line */}
+                                                                        <line x1="0" y1="155" x2="800" y2="155" stroke="#000" strokeWidth="2"/>
+                                                                        {/* Grass (optimized: 25 instead of 50) */}
+                                                                        {Array.from({length: 25}).map((_, i) => (
+                                                                            <g key={i}>
+                                                                                <line x1={16 + i * 31} y1="155" x2={14 + i * 31} y2="152" stroke="#78b450" strokeWidth="0.8" />
+                                                                                <line x1={26 + i * 31} y1="155" x2={25 + i * 31} y2="152.5" stroke="#78b450" strokeWidth="0.6" />
+                                                                            </g>
+                                                                        ))}
+                                                                        {/* Red dashed property boundaries (clipped to panel) */}
+                                                                        <line x1="65" y1="8" x2="65" y2="175" stroke="#DC0000" strokeWidth="2" strokeDasharray="8 5"/>
+                                                                        <line x1="735" y1="8" x2="735" y2="175" stroke="#DC0000" strokeWidth="2" strokeDasharray="8 5"/>
+                                                                        {/* Boundary labels (positioned inside, not overlapping) */}
+                                                                        <text transform="rotate(-90, 76, 90)" x="76" y="90" fontSize="8" fill="#DC0000" fontStyle="italic" textAnchor="middle">Limite de propriété</text>
+                                                                        <text transform="rotate(-90, 724, 90)" x="724" y="90" fontSize="8" fill="#DC0000" fontStyle="italic" textAnchor="middle">Limite de propriété</text>
+                                                                        {/* TN markers */}
+                                                                        <rect x="62" y="152" width="5" height="5" fill="#f97316" rx="1"/>
+                                                                        <rect x="733" y="152" width="5" height="5" fill="#f97316" rx="1"/>
+                                                                        <text x="50" y="167" fontSize="6" fill="#000">TN -0.00</text>
+                                                                        <text x="50" y="174" fontSize="5.5" fill="#555">+{ngfVal} NGF</text>
+                                                                        <text x="742" y="167" fontSize="6" fill="#000">TN -0.00</text>
+                                                                        <text x="742" y="174" fontSize="5.5" fill="#555">+{ngfVal} NGF</text>
+                                                                        {/* Plot width dimension line */}
+                                                                        <line x1="65" y1="14" x2="735" y2="14" stroke="#000" strokeWidth="0.4"/>
+                                                                        <line x1="65" y1="10" x2="65" y2="18" stroke="#000" strokeWidth="0.4"/>
+                                                                        <line x1="735" y1="10" x2="735" y2="18" stroke="#000" strokeWidth="0.4"/>
+                                                                        <rect x="375" y="7" width="50" height="14" fill="#fff" stroke="#000" strokeWidth="0.3" rx="1"/>
+                                                                        <text x="400" y="17" fontSize="8" fill="#000" textAnchor="middle">{plotWidth}</text>
+                                                                        {showBuilding && <>
+                                                                            {/* Building walls */}
+                                                                            <rect x="250" y="75" width="300" height="80" fill="#f0e4c4" stroke="#555" strokeWidth="1"/>
+                                                                            {/* Windows (properly spaced, skip door area) */}
+                                                                            {[280, 320, 360, 460, 500].map((wx) => (
+                                                                                <g key={wx}>
+                                                                                    <rect x={wx} y="92" width="18" height="28" fill="#b4d6f0" stroke="#3a3a50" strokeWidth="0.5"/>
+                                                                                    <line x1={wx + 9} y1="92" x2={wx + 9} y2="120" stroke="#3a3a50" strokeWidth="0.35"/>
+                                                                                    <line x1={wx} y1="106" x2={wx + 18} y2="106" stroke="#3a3a50" strokeWidth="0.35"/>
+                                                                                </g>
+                                                                            ))}
+                                                                            {/* Door */}
+                                                                            <rect x="393" y="110" width="14" height="45" fill="#6e4628" stroke="#3a2010" strokeWidth="0.5"/>
+                                                                            <circle cx="404" cy="132" r="1" fill="#c8b060"/>
+                                                                            {/* Roof gable */}
+                                                                            <polygon points="247,75 400,32 553,75" fill="#6e6e6e" stroke="#404040" strokeWidth="1"/>
+                                                                            {/* Chimney vent */}
+                                                                            <polygon points="442,58 446,48 450,58" fill="#5a5a5a" stroke="#444" strokeWidth="0.4"/>
+                                                                            {/* Wall height dimension (blue) */}
+                                                                            <line x1="237" y1="155" x2="237" y2="75" stroke="#1e64c8" strokeWidth="0.5"/>
+                                                                            <line x1="234" y1="155" x2="240" y2="155" stroke="#1e64c8" strokeWidth="0.5"/>
+                                                                            <line x1="234" y1="75" x2="240" y2="75" stroke="#1e64c8" strokeWidth="0.5"/>
+                                                                            <rect x="213" y="109" width="30" height="11" rx="2" fill="#1e64c8"/>
+                                                                            <text x="228" y="117" fontSize="7" fill="#fff" textAnchor="middle" fontWeight="bold">{wallH}</text>
+                                                                            {/* Ridge annotation */}
+                                                                            <text x="400" y="26" fontSize="6.5" fill="#555" textAnchor="middle">Faîtage +{ridgeH}</text>
+                                                                            {/* Building width dimension */}
+                                                                            <line x1="250" y1="24" x2="550" y2="24" stroke="#000" strokeWidth="0.3"/>
+                                                                            <line x1="250" y1="20" x2="250" y2="28" stroke="#000" strokeWidth="0.3"/>
+                                                                            <line x1="550" y1="20" x2="550" y2="28" stroke="#000" strokeWidth="0.3"/>
+                                                                            <rect x="378" y="18" width="44" height="12" fill="#fff" stroke="#000" strokeWidth="0.2" rx="1"/>
+                                                                            <text x="400" y="27" fontSize="7" fill="#000" textAnchor="middle">{buildingW}</text>
+                                                                            {/* Floor level */}
+                                                                            <text x="460" y="150" fontSize="5.5" fill="#555">Niveau RDC +0.00</text>
+                                                                        </>}
+                                                                    </svg>
+                                                                    <div className="text-center py-1.5 border-t border-slate-100">
+                                                                        <p className="text-xs font-bold text-slate-700">{panelLabel}</p>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                            <div className="px-6 py-5">
-                                                                {capturedImages['PC3'] ? (
-                                                                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                                                                        <img src={capturedImages['PC3']} alt="Cross section — orthographic side view" className="w-full h-auto" />
-                                                                        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-center">
-                                                                            {isEn ? "Orthographic side view — captured from the 3D terrain editor" : "Vue latérale orthographique — capturée depuis l'éditeur 3D"}
+                                                            );
+
+                                                            return (
+                                                                <div className="bg-white">
+                                                                    <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-8 py-4 text-white">
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div>
+                                                                                <h2 className="text-sm font-black uppercase tracking-wider">PC3 — {isEn ? "Cross Section" : "Coupe Générale AA"}</h2>
+                                                                                <p className="text-xs text-slate-300 mt-1">{isEn ? "Terrain and building profile" : "Profil du terrain et de la construction"}</p>
+                                                                            </div>
+                                                                            <div className="bg-black/30 rounded px-3 py-1.5 text-center">
+                                                                                <p className="text-[8px] text-slate-400 uppercase">Échelle</p>
+                                                                                <p className="text-lg font-black">1/100</p>
+                                                                                <p className="text-[7px] text-slate-400">ème</p>
+                                                                            </div>
                                                                         </div>
                                                                     </div>
-                                                                ) : (
-                                                                    <div className="border-2 border-dashed border-amber-200 rounded-xl bg-amber-50/50 p-8 text-center">
-                                                                        <Mountain className="w-10 h-10 text-amber-300 mx-auto mb-3" />
-                                                                        <p className="text-sm font-semibold text-amber-700">{isEn ? "Cross-section not yet captured" : "Coupe non encore capturée"}</p>
-                                                                        <p className="text-xs text-amber-500 mt-1">{isEn ? "Return to the site plan editor and click \"Continue to Complete File\" to generate this view." : "Retournez à l'éditeur de plan de masse et cliquez « Continuer vers le dossier complet » pour générer cette vue."}</p>
+                                                                    <div className="px-4 py-3 space-y-3">
+                                                                        {renderPanel("exist", "COUPE GÉNÉRALE AA - Existant", true)}
+                                                                        {renderPanel("proj", "COUPE GÉNÉRALE AA - Projeté", true)}
                                                                     </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
+                                                                </div>
+                                                            );
+                                                        })()
                                                     ) : selectedDoc === "PC5.1" ? (
                                                         /* ═══ PC5.1 — Facades (Initial State) ═══ */
                                                         <div className="bg-white">
@@ -3349,17 +3492,46 @@ export default function ProjectDescriptionPage({
                                             {/* Download Full Dossier */}
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    // Add print-dossier class to body for @media print styles
-                                                    document.body.classList.add('printing-dossier');
-                                                    window.print();
-                                                    // Remove after print dialog closes
-                                                    setTimeout(() => document.body.classList.remove('printing-dossier'), 1000);
+                                                disabled={dossierGenerating}
+                                                onClick={async () => {
+                                                    try {
+                                                        setDossierGenerating(true);
+                                                        setDossierProgress({ msg: isEn ? "Fetching project data..." : "Chargement des données...", pct: 5 });
+                                                        const baseUrl = window.location.origin;
+                                                        const data = await fetchDossierData(projectId, baseUrl);
+                                                        const imgs: DossierCapturedImages = {
+                                                            PC2: capturedImages['PC2'] || undefined,
+                                                            PC3: capturedImages['PC3'] || undefined,
+                                                            'PC5.2': capturedImages['PC5.2'] || undefined,
+                                                        };
+                                                        const doc = await assembleDossier(data, {
+                                                            projectId,
+                                                            baseUrl,
+                                                            capturedImages: imgs,
+                                                            onProgress: (msg, pct) => setDossierProgress({ msg, pct }),
+                                                        });
+                                                        const filename = `Dossier_PC_${sanitizeFilename(projectData?.address || projectName || 'projet')}.pdf`;
+                                                        doc.save(filename);
+                                                    } catch (err) {
+                                                        console.error('[Dossier] Generation failed:', err);
+                                                        alert(isEn ? 'PDF generation failed. Please try again.' : 'La génération du PDF a échoué. Veuillez réessayer.');
+                                                    } finally {
+                                                        setDossierGenerating(false);
+                                                        setDossierProgress({ msg: '', pct: 0 });
+                                                    }
                                                 }}
-                                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shadow-md hover:shadow-lg"
+                                                className={cn(
+                                                    "inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md",
+                                                    dossierGenerating
+                                                        ? "bg-slate-300 text-slate-500 cursor-wait"
+                                                        : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white hover:shadow-lg"
+                                                )}
                                             >
-                                                <Download className="w-4 h-4" />
-                                                {isEn ? "Download Full Dossier (PDF)" : "Télécharger le dossier complet (PDF)"}
+                                                {dossierGenerating ? (
+                                                    <><Loader2 className="w-4 h-4 animate-spin" /> {dossierProgress.msg || (isEn ? "Generating..." : "Génération...")}</>
+                                                ) : (
+                                                    <><Download className="w-4 h-4" /> {isEn ? "Download Full Dossier (PDF)" : "Télécharger le dossier complet (PDF)"}</>
+                                                )}
                                             </button>
                                         </div>
 

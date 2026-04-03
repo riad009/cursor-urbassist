@@ -50,20 +50,20 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const tileUrl = config.url
+        const upstreamUrl = config.url
             .replace("{z}", z)
             .replace("{y}", y)
             .replace("{x}", x);
 
         try {
-            const res = await fetch(tileUrl, {
-                signal: AbortSignal.timeout(5_000),
+            const res = await fetch(upstreamUrl, {
+                signal: AbortSignal.timeout(8_000),
                 headers: { Accept: "image/png,image/jpeg,image/*" },
             });
 
             if (!res.ok) {
-                console.error(`[map-tiles] Upstream ${res.status} for ${tileUrl}`);
-                return new NextResponse(null, { status: res.status });
+                console.error("[map-tiles] failed:", upstreamUrl, res.status);
+                return new NextResponse(null, { status: 502 });
             }
 
             const buf = await res.arrayBuffer();
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
                 },
             });
         } catch (err) {
-            console.error(`[map-tiles] Fetch failed for ${tileUrl}:`, err);
+            console.error("[map-tiles] failed:", upstreamUrl, err);
             return new NextResponse(null, { status: 502 });
         }
     }
