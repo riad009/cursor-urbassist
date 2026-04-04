@@ -11,6 +11,8 @@ export interface DossierProjectData {
   address: string | null;
   municipality: string | null;
   departement: string | null;
+  postalCode: string | null;
+  citycode: string | null;
   coordinates: string | null;
   parcelIds: string;
   parcelArea: number | null;
@@ -31,6 +33,24 @@ export interface ProjectDescriptionJSON {
   applicantFirstNames?: string;
   jobs?: JobEntry[];
   materials?: MaterialsData;
+  // PC4 descriptive notice fields
+  setbackDistances?: {
+    north?: number;
+    south?: number;
+    east?: number;
+    west?: number;
+    house?: number;
+    description?: string;
+  };
+  rainwaterManagement?: string;
+  parkingSpacesExisting?: number;
+  parkingSpacesProject?: number;
+  projectImageUrl?: string;
+  accessDescription?: string;
+  styleDescription?: string;
+  vegetationDescription?: string;
+  slopeDescription?: string;
+  currentBuildingState?: string;
   [key: string]: unknown;
 }
 
@@ -43,6 +63,7 @@ export interface JobEntry {
   wallHeight?: number;
   roofPitch?: number;
   existingFootprint?: number;
+  displayLabel?: string;
 }
 
 export interface MaterialsData {
@@ -57,7 +78,17 @@ export interface MaterialsData {
   matExtMaterial?: string;
   matExtColor?: string;
   existingFacade?: string;
-  [key: string]: string | undefined;
+  // PC4 extended material fields
+  structureMaterial?: string;
+  roofPan1Material?: string;
+  roofPan1Color?: string;
+  roofPan1RAL?: string;
+  roofPan1Slope?: number;
+  roofPan2Material?: string;
+  roofPan2Color?: string;
+  roofPan2RAL?: string;
+  roofPan2Slope?: number;
+  [key: string]: string | number | undefined;
 }
 
 export interface SitePlanDataRow {

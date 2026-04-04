@@ -276,43 +276,55 @@ export interface SurfaceAreas {
   parcelArea: number;
   footprintExisting: number;
   footprintProjected: number;
+  footprintHabitation: number;
   greenArea: number;
   gravelArea: number;
+  semiPermeableArea: number;
   impermeableArea: number;
   totalFreeSpace: number;
   parkingSpaces: number;
+  parkingSpacesExisting: number;
+  parkingSpacesProject: number;
+  pleineTerreTotal: number;
+  coefficientEmpriseExisting: number;
+  coefficientEmpriseProject: number;
 }
 
 export function getSurfaceAreas(project: DossierProjectData): SurfaceAreas {
   const parcelArea = project.parcelArea || 500;
   const fpExist = project.sitePlanData?.footprintExisting || 0;
   const fpProj = project.sitePlanData?.footprintProjected || 0;
+  const desc = project.projectDescription;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sa = project.sitePlanData?.surfaceAreas as Record<string, any> | null;
 
-  if (sa) {
-    return {
-      parcelArea,
-      footprintExisting: fpExist,
-      footprintProjected: fpProj || Number(sa.footprintTotal) || 0,
-      greenArea: Number(sa.greenArea) || Number(sa.vegetalizedArea) || Math.round(parcelArea * 0.6),
-      gravelArea: Number(sa.gravelArea) || Number(sa.semiPermeableArea) || Math.round(parcelArea * 0.1),
-      impermeableArea: Number(sa.impermeableArea) || Math.round(parcelArea * 0.1),
-      totalFreeSpace: Number(sa.totalFreeSpace) || Math.round(parcelArea * 0.8),
-      parkingSpaces: Number(sa.parkingSpaces) || 1,
-    };
-  }
+  const greenArea = Number(sa?.greenArea) || Number(sa?.vegetalizedArea) || Math.round(parcelArea * 0.6);
+  const semiPerm = Number(sa?.semiPermeableArea) || Number(sa?.gravelArea) || Math.round(parcelArea * 0.1);
+  const imperm = Number(sa?.impermeableArea) || Math.round(parcelArea * 0.1);
+  const habFP = Number(sa?.footprintHabitation) || fpExist;
+  const totalFP_exist = fpExist;
+  const totalFP_proj = fpProj || fpExist;
+  const pleineTerreExist = greenArea + semiPerm;
+  const totalFree = Number(sa?.totalFreeSpace) || Math.max(0, parcelArea - totalFP_exist);
+  const parkingExist = Number(desc?.parkingSpacesExisting) || Number(sa?.parkingSpaces) || 1;
+  const parkingProj = Number(desc?.parkingSpacesProject) || Number(sa?.parkingSpaces) || parkingExist;
 
-  // Defaults
   return {
     parcelArea,
-    footprintExisting: fpExist,
-    footprintProjected: fpProj || Math.round(parcelArea * 0.2),
-    greenArea: Math.round(parcelArea * 0.6),
-    gravelArea: Math.round(parcelArea * 0.1),
-    impermeableArea: Math.round(parcelArea * 0.1),
-    totalFreeSpace: Math.round(parcelArea * 0.8),
-    parkingSpaces: 1,
+    footprintExisting: totalFP_exist,
+    footprintProjected: totalFP_proj,
+    footprintHabitation: habFP,
+    greenArea,
+    gravelArea: semiPerm,
+    semiPermeableArea: semiPerm,
+    impermeableArea: imperm,
+    totalFreeSpace: totalFree,
+    parkingSpaces: parkingProj,
+    parkingSpacesExisting: parkingExist,
+    parkingSpacesProject: parkingProj,
+    pleineTerreTotal: pleineTerreExist,
+    coefficientEmpriseExisting: parcelArea > 0 ? (totalFP_exist / parcelArea) * 100 : 0,
+    coefficientEmpriseProject: parcelArea > 0 ? (totalFP_proj / parcelArea) * 100 : 0,
   };
 }

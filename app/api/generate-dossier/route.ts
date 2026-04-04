@@ -32,6 +32,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
+    // Extract postal code from citycode or address
+    let postalCode: string | null = null;
+    if (project.citycode) {
+      // citycode is INSEE code (5 digits) — postal code prefix = first 2 digits (department)
+      postalCode = project.citycode;
+    }
+    // Try to extract from address string (e.g., "13 Rue X, 60510 Bresles")
+    if (!postalCode && project.address) {
+      const postalMatch = project.address.match(/\b(\d{5})\b/);
+      if (postalMatch) postalCode = postalMatch[1];
+    }
+
     // Shape the response to match DossierProjectData interface
     const data = {
       id: project.id,
@@ -39,6 +51,8 @@ export async function GET(request: NextRequest) {
       address: project.address,
       municipality: project.municipality,
       departement: project.departement,
+      postalCode,
+      citycode: project.citycode,
       coordinates: project.coordinates,
       parcelIds: project.parcelIds,
       parcelArea: project.parcelArea,

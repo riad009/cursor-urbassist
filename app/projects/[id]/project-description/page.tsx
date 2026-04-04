@@ -138,6 +138,9 @@ const PC_DOCS: DocEntry[] = [
     { code: "CERFA", labelEn: "Pre-filled CERFA form", labelFr: "Formulaire CERFA pré-rempli", unlocked: false },
 ];
 
+import PC4InlinePreview from "@/components/documents/PC4InlinePreview";
+import PC51InlinePreview from "@/components/documents/PC51InlinePreview";
+
 const PC1LocationPlan = dynamic(
     () => import("@/components/project-description/PC1LocationPlan"),
     { ssr: false, loading: () => <div className="h-64 bg-gray-100 animate-pulse rounded" /> }
@@ -903,6 +906,7 @@ export default function ProjectDescriptionPage({
             const res = await fetch("/api/analyze-plu", {
                 method: "POST",
                 body: formData,
+                signal: AbortSignal.timeout(130_000), // 130s — slightly above Vercel's 120s maxDuration
             });
             // Safe JSON parsing — backend might return HTML on crash
             const contentType = res.headers.get("content-type") || "";
@@ -937,6 +941,15 @@ export default function ProjectDescriptionPage({
                 setPluAnalysisResult({ analysis: data.analysis as object, pluRules: data.pluRules as object });
                 setGenerationCount(prev => prev + 1);
                 setAnalysisProgress(isFallbackSource ? 50 : 95);
+
+                // If partial results — AI couldn't extract all rules from the PDF
+                // This is a soft warning, NOT a fatal error. The analysis still succeeded.
+                if (data.partialResults) {
+                    const fields = (data.foundFields as string[]) || [];
+                    console.warn(`[PLU] Partial results: ${fields.length} fields extracted. Found: ${fields.join(", ")}`);
+                    // Store partial info for Step 6 dashboard to render an inline warning
+                    setPluAnalysisResult(prev => prev ? { ...prev, partialResults: true, foundFields: fields } : prev);
+                }
 
 
                 // ── Chain feasibility matrix generation ──────────────────
@@ -2320,6 +2333,7 @@ export default function ProjectDescriptionPage({
                                             const rules = pluAnalysisResult?.pluRules;
                                             const analysis = pluAnalysisResult?.analysis;
                                             const notSpecified = isEn ? "Not specified in document" : "Non précisé dans le document";
+                                            const notRegulated = isEn ? "Not regulated" : "Non réglementée";
                                             const formatVal = (v: number | string | null | undefined, unit?: string) => {
                                                 if (v === null || v === undefined) return notSpecified;
                                                 if (typeof v === "number") return `${v}${unit || ""}`;
@@ -2357,6 +2371,18 @@ export default function ProjectDescriptionPage({
                                                             : "Ces règles ont été automatiquement extraites de votre document PLU par l'IA. Le croisement de conformité se fera en Phase 2, après le dessin du plan de masse."}
                                                     </p>
 
+                                                    {/* Partial Results Warning */}
+                                                    {(pluAnalysisResult as { partialResults?: boolean } | null)?.partialResults && (
+                                                        <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 -mt-1">
+                                                            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                                                            <p className="text-xs text-amber-800">
+                                                                {isEn
+                                                                    ? "Partial extraction — some values could not be found in the PLU document and were filled with zone defaults. Values shown in grey are estimates."
+                                                                    : "Extraction partielle — certaines valeurs n'ont pas pu être trouvées dans le document PLU et ont été complétées par des valeurs par défaut. Les valeurs en gris sont des estimations."}
+                                                            </p>
+                                                        </div>
+                                                    )}
+
                                                     {/* ── Numeric Rules Cards ── */}
                                                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                                                         {/* CES */}
@@ -2369,8 +2395,8 @@ export default function ProjectDescriptionPage({
                                                                     {isEn ? "Ground Coverage (CES)" : "Emprise au sol (CES)"}
                                                                 </h4>
                                                             </div>
-                                                            <p className={`text-lg font-bold ${rules?.maxCoverageRatio != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
-                                                                {formatPercent(rules?.maxCoverageRatio)}
+                                                            <p className={`text-lg font-bold ${rules?.maxCoverageRatio != null ? "text-slate-900" : "text-emerald-600 text-sm"}`}>
+                                                                {rules?.maxCoverageRatio != null ? formatPercent(rules.maxCoverageRatio) : notRegulated}
                                                             </p>
                                                         </div>
 
@@ -2415,7 +2441,7 @@ export default function ProjectDescriptionPage({
                                                                 </h4>
                                                             </div>
                                                             <p className={`text-lg font-bold ${rules?.greenSpaceMinPercent != null ? "text-slate-900" : "text-slate-400 text-sm"}`}>
-                                                                {rules?.greenSpaceMinPercent != null ? `${rules.greenSpaceMinPercent} %` : notSpecified}
+                                                                {rules?.greenSpaceMinPercent != null ? `${rules.greenSpaceMinPercent} %` : (isEn ? "Not specified" : "Non précisé")}
                                                             </p>
                                                         </div>
 
@@ -3079,121 +3105,21 @@ export default function ProjectDescriptionPage({
 
                                                     {/* Document content preview */}
                                                     {selectedDoc === "PC4 / DPC 8-1" ? (
-                                                        <div className="p-6 max-h-[70vh] overflow-y-auto">
-                                                            <div className="border border-slate-200 rounded-lg overflow-hidden shadow-inner">
-                                                                {/* Document header */}
-                                                                <div className="bg-white px-8 py-6 border-b-2 border-slate-900">
-                                                                    <div className="flex items-start justify-between">
-                                                                        <div>
-                                                                            <h1 className="text-xl font-black text-slate-900 uppercase tracking-wide">
-                                                                                {isEn ? "DESCRIPTIVE NOTICE (PC4)" : "NOTICE DESCRIPTIVE (PC4)"}
-                                                                            </h1>
-                                                                            <p className="text-xs text-slate-500 mt-1">
-                                                                                {isEn ? "Automatically generated by Urbanist Simulator" : "Généré automatiquement par Urbassist Simulator"}
-                                                                            </p>
-                                                                        </div>
-                                                                        <div className="text-right">
-                                                                            <p className="text-base font-bold text-slate-900">{projectName || "—"}</p>
-                                                                            <p className="text-xs text-slate-500">Ref: {projectId.slice(0, 6)}</p>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="flex justify-between mt-4 pt-3 border-t border-slate-200">
-                                                                        <div>
-                                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{isEn ? "APPLICANT" : "DEMANDEUR"}</p>
-                                                                            <p className="text-sm font-semibold text-slate-900">{applicantName || "—"}</p>
-                                                                        </div>
-                                                                        <div className="text-right">
-                                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{isEn ? "DATE OF PUBLICATION" : "DATE D'ÉDITION"}</p>
-                                                                            <p className="text-sm font-bold text-slate-900">{new Date().toLocaleDateString(isEn ? "en-US" : "fr-FR")}</p>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-
-                                                                {/* Section 1 */}
-                                                                <div className="px-8 py-4 border-b border-slate-100">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">1</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "INITIAL STATE OF THE LAND AND ITS SURROUNDINGS" : "ÉTAT INITIAL DU TERRAIN ET SES ABORDS"}</h2>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? `The land on which we are planning the work is located at ${projectAddress || "[address missing]"}. The land is situated in an urban and residential area (Zone U) accessible via an existing public road. The plot has a relatively flat topography and is situated within an existing built-up area.`
-                                                                            : `Le terrain sur lequel nous envisageons les travaux se situe au ${projectAddress || "[adresse manquante]"}. Le terrain se trouve dans une zone urbaine et pavillonnaire (Zone U) à laquelle on accède par la voie publique existante. La parcelle présente une topographie relativement plane et s'insère dans un tissu bâti existant.`}
-                                                                    </p>
-                                                                </div>
-
-                                                                {/* Section 2 */}
-                                                                <div className="px-8 py-4 border-b border-slate-100">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">2</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "PROJECTED STATE" : "ÉTAT PROJETÉ"}</h2>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? "The proposed project does not involve any substantial alterations to the natural terrain, its surroundings, or its hydraulic features. The overall topography of the land will be preserved. Earthworks will be limited to what is strictly necessary for the foundations."
-                                                                            : "Le projet implanté ne prévoit aucune modification substantielle du terrain naturel, de ses abords ainsi que de ses aménagements hydrauliques. La topographie globale du terrain sera conservée. Les travaux de terrassement seront limités au strict nécessaire."}
-                                                                    </p>
-                                                                </div>
-
-                                                                {/* Section 3 */}
-                                                                <div className="px-8 py-4 border-b border-slate-100">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">3</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "LOCATION, ORGANIZATION, COMPOSITION AND VOLUME" : "IMPLANTATION, ORGANISATION, COMPOSITION ET VOLUME"}</h2>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? `The project was specifically designed with functionality and compliance. ${jobs.length > 0 ? `The new building will have a footprint of ${jobs[0]?.footprint || 0}m² over ${jobs[0]?.levels || 1} level(s).` : ""}`
-                                                                            : `Le projet a été spécifiquement conçu pour la fonctionnalité et la conformité. ${jobs.length > 0 ? `Le nouveau bâtiment aura une emprise au sol de ${jobs[0]?.footprint || 0}m² sur ${jobs[0]?.levels || 1} niveau(x).` : ""}`}
-                                                                    </p>
-                                                                </div>
-
-                                                                {/* Section 4 */}
-                                                                <div className="px-8 py-4 border-b border-slate-100">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">4</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "TREATMENT OF BUILDINGS, FENCES, VEGETATION" : "TRAITEMENT DES CONSTRUCTIONS, CLÔTURES, VÉGÉTATION"}</h2>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? "The perimeter of the plot, along the property lines, will remain as is. Open spaces will be maintained with vegetation."
-                                                                            : "Le périmètre de la parcelle, le long des limites séparatives, restera en l'état. Les espaces ouverts seront maintenus avec de la végétation."}
-                                                                    </p>
-                                                                </div>
-
-                                                                {/* Section 5 */}
-                                                                <div className="px-8 py-4 border-b border-slate-100">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">5</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "MATERIALS AND COLORS" : "MATÉRIAUX ET COULEURS"}</h2>
-                                                                    </div>
-                                                                    <div className="text-xs text-slate-600 leading-relaxed space-y-1">
-                                                                        {matExtMaterial || wallMaterial || roofCovering ? (
-                                                                            <>
-                                                                                {wallMaterial && <p>• {isEn ? "Walls" : "Murs"}: {wallMaterial} ({wallColor || "—"})</p>}
-                                                                                {roofCovering && <p>• {isEn ? "Roof" : "Toiture"}: {roofCovering} ({roofColor || "—"})</p>}
-                                                                                {matExtMaterial && <p>• {isEn ? "Joinery" : "Menuiseries"}: {matExtMaterial} ({matExtColor || "—"})</p>}
-                                                                            </>
-                                                                        ) : (
-                                                                            <p className="italic text-slate-400">{isEn ? "No materials specified yet." : "Aucun matériau spécifié."}</p>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-
-                                                                {/* Section 6 */}
-                                                                <div className="px-8 py-4">
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">6</span>
-                                                                        <h2 className="text-xs font-black text-slate-900 uppercase">{isEn ? "ACCESS AND PARKING" : "ACCÈS ET STATIONNEMENT"}</h2>
-                                                                    </div>
-                                                                    <p className="text-xs text-slate-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? "Access to the site will be via the existing entrance from the public road. Vehicle parking will continue to be available on the site."
-                                                                            : "L'accès au site se fera par l'entrée existante depuis la voie publique. Le stationnement des véhicules continuera d'être disponible sur le site."}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                        <PC4InlinePreview
+                                                            jobs={jobs}
+                                                            projectAddress={projectAddress}
+                                                            projectData={projectData}
+                                                            projectName={projectName}
+                                                            projectId={projectId}
+                                                            applicantName={applicantName}
+                                                            matExtMaterial={matExtMaterial}
+                                                            wallMaterial={wallMaterial}
+                                                            roofCovering={roofCovering}
+                                                            roofMaterial={roofMaterial}
+                                                            roofColor={roofColor}
+                                                            joineryMaterial={joineryMaterial}
+                                                            trimColor={trimColor}
+                                                        />
                                                     ) : selectedDoc === "PC1" ? (
                                                         /* ═══ PC1 — Interactive Plan de Situation ═══ */
                                                         <PC1LocationPlan project={projectData} projectId={projectId} />
@@ -3356,55 +3282,12 @@ export default function ProjectDescriptionPage({
                                                             );
                                                         })()
                                                     ) : selectedDoc === "PC5.1" ? (
-                                                        /* ═══ PC5.1 — Facades (Initial State) ═══ */
-                                                        <div className="bg-white">
-                                                            <div className="bg-gradient-to-r from-violet-800 to-violet-700 px-8 py-5 text-white">
-                                                                <div className="flex items-center justify-between">
-                                                                    <div>
-                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC5.1 — {isEn ? "Facades – Initial State" : "Façades – État Initial"}</h2>
-                                                                        <p className="text-xs text-violet-200 mt-1">{isEn ? "Current state before construction" : "État actuel avant travaux"}</p>
-                                                                    </div>
-                                                                    <div className="text-right text-xs text-violet-200">
-                                                                        <p>{isEn ? "Scale: 1/100" : "Échelle : 1/100"}</p>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div className="px-6 py-5">
-                                                                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white p-6">
-                                                                    <svg viewBox="0 0 600 200" className="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
-                                                                        {/* Ground */}
-                                                                        <rect x="0" y="160" width="600" height="40" fill="#f0fdf4" />
-                                                                        <line x1="0" y1="160" x2="600" y2="160" stroke="#65a30d" strokeWidth="2" />
-                                                                        {/* Grass texture */}
-                                                                        {Array.from({ length: 30 }).map((_, i) => (
-                                                                            <line key={i} x1={20 + i * 19} y1="160" x2={15 + i * 19} y2="152" stroke="#86efac" strokeWidth="1" />
-                                                                        ))}
-                                                                        {/* Empty plot indication */}
-                                                                        <text x="300" y="100" fontSize="14" fill="#94a3b8" textAnchor="middle" fontStyle="italic">
-                                                                            {isEn ? "Vacant/undeveloped plot" : "Terrain vierge / non bâti"}
-                                                                        </text>
-                                                                        <text x="300" y="125" fontSize="10" fill="#cbd5e1" textAnchor="middle">
-                                                                            {projectAddress || (isEn ? "Address not specified" : "Adresse non renseignée")}
-                                                                        </text>
-                                                                        {/* Property boundaries */}
-                                                                        <line x1="50" y1="40" x2="50" y2="160" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="8 4" />
-                                                                        <line x1="550" y1="40" x2="550" y2="160" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="8 4" />
-                                                                        <text x="50" y="35" fontSize="8" fill="#6366f1" textAnchor="middle">{isEn ? "Property limit" : "Limite de propriété"}</text>
-                                                                        <text x="550" y="35" fontSize="8" fill="#6366f1" textAnchor="middle">{isEn ? "Property limit" : "Limite de propriété"}</text>
-                                                                        {/* Sky */}
-                                                                        <text x="300" y="20" fontSize="8" fill="#93c5fd" textAnchor="middle">{isEn ? "(No existing construction)" : "(Aucune construction existante)"}</text>
-                                                                    </svg>
-                                                                </div>
-                                                                <div className="mt-4 bg-violet-50 rounded-xl p-4 border border-violet-100">
-                                                                    <p className="text-xs font-semibold text-violet-800 mb-1">{isEn ? "Current State Description" : "Description de l'état actuel"}</p>
-                                                                    <p className="text-xs text-violet-600 leading-relaxed">
-                                                                        {isEn
-                                                                            ? `The plot located at ${projectAddress || '—'} is currently undeveloped. The terrain is ${terrainInitial || 'generally flat'} with natural vegetation.`
-                                                                            : `La parcelle située ${projectAddress || '—'} est actuellement non bâtie. Le terrain est ${terrainInitial || 'globalement plat'} avec de la végétation naturelle.`}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                        /* ═══ PC5.1 — Facades (Initial State) — Professional Elevations ═══ */
+                                                        <PC51InlinePreview
+                                                            projectData={projectData}
+                                                            projectAddress={projectAddress}
+                                                            jobs={jobs as unknown as Array<Record<string, unknown>>}
+                                                        />
                                                     ) : selectedDoc === "PC5.2" ? (
                                                         /* ═══ PC5.2 — Facades (Project) ═══ */
                                                         <div className="bg-white">
@@ -3678,181 +3561,178 @@ export default function ProjectDescriptionPage({
 
                         {/* Document body */}
                         <div className="flex-1 overflow-y-auto py-6 px-4">
-                            <div className="max-w-[680px] mx-auto bg-white rounded-xl shadow-2xl overflow-hidden print:shadow-none">
-                                {/* Header */}
-                                <div className="bg-gradient-to-r from-slate-800 to-indigo-900 px-8 py-6">
-                                    <div className="flex items-start justify-between">
-                                        <div>
-                                            <h1 className="text-xl font-black text-white tracking-wide uppercase">
-                                                {isEn ? "DESCRIPTIVE NOTICE (PC4)" : "NOTICE DESCRIPTIVE (PC4)"}
-                                            </h1>
-                                            <p className="text-xs text-indigo-300 mt-1">
-                                                {isEn ? "Automatically generated by Urbanist Simulator" : "Généré automatiquement par Urbanist Simulator"}
-                                            </p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-lg font-bold text-white">{projectName || "Project"}</p>
-                                            <p className="text-xs text-indigo-300">Ref: {projectId.slice(-6)}</p>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 flex items-center justify-between border-t border-white/20 pt-3">
-                                        <div>
-                                            <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
-                                                {isEn ? "APPLICANT" : "DEMANDEUR"}
-                                            </p>
-                                            <p className="text-sm text-white font-medium mt-0.5">
-                                                {applicantName ? `${applicantName}${applicantFirstNames ? ` ${applicantFirstNames}` : ""}` : "—"}
-                                            </p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">
-                                                {isEn ? "PUBLICATION DATE" : "DATE DE PUBLICATION"}
-                                            </p>
-                                            <p className="text-lg font-bold text-white">
-                                                {new Date().toLocaleDateString(isEn ? "en-US" : "fr-FR")}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div className="max-w-[900px] mx-auto bg-white rounded-xl shadow-2xl overflow-hidden print:shadow-none">
+                                {(() => {
+                                    const mainJob = jobs[0];
+                                    const natureLabel = mainJob?.nature === "new_construction" ? "construction neuve"
+                                        : mainJob?.nature === "existing_extension" ? "extension sur l'existant"
+                                            : mainJob?.displayLabel?.toLowerCase() || "construction";
+                                    const postalMatch = (projectAddress || "").match(/\b(\d{5})\b/);
+                                    const postalCode = postalMatch ? postalMatch[1] : "";
+                                    const deptCode = postalCode.slice(0, 2);
+                                    const locationSuffix = postalCode ? `(${postalCode})` : deptCode ? `(${deptCode})` : "";
+                                    const parcelArea = projectData?.parcelArea || 500;
+                                    const fpExist = projectData?.sitePlanData?.footprintExisting || (mainJob?.footprint || 0);
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    const sa = projectData?.sitePlanData?.surfaceAreas as Record<string, any> | null;
+                                    const greenA = Number(sa?.greenArea) || Number(sa?.vegetalizedArea) || Math.round(parcelArea * 0.6);
+                                    const semiPerm = Number(sa?.semiPermeableArea) || Number(sa?.gravelArea) || Math.round(parcelArea * 0.1);
+                                    const imperm = Number(sa?.impermeableArea) || Math.round(parcelArea * 0.1);
+                                    const plTot = greenA + semiPerm;
+                                    const totalFree = greenA + semiPerm + imperm;
+                                    const ceExist = parcelArea > 0 ? ((fpExist / parcelArea) * 100).toFixed(1) : "0.0";
 
-                                {/* Sections */}
-                                <div className="px-8 py-6 space-y-7">
-                                    {/* Section 1 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">1</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "INITIAL STATE OF THE LAND AND ITS SURROUNDINGS" : "ÉTAT INITIAL DU TERRAIN ET DE SES ABORDS"}
-                                            </h2>
-                                        </div>
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                            {isEn
-                                                ? `The land on which we are planning the work is located at ${projectAddress || "[address missing]"}. The land is situated in an urban and residential area (Zone U) accessible via an existing public road. The plot has a relatively flat topography and is situated within an existing built-up area.`
-                                                : `Le terrain sur lequel sont projetés les travaux se situe au ${projectAddress || "[adresse manquante]"}. Le terrain est situé dans une zone urbaine et résidentielle (Zone U) accessible via une voie publique existante. La parcelle présente une topographie relativement plane et se situe dans une zone bâtie existante.`
-                                            }
-                                        </p>
-                                    </div>
+                                    const tRows = [
+                                        { l: "Surface de la parcelle", v: `${parcelArea} m²` },
+                                        { l: "Emprise au sol habitation", v: `${fpExist} m²` },
+                                        { l: "Emprise au sol totale", v: `${fpExist} m²` },
+                                        { l: "Coefficient d'emprise", v: `${ceExist} %` },
+                                        { l: "Surface pleine terre végétalisée", v: `${greenA} m²` },
+                                        { l: "Surface semi perméable", v: `${semiPerm} m²` },
+                                        { l: "Surface pleine terre totale", v: `${plTot} m²` },
+                                        { l: "SOIT", v: `${parcelArea > 0 ? ((plTot / parcelArea) * 100).toFixed(1) : "0.0"} %`, bold: true },
+                                        { l: "Surface libre imperméable", v: `${imperm} m²` },
+                                        { l: "SOIT", v: `${parcelArea > 0 ? ((imperm / parcelArea) * 100).toFixed(1) : "0.0"} %`, bold: true },
+                                        { l: "Total espaces libres", v: `${totalFree} m²` },
+                                        { l: "SOIT", v: `${parcelArea > 0 ? ((totalFree / parcelArea) * 100).toFixed(1) : "0.0"} %`, bold: true },
+                                        { l: "Places de stationnement", v: "1" },
+                                    ];
 
-                                    {/* Section 2 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">2</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "PROJECTED STATE" : "ÉTAT PROJETÉ"}
-                                            </h2>
+                                    const ModalTable = ({ title }: { title: string }) => (
+                                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                                            <div className="bg-[#1a237e] text-white text-[10px] font-bold text-center py-2 uppercase tracking-wider">
+                                                Récapitulatif des surfaces — {title}
+                                            </div>
+                                            <div className="bg-[#283593] text-white flex justify-between px-3 py-1.5 text-[9px] font-bold uppercase">
+                                                <span>Description</span>
+                                                <span>Surfaces</span>
+                                            </div>
+                                            {tRows.map((row, i) => (
+                                                <div
+                                                    key={i}
+                                                    className={cn(
+                                                        "flex justify-between px-3 py-1.5 text-[9px] border-t border-slate-100",
+                                                        row.bold ? "bg-indigo-50 font-bold text-indigo-900" : i % 2 === 0 ? "bg-slate-50" : "bg-white"
+                                                    )}
+                                                >
+                                                    <span className={row.bold ? "font-bold" : "text-slate-600"}>{row.l}</span>
+                                                    <span className="font-bold text-slate-800">{row.v}</span>
+                                                </div>
+                                            ))}
                                         </div>
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                            {isEn
-                                                ? "The proposed project does not involve any substantial alterations to the natural terrain, its surroundings, or its hydraulic features. The overall topography of the land will be preserved. Earthworks will be limited to what is strictly necessary for the foundations of the buildings or extensions. The area surrounding the construction will be restored to its original condition after completion."
-                                                : "Le projet proposé n'implique aucune altération substantielle du terrain naturel, de ses abords ou de ses caractéristiques hydrauliques. La topographie générale du terrain sera préservée. Les terrassements seront limités au strict nécessaire pour les fondations des bâtiments ou extensions. Les abords de la construction seront remis en état après achèvement des travaux."}
-                                        </p>
-                                    </div>
+                                    );
 
-                                    {/* Section 3 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">3</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "LOCATION, ORGANIZATION, COMPOSITION AND VOLUME" : "IMPLANTATION, ORGANISATION, COMPOSITION ET VOLUME"}
-                                            </h2>
-                                        </div>
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                            {(() => {
-                                                const jobSummaries = jobs.map(j => {
-                                                    const natureLabel = j.nature === "new_construction" ? (isEn ? "new, detached building" : "construction neuve détachée")
-                                                        : j.nature === "existing_extension" ? (isEn ? "extension" : "extension")
-                                                            : (isEn ? "outdoor layout" : "aménagement extérieur");
-                                                    return isEn
-                                                        ? `The ${natureLabel} will have a footprint of ${j.footprint}m² over ${j.levels} level${j.levels > 1 ? "s" : ""}. The planned ${natureLabel} will add ${j.floorAreaEstimated.toFixed(1)}m² of floor space and a footprint of ${j.footprint}m².`
-                                                        : `La ${natureLabel} aura une emprise au sol de ${j.footprint}m² sur ${j.levels} niveau${j.levels > 1 ? "x" : ""}. L'extension prévue ajoutera ${j.floorAreaEstimated.toFixed(1)}m² de surface de plancher et une emprise de ${j.footprint}m².`;
-                                                });
-                                                const intro = isEn
-                                                    ? "The project was specifically designed with functionality and compliance with current regulations in mind."
-                                                    : "Le projet a été spécifiquement conçu dans un souci de fonctionnalité et de conformité avec la réglementation en vigueur.";
-                                                const suffix = isEn
-                                                    ? "It will be built adjacent to the existing structure, respecting regulatory setbacks. The design has been carefully considered to ensure harmonious integration with the surrounding built environment."
-                                                    : "Il sera construit en tenant compte des retraits réglementaires. La conception a été soigneusement étudiée pour assurer une intégration harmonieuse avec l'environnement bâti environnant.";
-                                                return `${intro} ${jobSummaries.join(" ")} ${suffix}`;
-                                            })()}
-                                        </p>
-                                    </div>
+                                    return (
+                                        <>
+                                            {/* Header */}
+                                            <div className="bg-gradient-to-r from-slate-800 to-indigo-900 px-8 py-6">
+                                                <div className="flex items-start justify-between">
+                                                    <div>
+                                                        <h1 className="text-xl font-black text-white tracking-wide uppercase">
+                                                            NOTICE DESCRIPTIVE (PCMI 4)
+                                                        </h1>
+                                                        <p className="text-xs text-indigo-300 mt-1">Généré automatiquement par Urbassist</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-lg font-bold text-white">{projectName || "—"}</p>
+                                                        <p className="text-xs text-indigo-300">Ref: {projectId.slice(0, 6)}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-4 flex items-center justify-between border-t border-white/20 pt-3">
+                                                    <div>
+                                                        <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Demandeur</p>
+                                                        <p className="text-sm text-white font-medium mt-0.5">{applicantName || "—"}</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Date d&apos;édition</p>
+                                                        <p className="text-lg font-bold text-white">{new Date().toLocaleDateString("fr-FR")}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
 
-                                    {/* Section 4 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">4</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "TREATMENT OF BUILDINGS, FENCES, VEGETATION" : "TRAITEMENT DES CONSTRUCTIONS, CLÔTURES, VÉGÉTATION"}
-                                            </h2>
-                                        </div>
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                            {isEn
-                                                ? "The perimeter of the plot, along the property lines and at the rear, will remain as is. Open spaces will be maintained with vegetation. No changes to the fences are planned."
-                                                : "Le périmètre de la parcelle, le long des limites de propriété et en fond de parcelle, restera en l'état. Les espaces libres seront maintenus avec de la végétation. Aucune modification des clôtures n'est prévue."}
-                                        </p>
-                                    </div>
+                                            {/* Two-column layout */}
+                                            <div className="flex">
+                                                {/* LEFT — Narrative */}
+                                                <div className="flex-[55] px-6 py-5 space-y-4 border-r border-slate-100">
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">1 - État initial du terrain et ses abords :</h2>
+                                                        <div className="text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                                                            <p>Le terrain se situe au {projectAddress || "[adresse]"} sur la commune de {(projectData?.municipality || "").toUpperCase()} {locationSuffix}.</p>
+                                                            <p>Le terrain est partiellement végétalisé et planté de quelques arbres.</p>
+                                                            <p>L&apos;accès à la propriété se fait par la voie publique existante.</p>
+                                                            <p>{fpExist > 0 ? "Le terrain est occupé par une maison d'habitation." : "Le terrain est actuellement non bâti."}</p>
+                                                            <p>Le terrain présente une très faible pente.</p>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">2 - État projeté :</h2>
+                                                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                                                            Le projet prévoit la {natureLabel}{mainJob?.footprint ? ` d'une emprise au sol de ${mainJob.footprint} m²` : ""}.
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">Aménagement du terrain :</h2>
+                                                        <div className="text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                                                            <p>Le projet ne modifie en rien le terrain et ses abords.</p>
+                                                            <p>La topographie globale du terrain sera conservée.</p>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">Implantation, organisation, composition et volume :</h2>
+                                                        <div className="text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                                                            {mainJob && (
+                                                                <>
+                                                                    <p>La réalisation de la {natureLabel} ne nécessite pas de mouvement de terre important.</p>
+                                                                    <p>Le niveau actuel du terrain au droit du projet sera conservé.</p>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">Traitement des constructions, clôtures, végétations :</h2>
+                                                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                                                            Les aménagements extérieurs existants ne subiront aucune modification et seront conservés en l&apos;état.
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">Matériaux et les couleurs :</h2>
+                                                        <div className="text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                                                            {(() => {
+                                                                const parts: string[] = [];
+                                                                const wm = matExtMaterial || wallMaterial;
+                                                                if (wm) parts.push(`La structure sera en ${wm}.`);
+                                                                const rc = roofCovering || roofMaterial;
+                                                                if (rc) parts.push(`La toiture sera en ${rc}${roofColor ? ` de couleur ${roofColor}` : ""}.`);
+                                                                if (joineryMaterial) parts.push(`Les menuiseries seront en ${joineryMaterial}${trimColor ? ` de coloris ${trimColor}` : ""}.`);
+                                                                if (parts.length === 0) parts.push("Les matériaux seront définis conformément au PLU applicable.");
+                                                                return parts.map((t, i) => <p key={i}>{t}</p>);
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-xs font-black text-slate-900 uppercase border-b border-slate-900 pb-0.5 mb-2 inline-block">Organisation et l&apos;aménagement des accès :</h2>
+                                                        <div className="text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                                                            <p>L&apos;accès au terrain ne sera pas modifié.</p>
+                                                            <p>Le projet créera 1 place de stationnement extérieure supplémentaire.</p>
+                                                            <p>Les eaux de pluies générées par le projet seront traitées par une cuve de rétention.</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {/* RIGHT — Tables */}
+                                                <div className="flex-[45] px-5 py-5 space-y-4 bg-slate-50/50">
+                                                    <ModalTable title="Existant" />
+                                                    <ModalTable title="Projet" />
+                                                </div>
+                                            </div>
 
-                                    {/* Section 5 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">5</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "MATERIALS AND COLORS" : "MATÉRIAUX ET COLORIS"}
-                                            </h2>
-                                        </div>
-                                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                                            <p className="text-sm text-slate-600 leading-relaxed">
-                                                {(() => {
-                                                    const parts: string[] = [];
-                                                    if (matExtMaterial || matExtColor) {
-                                                        parts.push(isEn
-                                                            ? `The facades will be treated with: ${matExtMaterial || "—"}, finish ${matExtColor || "—"}, color ${matExtColor || "—"}`
-                                                            : `Les façades seront traitées avec : ${matExtMaterial || "—"}, finition ${matExtColor || "—"}, coloris ${matExtColor || "—"}`);
-                                                    }
-                                                    if (joineryMaterial) {
-                                                        parts.push(isEn
-                                                            ? `The exterior joinery will be in: ${joineryMaterial} ${trimColor || ""}`
-                                                            : `Les menuiseries extérieures seront en : ${joineryMaterial} ${trimColor || ""}`);
-                                                    }
-                                                    if (roofCovering || roofColor) {
-                                                        parts.push(isEn
-                                                            ? `Roofing: ${roofCovering || "—"}, color ${roofColor || "—"}`
-                                                            : `Toiture : ${roofCovering || "—"}, coloris ${roofColor || "—"}`);
-                                                    }
-                                                    if (gutterMaterial) {
-                                                        parts.push(isEn ? `Gutters: ${gutterMaterial}` : `Gouttières : ${gutterMaterial}`);
-                                                    }
-                                                    return parts.length > 0 ? parts.join(". ") + "." : (isEn ? "No materials specified yet." : "Aucun matériau spécifié pour l'instant.");
-                                                })()}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {/* Section 6 */}
-                                    <div>
-                                        <div className="flex items-center gap-2.5 mb-3">
-                                            <span className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center">6</span>
-                                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">
-                                                {isEn ? "ACCESS AND PARKING" : "ACCÈS ET STATIONNEMENT"}
-                                            </h2>
-                                        </div>
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                            {isEn
-                                                ? "Access to the site will be via the existing entrance from the public road. The project does not alter current access conditions. Vehicle parking will continue to be available on the site, with existing parking areas being maintained or redesigned as needed."
-                                                : "L'accès au site se fera par l'entrée existante depuis la voie publique. Le projet ne modifie pas les conditions d'accès actuelles. Le stationnement des véhicules continuera d'être disponible sur le site, les aires de stationnement existantes étant maintenues ou réaménagées si nécessaire."}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Footer */}
-                                <div className="px-8 py-4 border-t border-slate-100 text-center">
-                                    <p className="text-xs text-indigo-400">
-                                        {isEn
-                                            ? `Document generated via Urbanist Proto v5.3 - urbassist.com - ${new Date().toLocaleDateString("en-US")}`
-                                            : `Document généré via Urbanist Proto v5.3 - urbassist.com - ${new Date().toLocaleDateString("fr-FR")}`
-                                        }
-                                    </p>
-                                </div>
+                                            {/* Footer */}
+                                            <div className="px-8 py-3 border-t border-slate-200 bg-slate-50 flex justify-between items-center">
+                                                <span className="text-[9px] text-slate-400 italic">Document ne pouvant servir à l&apos;exécution des travaux.</span>
+                                                <span className="text-[9px] text-slate-400 font-semibold">INDICE 0 — {new Date().toLocaleDateString("fr-FR")} — NOTICE DESCRIPTIVE — PCMI 4</span>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
