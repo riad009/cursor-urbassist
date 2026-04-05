@@ -133,11 +133,12 @@ export const maxDuration = 120;
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-2.5-flash"; // 2.5-flash — fastest available model (2.0-flash was deprecated)
 const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB — File API handles large files natively
 const FILE_API_POLL_INTERVAL_MS = 2_000; // Poll every 2s while waiting for file to become ACTIVE
-const FILE_API_MAX_POLL_ATTEMPTS = 60; // Max 120s of polling (60 * 2s)
-const API_TIMEOUT_MS = 120_000; // 2 min — large PDFs can take time
+const FILE_API_MAX_POLL_ATTEMPTS = 22; // Max 44s of polling (22 * 2s) — leave time for Gemini calls
+const GEMINI_CALL_TIMEOUT_MS = 50_000; // 50s max per individual Gemini call
+const MASTER_DEADLINE_MS = 115_000; // 115s — hard ceiling to return before Vercel kills us at 120s
 
 // ─── Gemini responseSchema for PluRules ──────────────────────────────────────
 // This guarantees the output JSON matches our TypeScript interface exactly.
@@ -197,13 +198,18 @@ const PLU_RULES_SCHEMA: any = {
 
 export async function POST(request: NextRequest) {
   const tmpFilesToCleanup: string[] = [];
+  const masterStartMs = Date.now(); // Master deadline — every step checks this
+  const remainingMs = () => MASTER_DEADLINE_MS - (Date.now() - masterStartMs);
+  const hasTimeLeft = (minMs = 15_000) => remainingMs() > minMs;
   try {
     // ── 1. Parse multipart/form-data ───────────────────────────────────────
     const formData = await request.formData();
     // Accept both legacy field names and new unified field names
     const pdfFile = (formData.get("pluPdfFile") as File | null) || (formData.get("pdfFile") as File | null);
     const pdfFile2 = (formData.get("lotissementFile") as File | null) || (formData.get("pdfFile2") as File | null); // Optional lotissement supplement
-    const pdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";   // Auto-fetched GPU URL
+    const rawPdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";
+    // Strip page anchors (e.g., "reglement.pdf#page=205") — GPU API adds these for navigation, they break downloads
+    const pdfUrl = rawPdfUrl.split("#")[0];
     let pluZone = (formData.get("pluZone") as string) || "non spécifiée";
     const isABFZone = (formData.get("isABFZone") as string) === "true";
     const parcelAddress = (formData.get("parcelAddress") as string) || "non précisée";
@@ -243,16 +249,16 @@ export async function POST(request: NextRequest) {
       const sanitizedUrl = pdfUrl.replace(/"/g, '').replace(/'/g, '');
 
       const curlStrategies = [
-        `curl -sS -L --max-time 120 --retry 3 --retry-delay 3 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
-        `curl -sS -L --max-time 120 --retry 2 --retry-delay 5 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
-        `curl -sS -L -k --max-time 120 -o "${tmpFile}" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 30 --retry 1 --retry-delay 2 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 25 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
+        `curl -sS -L -k --max-time 20 -o "${tmpFile}" "${sanitizedUrl}"`,
       ];
 
       for (let i = 0; i < curlStrategies.length; i++) {
         try {
           try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
           console.log(`[analyze-plu] ➤ Strategy ${i + 1}/${curlStrategies.length}...`);
-          execSync(curlStrategies[i], { timeout: 130_000, stdio: ['pipe', 'pipe', 'pipe'] });
+          execSync(curlStrategies[i], { timeout: 35_000, stdio: ['pipe', 'pipe', 'pipe'] });
 
           if (existsSync(tmpFile)) {
             const buf = readFileSync(tmpFile);
@@ -280,7 +286,7 @@ export async function POST(request: NextRequest) {
           const fetchRes = await fetch(sanitizedUrl, {
             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/pdf,*/*" },
             redirect: "follow",
-            signal: AbortSignal.timeout(120_000),
+            signal: AbortSignal.timeout(25_000),
           });
           if (fetchRes.ok) {
             const nodeBuf = Buffer.from(await fetchRes.arrayBuffer());
@@ -361,7 +367,7 @@ export async function POST(request: NextRequest) {
         try {
           // pdftotext -layout preserves document layout (columns, spacing)
           execSync(`pdftotext -layout "${pdfTextTmpFile}" "${pdfTextOutFile}"`, {
-            timeout: 60_000, stdio: ['pipe', 'pipe', 'pipe'],
+            timeout: 20_000, stdio: ['pipe', 'pipe', 'pipe'],
           });
           if (existsSync(pdfTextOutFile)) {
             const fullText = readFileSync(pdfTextOutFile, 'utf-8');
@@ -452,10 +458,20 @@ export async function POST(request: NextRequest) {
 
     // ── Check if we have any usable data ─────────────────────────────────
     const hasFileApiPdf = uploadedFileUris.length > 0;
-    if (!hasFileApiPdf && !degradedModeText && pdfUrl.trim()) {
-      console.warn(`[analyze-plu] ⚠ All PDF processing strategies failed — running text-only qualitative analysis`);
+    if (!hasFileApiPdf && !degradedModeText && !zoneFocusedText && pdfUrl.trim()) {
+      // PDF URL was provided but ALL download strategies failed (404, timeout, corrupted, etc.)
+      console.error(`[analyze-plu] ✗ All PDF download strategies failed for URL: ${pdfUrl.slice(0, 200)}`);
+      cleanupTmpFiles(tmpFilesToCleanup);
+      return NextResponse.json(
+        {
+          error: "Le document PLU n'a pas pu être téléchargé (le fichier est introuvable ou le serveur ne répond pas). Veuillez télécharger le règlement manuellement depuis le site de votre collectivité et l'importer via le bouton « Importer un fichier PDF ».",
+          downloadFailed: true,
+          failedUrl: pdfUrl.slice(0, 300),
+        },
+        { status: 422 }
+      );
     }
-    if (!hasFileApiPdf && !degradedModeText && !pdfUrl.trim()) {
+    if (!hasFileApiPdf && !degradedModeText && !zoneFocusedText && !pdfUrl.trim()) {
       cleanupTmpFiles(tmpFilesToCleanup);
       return NextResponse.json(
         { error: "Aucune source de document PLU trouvée. Veuillez uploader un fichier PDF ou vérifier que l'URL automatique est disponible." },
@@ -499,8 +515,8 @@ export async function POST(request: NextRequest) {
     // If the zone is unknown but we have a PDF, ask Gemini to identify zones
     // from the document. This eliminates the edge case where Gemini has a
     // real PLU PDF but doesn't know which zone to extract rules for.
-    if ((!pluZone || pluZone === "non spécifiée") && uploadedFileUris.length > 0) {
-      console.log(`[analyze-plu] ▶ Zone unknown — running zone detection pre-pass...`);
+    if ((!pluZone || pluZone === "non spécifiée") && uploadedFileUris.length > 0 && hasTimeLeft(70_000)) {
+      console.log(`[analyze-plu] ▶ Zone unknown — running zone detection pre-pass... (${(remainingMs() / 1000).toFixed(0)}s remaining)`);
       try {
         const zoneDetectionResult = await callGeminiWithFileApi(
           genAI,
@@ -623,11 +639,15 @@ Rules:
     };
 
     const t0 = Date.now();
-    // Run both calls — extraction runs if we have PDF OR extracted text
+    // Dynamic timeout: leave 15s buffer for JSON parsing + response
+    const perCallTimeout = Math.min(GEMINI_CALL_TIMEOUT_MS, Math.max(remainingMs() - 15_000, 10_000));
+    console.log(`[analyze-plu] ▶ Starting Gemini calls (timeout per call: ${(perCallTimeout / 1000).toFixed(0)}s, remaining budget: ${(remainingMs() / 1000).toFixed(0)}s)`);
+
+    // Run both calls in parallel — extraction runs if we have PDF OR extracted text
     const geminiCalls: [Promise<string | null>, Promise<string | null>] = [
-      callGeminiWithFileApi(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, uploadedFileUris, qualitativeConfig),
+      callGeminiWithFileApi(genAI, qualitativeSystemPrompt, qualitativeUserPrompt, uploadedFileUris, qualitativeConfig, perCallTimeout),
       hasContent
-        ? callGeminiWithFileApi(genAI, extractionSystemPrompt, extractionUserPrompt, uploadedFileUris, extractionConfig)
+        ? callGeminiWithFileApi(genAI, extractionSystemPrompt, extractionUserPrompt, uploadedFileUris, extractionConfig, perCallTimeout)
         : Promise.resolve(null),
     ];
     const [qualResult, extractResult] = await Promise.allSettled(geminiCalls);
@@ -700,8 +720,8 @@ Rules:
     // retry extraction using the zone-focused text directly (no File API).
     // This handles the case where Gemini processes the full PDF but can't
     // find the right section, even though we have that section pre-extracted.
-    if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && zoneFocusedText && hasFileApiPdf) {
-      console.log(`[analyze-plu] ⚠ File API extraction returned ${countNullCriticalFields(pluRules)} null fields — retrying with zone-focused text directly (Layer 2)`);
+    if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && zoneFocusedText && hasFileApiPdf && hasTimeLeft(35_000)) {
+      console.log(`[analyze-plu] ⚠ File API extraction returned ${countNullCriticalFields(pluRules)} null fields — retrying with zone-focused text directly (Layer 2, ${(remainingMs() / 1000).toFixed(0)}s remaining)`);
       try {
         const textOnlyPrompt = `${extractionUserPrompt}\n\n--- TEXTE RÉGLEMENTAIRE EXTRAIT POUR LA ZONE ${pluZone.toUpperCase()} ---\n${zoneFocusedText}\n--- FIN ---\n\nATTENTION: Le PDF complet n'a pas été analysé avec succès. Analysez le texte ci-dessus qui contient les règles pour la zone ${pluZone}. Extrayez TOUTES les valeurs numériques et qualitatives présentes.`;
         const layer2Result = await callGeminiWithFileApi(
@@ -759,11 +779,9 @@ Rules:
     // retry once with a simpler, focused prompt asking only for the 4 most
     // critical fields: CES, maxHeight, setbacks.front, setbacks.side.
     let retried = false;
-    const elapsedMs = Date.now() - t0;
-    const RETRY_TIME_BUDGET_MS = 95_000; // Skip retry if we've used >95s of 120s budget
 
-    if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && hasContent && elapsedMs < RETRY_TIME_BUDGET_MS) {
-      console.log(`[analyze-plu] ⚠ ${countNullCriticalFields(pluRules)} critical fields are null — initiating retry with simplified prompt (elapsed: ${(elapsedMs / 1000).toFixed(1)}s)`);
+    if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && hasContent && hasTimeLeft(25_000)) {
+      console.log(`[analyze-plu] ⚠ ${countNullCriticalFields(pluRules)} critical fields are null — initiating retry with simplified prompt (${(remainingMs() / 1000).toFixed(0)}s remaining)`);
       retried = true;
 
       const retrySystemPrompt = `You are a French urban planning regulation parser. Extract ONLY the 4 most critical numeric values from the PLU document for zone "${pluZone}". Do NOT invent values — use null if not found.
@@ -842,8 +860,8 @@ ${zoneFocusedText ? `\n--- TEXTE ZONE ${pluZone.toUpperCase()} ---\n${zoneFocuse
       } catch (err) {
         console.warn(`[analyze-plu] ⚠ Retry Gemini call failed:`, (err as Error).message);
       }
-    } else if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && elapsedMs >= RETRY_TIME_BUDGET_MS) {
-      console.warn(`[analyze-plu] ⚠ ${countNullCriticalFields(pluRules)} critical fields are null but retry SKIPPED — time budget exceeded (${(elapsedMs / 1000).toFixed(1)}s >= ${RETRY_TIME_BUDGET_MS / 1000}s)`);
+    } else if (extractOk && countNullCriticalFields(pluRules) > NULL_THRESHOLD && !hasTimeLeft(25_000)) {
+      console.warn(`[analyze-plu] ⚠ ${countNullCriticalFields(pluRules)} critical fields are null but retry SKIPPED — time budget exceeded (${(remainingMs() / 1000).toFixed(0)}s remaining)`);
     }
 
     // ── 8. Merge zone-aware defaults into PluRules ────────────────────────
@@ -971,6 +989,7 @@ function cleanupTmpFiles(paths: string[]) {
 /**
  * Call Gemini with Google File API URIs instead of Base64 inline data.
  * Falls back to text-only mode if the file parts cause a 400 error.
+ * Has a REAL timeout — if Gemini doesn't respond within timeoutMs, the call is abandoned.
  */
 async function callGeminiWithFileApi(
   genAI: GoogleGenerativeAI,
@@ -978,6 +997,7 @@ async function callGeminiWithFileApi(
   userPrompt: string,
   fileParts: { fileData: { fileUri: string; mimeType: string } }[],
   generationConfig: GenerationConfig,
+  timeoutMs: number = GEMINI_CALL_TIMEOUT_MS,
 ): Promise<string | null> {
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
@@ -985,48 +1005,72 @@ async function callGeminiWithFileApi(
     generationConfig,
   });
 
-  const timeout = setTimeout(() => {}, API_TIMEOUT_MS);
+  // Real timeout via Promise.race — if Gemini hangs, we move on
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Gemini call timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+  );
 
   try {
     // Attempt 1: with File API parts
     try {
-      const result = await model.generateContent({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              ...fileParts,
-              { text: userPrompt },
-            ],
-          },
-        ],
-      });
-      return result.response.text();
-    } catch (firstErr) {
-      const errMsg = (firstErr as Error).message || "";
-      const is400 = errMsg.includes("400") || errMsg.includes("Bad Request") || errMsg.includes("invalid argument");
-
-      // If the error is a 400 and we had file parts, retry WITHOUT files (text-only)
-      if (is400 && fileParts.length > 0) {
-        console.warn(`[analyze-plu] ⚠ Gemini 400 with File API PDF — retrying text-only (PDF may be corrupted, scanned, or too complex)`);
-        const retryResult = await model.generateContent({
+      const result = await Promise.race([
+        model.generateContent({
           contents: [
             {
               role: "user",
               parts: [
-                { text: `[NOTE: Le document PDF n'a pas pu être analysé directement. Réponds en te basant UNIQUEMENT sur les informations textuelles fournies dans le prompt système et ci-dessous. Indique clairement dans tes réponses que l'analyse est basée sur les informations du projet et non sur le document PLU.]\n\n${userPrompt}` },
+                ...fileParts,
+                { text: userPrompt },
               ],
             },
           ],
-        });
+        }),
+        timeoutPromise,
+      ]);
+      return result.response.text();
+    } catch (firstErr) {
+      const errMsg = (firstErr as Error).message || "";
+      const isTimeout = errMsg.includes("timed out");
+      const is400 = errMsg.includes("400") || errMsg.includes("Bad Request") || errMsg.includes("invalid argument");
+
+      // If timeout, just return null — don't retry
+      if (isTimeout) {
+        console.warn(`[analyze-plu] ⚠ Gemini call timed out after ${timeoutMs / 1000}s — skipping`);
+        return null;
+      }
+
+      // If the error is a 400 and we had file parts, retry WITHOUT files (text-only)
+      if (is400 && fileParts.length > 0) {
+        console.warn(`[analyze-plu] ⚠ Gemini 400 with File API PDF — retrying text-only (PDF may be corrupted, scanned, or too complex)`);
+        const retryTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Gemini text-only retry timed out`)), timeoutMs)
+        );
+        const retryResult = await Promise.race([
+          model.generateContent({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: `[NOTE: Le document PDF n'a pas pu être analysé directement. Réponds en te basant UNIQUEMENT sur les informations textuelles fournies dans le prompt système et ci-dessous. Indique clairement dans tes réponses que l'analyse est basée sur les informations du projet et non sur le document PLU.]\n\n${userPrompt}` },
+                ],
+              },
+            ],
+          }),
+          retryTimeout,
+        ]);
         return retryResult.response.text();
       }
 
       // Not a 400 or no file parts — rethrow
       throw firstErr;
     }
-  } finally {
-    clearTimeout(timeout);
+  } catch (err) {
+    // Catch-all: if anything goes wrong, return null instead of crashing
+    const msg = (err as Error).message || "";
+    if (!msg.includes("timed out")) {
+      console.warn(`[analyze-plu] ⚠ Gemini call failed:`, msg.slice(0, 200));
+    }
+    return null;
   }
 }
 

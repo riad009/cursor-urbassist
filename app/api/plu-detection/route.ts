@@ -257,7 +257,10 @@ export async function POST(request: NextRequest) {
         // ── Extract PDF URL from zone properties ──────────────────────
         // Strategy: gpu_doc_id + nomfic → real GPU download endpoint
         const gpuDocId = (zone.gpu_doc_id ?? zone.GPU_DOC_ID) as string | undefined;
-        const nomfic = (zone.nomfic ?? zone.NOMFIC) as string | undefined;
+        const rawNomfic = (zone.nomfic ?? zone.NOMFIC) as string | undefined;
+        // Strip page anchors (e.g., "reglement.pdf#page=205" → "reglement.pdf")
+        // GPU API returns these for navigation but they break download URLs
+        const nomfic = rawNomfic?.split("#")[0];
         if (gpuDocId && nomfic && gpuDocId.trim() && nomfic.trim()) {
           pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document/${gpuDocId.trim()}/files/${encodeURIComponent(nomfic.trim())}`;
         }
@@ -286,7 +289,8 @@ export async function POST(request: NextRequest) {
           const docGpuId = (doc.gpu_doc_id ?? doc.GPU_DOC_ID ?? doc.id) as string | undefined;
           // nomfic comes from the zone, not the document layer, but we can try the zone again
           const bestZone = pickBestZone(zoneFeatures as Array<{ properties?: Record<string, unknown> }>);
-          const zoneNomfic = (bestZone?.nomfic ?? bestZone?.NOMFIC) as string | undefined;
+          const rawZoneNomfic = (bestZone?.nomfic ?? bestZone?.NOMFIC) as string | undefined;
+          const zoneNomfic = rawZoneNomfic?.split("#")[0]; // Strip page anchors
           if (docGpuId && zoneNomfic && docGpuId.trim() && zoneNomfic.trim()) {
             pluInfo.pdfUrl = `https://www.geoportail-urbanisme.gouv.fr/api/document/${docGpuId.trim()}/files/${encodeURIComponent(zoneNomfic.trim())}`;
           }

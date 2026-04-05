@@ -917,6 +917,18 @@ export default function ProjectDescriptionPage({
             const data: Record<string, unknown> = await res.json();
 
             if (!res.ok) {
+                const isDownloadFailed = (data as Record<string, unknown>).downloadFailed === true;
+                if (isDownloadFailed) {
+                    // PDF URL was provided but the file doesn't exist (404) — tell user to upload manually
+                    clearInterval(interval);
+                    setGenerationError(
+                        "⚠ Le document PLU automatique n'a pas pu être téléchargé (fichier introuvable sur le serveur national). " +
+                        "Veuillez télécharger le règlement depuis le site de votre mairie et l'importer manuellement via le bouton « Importer un fichier PDF » ci-dessus, puis relancer l'analyse."
+                    );
+                    setAnalysisProgress(100);
+                    setAnalysisComplete(true);
+                    return;
+                }
                 throw new Error((data.error as string) || "L'analyse du document a échoué.");
             }
 
@@ -1019,7 +1031,13 @@ export default function ProjectDescriptionPage({
         } catch (err) {
             clearInterval(interval);
             console.error("PLU Analysis failed:", err);
-            setGenerationError(err instanceof Error ? err.message : "Erreur de connexion. Veuillez réessayer.");
+            const msg = err instanceof Error ? err.message : "";
+            const isTimeout = msg.includes("abort") || msg.includes("timeout") || msg.includes("TimeoutError");
+            setGenerationError(
+                isTimeout
+                    ? "⏱ L'analyse a pris trop de temps. Le document est peut-être trop volumineux. Veuillez réessayer ou uploader un fichier PDF plus léger."
+                    : (msg || "Erreur de connexion. Veuillez réessayer.")
+            );
             setAnalysisProgress(100);
             setAnalysisComplete(true);
         }
