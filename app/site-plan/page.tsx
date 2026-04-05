@@ -992,18 +992,23 @@ function SitePlanContent() {
   useEffect(() => {
     if (!currentProjectId) { setProjectData(null); return; }
 
+    // AbortController prevents stale responses from old project IDs
+    const controller = new AbortController();
+
     // Retry logic: transient fetch failures (cold start, network glitch) shouldn't leave page blank
     const MAX_RETRIES = 3;
     let attempt = 0;
 
     const loadProject = () => {
       attempt++;
-      fetch(`/api/projects/${currentProjectId}`)
+      fetch(`/api/projects/${currentProjectId}`, { signal: controller.signal })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
         })
         .then((d) => {
+          // Stale check: if abort was called while parsing JSON, bail out
+          if (controller.signal.aborted) return;
           const p = d.project;
           if (!p) { setProjectData(null); return; }
           const ai = p.regulatoryAnalysis?.aiAnalysis as any;
@@ -1026,6 +1031,7 @@ function SitePlanContent() {
             parcelsGeoJSON: p.parcelsGeoJSON ?? null,
             existingBuildingsGeoJSON: p.existingBuildingsData ?? null,
             precomputedSiteData: p.processedSiteData ?? null,
+            pluSetbacks: ai?.setbacks ?? undefined,
           });
 
           // ── COMPUTE SHIFT: Load pre-computed ProcessedSiteData from DB ──
@@ -1039,6 +1045,8 @@ function SitePlanContent() {
           }
         })
         .catch((err) => {
+          // AbortError is expected on cleanup — don't retry
+          if (err instanceof DOMException && err.name === "AbortError") return;
           console.warn(`[site-plan] Project fetch attempt ${attempt}/${MAX_RETRIES} failed:`, err);
           if (attempt < MAX_RETRIES) {
             setTimeout(loadProject, 1000); // Retry after 1 second
@@ -1050,6 +1058,9 @@ function SitePlanContent() {
     };
 
     loadProject();
+
+    // Cleanup: abort any in-flight fetch when project changes or component unmounts
+    return () => controller.abort();
   }, [currentProjectId]);
 
   // ── Sync project data into editor store for persistence ──
@@ -1804,15 +1815,53 @@ function SitePlanContent() {
         return sum;
       }, 0);
 
+      // ── Fix #3: Calculate footprintExisting from existing buildings ──────
+      // buildingDetails tracks buildings with isExisting flag
+      let footprintExisting = 0;
+      const countedBuildingIds = new Set<string>();
+      buildingDetails.forEach((b) => {
+        if (b.isExisting) {
+          footprintExisting += b.width * b.depth;
+          countedBuildingIds.add(b.id);
+        }
+      });
+      // Also check canvas objects for isExistingBuilding flag (IGN imports etc.)
+      // but skip objects already counted via buildingDetails (linked by buildingDetailId)
+      canvas.getObjects().forEach((o: any) => {
+        if (o.isExistingBuilding && o.width != null && o.height != null) {
+          if (o.buildingDetailId && countedBuildingIds.has(o.buildingDetailId)) return;
+          footprintExisting += toM(o.width * (o.scaleX || 1)) * toM(o.height * (o.scaleY || 1));
+        }
+      });
+
+      // ── Fix #4: Compute surfaceAreas from canvas element surfaceTypes ───
+      const surfaceAreas = { green: 0, semiPermeable: 0, impermeable: 0, parking: 0 };
+      elementsToSend.forEach((e: any) => {
+        const area = Number(e.area) || 0;
+        if (!area) return;
+        const st = String(e.surfaceType || "").toLowerCase();
+        if (st === "green" || st === "vegetation" || st === "garden" || st === "lawn") {
+          surfaceAreas.green += area;
+        } else if (st === "gravel" || st === "permeable" || st === "semi_permeable") {
+          surfaceAreas.semiPermeable += area;
+        } else if (st === "concrete" || st === "asphalt" || st === "impermeable" || st === "paved") {
+          surfaceAreas.impermeable += area;
+        } else if (st === "parking") {
+          surfaceAreas.parking += 1; // count parking spots
+        }
+      });
+
       const res = await fetch(`/api/projects/${currentProjectId}/site-plan`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           canvasData, elements: elementsToSend,
           footprintProjected: projected + (projectData?.includeOverhangInFootprint ? totalOverhang : 0),
+          footprintExisting,
           footprintMax: footprintMax ?? 200,
           northAngle: projectData?.northAngle ?? null,
           building3D: buildingDetails.length > 0 ? { buildings: buildingDetails } : null,
+          surfaceAreas,
         }),
       });
 

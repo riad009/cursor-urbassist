@@ -22,6 +22,7 @@ import { jsPDF } from "jspdf";
 import { DossierProjectData, GeneratorResult, JobEntry } from "./types";
 import { A3L, drawFooter } from "./shared";
 import { getBuildingData, getParcelDimensions, getNGFValue } from "./svg-helpers";
+import { extractProjectData } from "./extract-project-data";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PUBLIC
@@ -32,10 +33,12 @@ export async function generatePC3(
   project: DossierProjectData,
   _capturedImages?: Record<string, string | undefined>,
 ): Promise<GeneratorResult> {
-  const building = getBuildingData(project);
-  const parcel   = getParcelDimensions(project.parcelGeometry, project.parcelArea);
-  const ngf      = getNGFValue(project);
-  const jobs     = (project.projectDescription?.jobs || []) as JobEntry[];
+  const extracted = extractProjectData(project);
+  const building = extracted.building;
+  const parcel   = extracted.parcel;
+  const ngf      = extracted.ngfAltitude;
+  const jobs     = extracted.jobs;
+  const terrain  = extracted.terrain;
 
   const { W, M, H, FOOTER_H } = A3L;
   const cW = W - M * 2; // 400 mm
@@ -64,11 +67,11 @@ export async function generatePC3(
 
   // ── PANEL 1: Existant (always show main building) ─────────────────────
   drawCrossPanel(doc, M, topY, cW, panelH,
-    "COUPE GÉNÉRALE AA - Existant", parcel, building, ngf, false, jobs);
+    "COUPE GÉNÉRALE AA - Existant", parcel, building, ngf, false, jobs, terrain);
 
   // ── PANEL 2: Projeté (main building + any additions) ──────────────────
   drawCrossPanel(doc, M, topY + panelH + gap, cW, panelH,
-    "COUPE GÉNÉRALE AA - Projeté", parcel, building, ngf, true, jobs);
+    "COUPE GÉNÉRALE AA - Projeté", parcel, building, ngf, true, jobs, terrain);
 
   // ── footer ─────────────────────────────────────────────────────────────
   drawFooter(doc, {
@@ -142,6 +145,7 @@ function drawCrossPanel(
   ngf: number,
   isProjected: boolean,
   jobs: JobEntry[],
+  terrain: { slopeDeg: number; hasRealData: boolean },
 ) {
   /* ┌─────────────────────────────────────────────────────────────────┐
    * │  0 –  8% : dimension lines above building                     │
@@ -179,6 +183,16 @@ function drawCrossPanel(
   for (let gx = bx + 2; gx < bx + bw - 2; gx += 2.5) {
     doc.line(gx, groundY, gx - 0.7, groundY - 1.2);
     doc.line(gx + 1.0, groundY, gx + 0.4, groundY - 1.0);
+  }
+
+  // ── terrain slope annotation (from real elevation data when available) ──
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(5);
+  doc.setTextColor(100, 116, 139);
+  if (terrain.hasRealData && terrain.slopeDeg > 0.5) {
+    doc.text(`Pente TN ≈ ${terrain.slopeDeg.toFixed(1)}°`, bx + bw * 0.5, groundY + 3, { align: "center" });
+  } else if (!terrain.hasRealData) {
+    doc.text("(Profil terrain estimé — valider sur site)", bx + bw * 0.5, groundY + 3, { align: "center" });
   }
 
   // ── red dashed property boundaries (CLIPPED to this panel only) ──

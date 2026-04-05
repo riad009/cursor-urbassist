@@ -50,28 +50,99 @@ export interface BuildingDims {
   roofColor: string;
   wallMaterial: string;
   wallColor: string;
+  name?: string;        // building label for annotations
 }
 
-/** Extract building dimensions from project data with sensible defaults */
+/**
+ * Extract building dimensions from project data with sensible defaults.
+ *
+ * The 2D editor saves building3D as `{ buildings: [BuildingDetail, ...] }`.
+ * Each BuildingDetail has nested objects:
+ *   wallHeights: { ground, first, second }
+ *   roof: { type, pitch, overhang, material }
+ *   materials: { walls, roof, facade }
+ *
+ * We unwrap buildings[0] and map nested paths to flat BuildingDims.
+ * Falls back to projectDescription.jobs[0], then hardcoded defaults.
+ */
 export function getBuildingData(project: DossierProjectData): BuildingDims {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const b3d = project.sitePlanData?.building3D as Record<string, any> | null;
+  const b3dRaw = project.sitePlanData?.building3D as Record<string, any> | null;
+
+  // Unwrap the buildings array wrapper — editor stores { buildings: [...] }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const b3d: Record<string, any> | null =
+    Array.isArray(b3dRaw?.buildings) && b3dRaw!.buildings.length > 0
+      ? b3dRaw!.buildings[0]
+      : b3dRaw;
+
   const jobs = (project.projectDescription?.jobs || []) as unknown as Array<Record<string, unknown>>;
   const mats = (project.projectDescription?.materials || {}) as Record<string, unknown>;
   const mainJob = jobs[0] || {};
 
-  return {
-    width: Number(b3d?.width) || Number(mainJob.footprint ? Math.sqrt(Number(mainJob.footprint)) : 0) || 8,
-    depth: Number(b3d?.depth) || Number(mainJob.footprint ? Math.sqrt(Number(mainJob.footprint)) * 0.75 : 0) || 6,
-    wallHeight: Number(b3d?.wallHeight) || Number(mainJob.wallHeight) || 2.5,
-    ridgeHeight: Number(b3d?.ridgeHeight) || Number(mainJob.ridgeHeight) || 3.2,
-    roofType: String(b3d?.roofType || mainJob.roofType || "gable"),
-    roofPitch: Number(b3d?.roofPitch) || Number(mainJob.roofPitch) || 30,
-    roofMaterial: String(b3d?.roofMaterial || (mats as Record<string, string>)?.roofCovering || (mats as Record<string, string>)?.roofMaterial || "Tuiles"),
-    roofColor: String(b3d?.roofColor || (mats as Record<string, string>)?.roofColor || "Gris anthracite"),
-    wallMaterial: String(b3d?.wallMaterial || (mats as Record<string, string>)?.wallMaterial || (mats as Record<string, string>)?.matExtMaterial || "Enduit"),
-    wallColor: String(b3d?.wallColor || (mats as Record<string, string>)?.wallColor || (mats as Record<string, string>)?.matExtColor || "Beige"),
+  // wallHeights is { ground, first, second } — extract ground floor height
+  const wallH =
+    Number(b3d?.wallHeights?.ground) ||
+    Number(b3d?.wallHeight) ||
+    Number(mainJob.wallHeight) ||
+    2.5;
+
+  // ridgeHeight: prefer stored value, else compute from wallHeight + 0.7m rise
+  const ridgeH =
+    Number(b3d?.ridgeHeight) ||
+    (Number(b3d?.wallHeights?.ground) > 0 ? Number(b3d?.wallHeights?.ground) + 0.7 : 0) ||
+    Number(mainJob.ridgeHeight) ||
+    3.2;
+
+  // Post-process: enforce invariants
+  const result: BuildingDims = {
+    width:
+      Number(b3d?.width) ||
+      Number(mainJob.footprint ? Math.sqrt(Number(mainJob.footprint)) : 0) ||
+      8,
+    depth:
+      Number(b3d?.depth) ||
+      Number(mainJob.footprint ? Math.sqrt(Number(mainJob.footprint)) * 0.75 : 0) ||
+      6,
+    wallHeight: wallH,
+    ridgeHeight: ridgeH,
+
+    // roof is nested: roof.type, roof.pitch
+    roofType: String(b3d?.roof?.type || b3d?.roofType || mainJob.roofType || "gable"),
+    roofPitch: Number(b3d?.roof?.pitch || b3d?.roofPitch) || Number(mainJob.roofPitch) || 30,
+
+    // materials is nested: materials.walls, roof.material
+    roofMaterial: String(
+      b3d?.roof?.material ||
+      b3d?.materials?.roof ||
+      b3d?.roofMaterial ||
+      (mats as Record<string, string>)?.roofCovering ||
+      (mats as Record<string, string>)?.roofMaterial ||
+      "Tuiles"
+    ),
+    roofColor: String(b3d?.roofColor || (mats as Record<string, string>)?.roofColor || ""),
+    wallMaterial: String(
+      b3d?.materials?.walls ||
+      b3d?.wallMaterial ||
+      (mats as Record<string, string>)?.wallMaterial ||
+      (mats as Record<string, string>)?.matExtMaterial ||
+      "Enduit"
+    ),
+    wallColor: String(b3d?.wallColor || (mats as Record<string, string>)?.wallColor || (mats as Record<string, string>)?.matExtColor || ""),
+    name: String(b3d?.name || "Construction projetée"),
   };
+
+  // Enforce: ridgeHeight must always exceed wallHeight
+  if (result.ridgeHeight <= result.wallHeight) {
+    result.ridgeHeight = result.wallHeight + 0.7;
+  }
+
+  // Enforce minimum dimensions (avoid 0-width/height buildings)
+  if (result.width < 1) result.width = 8;
+  if (result.depth < 1) result.depth = 6;
+  if (result.wallHeight < 1) result.wallHeight = 2.5;
+
+  return result;
 }
 
 // ─── Parcel Dimensions ─────────────────────────────────────────────────────
@@ -131,16 +202,39 @@ function extractAllCoords(geoJson: any): number[][] {
 /** Get NGF altitude from terrain data */
 export function getNGFValue(project: DossierProjectData): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const td = project.terrainData?.elevationPoints as any;
+  const terrain = project.terrainData as Record<string, any> | null;
+  if (!terrain) return 0;
+
+  // Priority 1: elevationPoints array — IGN API stores as { z } not { elevation }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const td = terrain.elevationPoints as any;
   if (Array.isArray(td) && td.length > 0) {
-    const elev = td.find((p: Record<string, unknown>) => typeof p.elevation === "number");
-    if (elev) return Math.round(Number(elev.elevation) * 100) / 100;
+    // Check both field names: z (IGN RGE Alti), elevation (legacy)
+    const elev = td.find((p: Record<string, unknown>) =>
+      typeof p.z === "number" || typeof p.elevation === "number"
+    );
+    if (elev) {
+      const val = typeof elev.z === "number" ? elev.z : Number(elev.elevation);
+      if (val > -9999) return Math.round(val * 100) / 100;
+    }
   }
+
+  // Priority 2: stats object from terrain-elevation API response
+  if (typeof terrain.stats === "object" && terrain.stats !== null) {
+    if (typeof terrain.stats.mean === "number" && terrain.stats.mean > -9999)
+      return Math.round(terrain.stats.mean * 100) / 100;
+    if (typeof terrain.stats.min === "number" && terrain.stats.min > -9999)
+      return Math.round(terrain.stats.min * 100) / 100;
+  }
+
+  // Priority 3: elevationPoints as object (non-array)
   if (typeof td === "object" && td !== null && !Array.isArray(td)) {
     if (typeof td.averageElevation === "number") return Math.round(td.averageElevation * 100) / 100;
     if (typeof td.minElevation === "number") return Math.round(td.minElevation * 100) / 100;
   }
-  return 64.75; // Default NGF for Île-de-France
+
+  // No terrain data available — return 0 instead of hardcoded Paris value
+  return 0;
 }
 
 // ─── Reusable SVG Fragments ────────────────────────────────────────────────

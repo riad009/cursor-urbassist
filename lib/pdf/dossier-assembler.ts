@@ -62,6 +62,10 @@ export async function generateSingleDocument(
 
 /**
  * Assemble the full dossier (PC1 through PC5.2) into a single multi-page PDF.
+ *
+ * Each generator is wrapped in a try/catch — if one fails, an error page
+ * is inserted and generation continues. A user should NEVER receive a
+ * blank dossier because a single map fetch timed out.
  */
 export async function assembleDossier(
   projectData: DossierProjectData,
@@ -78,38 +82,113 @@ export async function assembleDossier(
   // ═══ PC1 — Plan de Situation (1 page: 3 views combined) ═══
   onProgress?.("PC1 — Plan de Situation...", 15);
   doc.addPage([420, 297], "landscape");
-  const r1 = await generatePC1(doc, projectData, baseUrl, (msg) =>
-    onProgress?.(msg, 30)
-  );
-  results.push(r1);
+  try {
+    const r1 = await generatePC1(doc, projectData, baseUrl, (msg) =>
+      onProgress?.(msg, 30)
+    );
+    results.push(r1);
+  } catch (err) {
+    console.error("[dossier] PC1 generation failed:", err);
+    drawErrorPage(doc, "PCMI 1", "Plan de Situation", err);
+  }
 
   // ═══ PC2 — Plan de Masse ═══
   onProgress?.("PC2 — Plan de Masse...", 45);
   doc.addPage([420, 297], "landscape");
-  const r2 = await generatePC2(doc, projectData, capturedImages);
-  results.push(r2);
+  try {
+    const r2 = await generatePC2(doc, projectData, capturedImages);
+    results.push(r2);
+  } catch (err) {
+    console.error("[dossier] PC2 generation failed:", err);
+    drawErrorPage(doc, "PCMI 2", "Plan de Masse", err);
+  }
 
   // ═══ PC3 — Plan en Coupe ═══
   onProgress?.("PC3 — Plan en Coupe...", 60);
   doc.addPage([420, 297], "landscape");
-  const r3 = await generatePC3(doc, projectData);
-  results.push(r3);
+  try {
+    const r3 = await generatePC3(doc, projectData);
+    results.push(r3);
+  } catch (err) {
+    console.error("[dossier] PC3 generation failed:", err);
+    drawErrorPage(doc, "PCMI 3", "Plan en Coupe", err);
+  }
 
   // ═══ PC4 — Notice Descriptive ═══
   onProgress?.("PC4 — Notice Descriptive...", 75);
   doc.addPage([420, 297], "landscape");
-  const r4 = await generatePC4(doc, projectData);
-  results.push(r4);
+  try {
+    const r4 = await generatePC4(doc, projectData);
+    results.push(r4);
+  } catch (err) {
+    console.error("[dossier] PC4 generation failed:", err);
+    drawErrorPage(doc, "PCMI 4", "Notice Descriptive", err);
+  }
 
   // ═══ PC5 — Plans des Façades ═══
   onProgress?.("PC5 — Plans des Façades...", 90);
   doc.addPage([420, 297], "landscape");
-  const r5 = await generatePC5(doc, projectData);
-  results.push(r5);
+  try {
+    const r5 = await generatePC5(doc, projectData);
+    results.push(r5);
+  } catch (err) {
+    console.error("[dossier] PC5 generation failed:", err);
+    drawErrorPage(doc, "PCMI 5", "Plans des Façades", err);
+  }
 
   onProgress?.("Finalisation du dossier...", 98);
 
   return doc;
+}
+
+// ─── Error page (used when a generator fails) ──────────────────────────────
+
+function drawErrorPage(doc: jsPDF, pcmiNumber: string, docTitle: string, err: unknown) {
+  const { W, H } = A3L;
+
+  // Light grey background
+  doc.setFillColor(248, 250, 252);
+  doc.rect(0, 0, W, H, "F");
+
+  // Warning icon area
+  doc.setFillColor(254, 243, 199); // amber-100
+  doc.roundedRect(W / 2 - 30, H * 0.3, 60, 60, 30, 30, "F");
+
+  doc.setTextColor(217, 119, 6); // amber-600
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(28);
+  doc.text("!", W / 2, H * 0.3 + 38, { align: "center" });
+
+  // Error title
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(16);
+  doc.text(`Échec de génération — ${pcmiNumber}`, W / 2, H * 0.55, { align: "center" });
+
+  // Subtitle
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  doc.text(docTitle, W / 2, H * 0.6, { align: "center" });
+
+  // Error detail
+  const errMsg = err instanceof Error ? err.message : String(err);
+  doc.setFontSize(7);
+  doc.text(`Erreur: ${errMsg.slice(0, 120)}`, W / 2, H * 0.67, { align: "center" });
+
+  doc.setFontSize(8);
+  doc.text(
+    "Ce document peut être régénéré individuellement depuis le tableau de bord du dossier.",
+    W / 2,
+    H * 0.73,
+    { align: "center" }
+  );
+
+  // Footer
+  drawFooter(doc, {
+    docTitle: `${docTitle} (ERREUR)`,
+    pcmiNumber,
+    scale: "—",
+  });
 }
 
 // ─── Cover page ────────────────────────────────────────────────────────────

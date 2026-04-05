@@ -27,6 +27,7 @@ import { jsPDF } from "jspdf";
 import { DossierProjectData, GeneratorResult, JobEntry, MaterialsData } from "./types";
 import { A3L, drawFooter, formatDateFR } from "./shared";
 import { getSurfaceAreas } from "./svg-helpers";
+import { extractProjectData } from "./extract-project-data";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    HELPERS
@@ -73,9 +74,12 @@ export async function generatePC4(
   doc: jsPDF,
   project: DossierProjectData
 ): Promise<GeneratorResult> {
+  const extracted = extractProjectData(project);
   const desc      = project.projectDescription;
-  const jobs      = (desc?.jobs || []) as JobEntry[];
+  const jobs      = extracted.jobs;
+  // Keep original MaterialsData for buildSections (requires index signature)
   const mats      = (desc?.materials || {}) as MaterialsData;
+  const regulatory = extracted.regulatory;
   const { W, M, H, FOOTER_H } = A3L;
   const maxY = H - FOOTER_H - 8;
 
@@ -158,6 +162,12 @@ export async function generatePC4(
   const textW = rightColX - M - 6;
   let curY = M + 4;
   const sections = buildSections(project, jobs, mats);
+
+  // Inject regulatory zone info into section 1 (État initial) if available
+  if (regulatory.hasRealData && regulatory.zoneType && sections.length > 0) {
+    const zoneNote = `La parcelle est classée en zone ${regulatory.zoneType} au Plan Local d'Urbanisme (PLU) de la commune.`;
+    sections[0].paragraphs.splice(1, 0, zoneNote);
+  }
 
   for (const sec of sections) {
     if (curY > maxY - 8) break;

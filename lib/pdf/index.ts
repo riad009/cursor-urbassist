@@ -9,4 +9,6 @@ export { generatePC4 } from "./pc4-generator";
 export { generatePC5 } from "./pc5-generator";
 export { assembleDossier, fetchDossierData, generateSingleDocument } from "./dossier-assembler";
 export { createA3Doc, drawFooter, drawScaleBar, drawNorthArrow, sanitizeFilename } from "./shared";
+export { extractProjectData } from "./extract-project-data";
+export type { ExtractedProjectData } from "./extract-project-data";
 export type { DossierProjectData, CapturedImages, GeneratorResult } from "./types";

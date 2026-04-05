@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
         elevationData: true,
         sectionData: true,
         descriptiveStatement: true,
+        regulatoryAnalysis: true,
       },
     });
 
@@ -98,6 +99,14 @@ export async function GET(request: NextRequest) {
             answers: project.descriptiveStatement.answers,
             generatedText: project.descriptiveStatement.generatedText,
             sections: project.descriptiveStatement.sections,
+          }
+        : null,
+      regulatoryData: project.regulatoryAnalysis
+        ? {
+            zoneType: project.regulatoryAnalysis.zoneType,
+            aiAnalysis: project.regulatoryAnalysis.aiAnalysis as Record<string, unknown> | null,
+            constraints: project.regulatoryAnalysis.constraints,
+            protectedZones: project.regulatoryAnalysis.protectedZones,
           }
         : null,
     };

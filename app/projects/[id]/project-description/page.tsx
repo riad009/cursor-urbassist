@@ -140,6 +140,7 @@ const PC_DOCS: DocEntry[] = [
 
 import PC4InlinePreview from "@/components/documents/PC4InlinePreview";
 import PC51InlinePreview from "@/components/documents/PC51InlinePreview";
+import PC52InlinePreview from "@/components/documents/PC52InlinePreview";
 
 const PC1LocationPlan = dynamic(
     () => import("@/components/project-description/PC1LocationPlan"),
@@ -3289,47 +3290,12 @@ export default function ProjectDescriptionPage({
                                                             jobs={jobs as unknown as Array<Record<string, unknown>>}
                                                         />
                                                     ) : selectedDoc === "PC5.2" ? (
-                                                        /* ═══ PC5.2 — Facades (Project) ═══ */
-                                                        <div className="bg-white">
-                                                            <div className="bg-gradient-to-r from-rose-800 to-rose-700 px-8 py-5 text-white">
-                                                                <div className="flex items-center justify-between">
-                                                                    <div>
-                                                                        <h2 className="text-sm font-black uppercase tracking-wider">PC5.2 — {isEn ? "Facades – Project" : "Façades – Projet"}</h2>
-                                                                        <p className="text-xs text-rose-200 mt-1">{isEn ? "Proposed construction appearance" : "Aspect de la construction projetée"}</p>
-                                                                    </div>
-                                                                    <div className="text-right text-xs text-rose-200">
-                                                                        <p>{isEn ? "Scale: 1/100" : "Échelle : 1/100"}</p>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div className="px-6 py-5">
-                                                                {capturedImages['PC5.2'] ? (
-                                                                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                                                                        <img src={capturedImages['PC5.2']} alt="3D facade view" className="w-full h-auto" />
-                                                                        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-center">
-                                                                            {isEn ? "3D perspective — captured from the site plan editor" : "Perspective 3D — capturée depuis l'éditeur de plan de masse"}
-                                                                        </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="border-2 border-dashed border-rose-200 rounded-xl bg-rose-50/50 p-8 text-center">
-                                                                        <Layers className="w-10 h-10 text-rose-300 mx-auto mb-3" />
-                                                                        <p className="text-sm font-semibold text-rose-700">{isEn ? "Facade view not yet captured" : "Vue de façade non encore capturée"}</p>
-                                                                        <p className="text-xs text-rose-500 mt-1">{isEn ? "Return to the site plan editor and click \"Continue to Complete File\" to generate this orthographic front view from your 3D model." : "Retournez à l'éditeur de plan de masse et cliquez « Continuer vers le dossier complet » pour générer cette vue frontale orthographique depuis votre modèle 3D."}</p>
-                                                                    </div>
-                                                                )}
-                                                                {/* Materials summary */}
-                                                                <div className="mt-4 grid grid-cols-2 gap-3">
-                                                                    <div className="bg-rose-50 rounded-lg p-3 border border-rose-100">
-                                                                        <p className="text-[10px] font-bold text-rose-400 uppercase">{isEn ? "Walls" : "Murs"}</p>
-                                                                        <p className="text-sm font-medium text-rose-800">{existingFacade || wallMaterial || (isEn ? "To be defined" : "À définir")}</p>
-                                                                    </div>
-                                                                    <div className="bg-rose-50 rounded-lg p-3 border border-rose-100">
-                                                                        <p className="text-[10px] font-bold text-rose-400 uppercase">{isEn ? "Roofing" : "Toiture"}</p>
-                                                                        <p className="text-sm font-medium text-rose-800">{roofCovering || roofMaterial || (isEn ? "To be defined" : "À définir")}</p>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                        /* ═══ PC5.2 — Facades (Project) — Professional Elevations ═══ */
+                                                        <PC52InlinePreview
+                                                            projectData={projectData}
+                                                            projectAddress={projectAddress}
+                                                            jobs={jobs as unknown as Array<Record<string, unknown>>}
+                                                        />
                                                     ) : (
                                                         /* Fallback for any unhandled document codes */
                                                         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -3347,7 +3313,16 @@ export default function ProjectDescriptionPage({
                                         </div>
 
                                         {/* ── MANDATE 4 & 5: Navigation + Print/Download ── */}
-                                        <div className="flex items-center justify-between pt-4 pb-2">
+                                        {/* Save reminder banner */}
+                                        <div className="mt-4 mb-2 px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 flex items-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-amber-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
+                                            <p className="text-xs text-amber-800">
+                                                {isEn
+                                                    ? "Make sure to save your site plan before downloading the dossier."
+                                                    : "Assurez-vous d\u2019avoir sauvegardé votre plan avant de télécharger le dossier."}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center justify-between pt-2 pb-2">
                                             <div className="flex items-center gap-3">
                                                 {/* Back to 3D Editor */}
                                                 <button
@@ -3413,10 +3388,11 @@ export default function ProjectDescriptionPage({
                                                 {dossierGenerating ? (
                                                     <><Loader2 className="w-4 h-4 animate-spin" /> {dossierProgress.msg || (isEn ? "Generating..." : "Génération...")}</>
                                                 ) : (
-                                                    <><Download className="w-4 h-4" /> {isEn ? "Download Full Dossier (PDF)" : "Télécharger le dossier complet (PDF)"}</>
+                                                    <><Download className="w-4 h-4" /> {isEn ? "Download Complete Dossier (PDF)" : "Télécharger le dossier complet"}</>
                                                 )}
                                             </button>
                                         </div>
+
 
                                     </div>
                                 )}

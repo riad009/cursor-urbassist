@@ -26,6 +26,7 @@ export interface DossierProjectData {
   elevationData: ElevationDataRow[];
   sectionData: SectionDataRow[];
   descriptiveStatement: DescriptiveStatementRow | null;
+  regulatoryData: RegulatoryDataRow | null;
 }
 
 export interface ProjectDescriptionJSON {
@@ -128,6 +129,25 @@ export interface DescriptiveStatementRow {
   answers: unknown;
   generatedText: string | null;
   sections: unknown;
+}
+
+export interface RegulatoryDataRow {
+  zoneType: string | null;
+  aiAnalysis: {
+    maxCoverageRatio?: number;
+    maxHeight?: number;
+    minGreenPct?: number;
+    includeOverhangInFootprint?: boolean;
+    setbacks?: {
+      front?: number;
+      side?: number;
+      rear?: number;
+    };
+    greenSpaceRequirements?: string;
+    [key: string]: unknown;
+  } | null;
+  constraints: unknown;
+  protectedZones: unknown;
 }
 
 // ─── Generator output ──────────────────────────────────────────────────────

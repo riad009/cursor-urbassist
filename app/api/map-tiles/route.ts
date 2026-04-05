@@ -13,6 +13,30 @@ import { fetchThreeMapViews } from "@/lib/fetchStaticMap";
  *   Returns JSON { views } with base64 strings.
  */
 
+/** 1×1 transparent PNG — returned on upstream failure so Leaflet shows blank tiles */
+function transparentPngResponse(): NextResponse {
+    // Minimal valid PNG: 1×1 pixel, fully transparent
+    const PNG_1x1 = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+        0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, // IDAT chunk
+        0x54, 0x78, 0x9c, 0x62, 0x00, 0x00, 0x00, 0x02,
+        0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc, 0x00, 0x00, // IEND chunk
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42,
+        0x60, 0x82,
+    ]);
+    return new NextResponse(PNG_1x1, {
+        status: 200,
+        headers: {
+            "Content-Type": "image/png",
+            "Cache-Control": "public, max-age=60",
+            "Access-Control-Allow-Origin": "*",
+        },
+    });
+}
+
 const TILE_LAYERS: Record<string, { url: string; contentType: string }> = {
     AERIAL: {
         url: "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image%2Fjpeg",
@@ -58,12 +82,16 @@ export async function GET(request: NextRequest) {
         try {
             const res = await fetch(upstreamUrl, {
                 signal: AbortSignal.timeout(8_000),
-                headers: { Accept: "image/png,image/jpeg,image/*" },
+                headers: {
+                    Accept: "image/png,image/jpeg,image/*",
+                    "User-Agent": "UrbAssist/1.0 (urbassist.com)",
+                    Referer: "https://urbassist.com",
+                },
             });
 
             if (!res.ok) {
-                console.error("[map-tiles] failed:", upstreamUrl, res.status);
-                return new NextResponse(null, { status: 502 });
+                console.error("[map-tiles] upstream error:", upstreamUrl, res.status);
+                return transparentPngResponse();
             }
 
             const buf = await res.arrayBuffer();
@@ -75,8 +103,8 @@ export async function GET(request: NextRequest) {
                 },
             });
         } catch (err) {
-            console.error("[map-tiles] failed:", upstreamUrl, err);
-            return new NextResponse(null, { status: 502 });
+            console.error("[map-tiles] fetch error:", upstreamUrl, err);
+            return transparentPngResponse();
         }
     }
 
