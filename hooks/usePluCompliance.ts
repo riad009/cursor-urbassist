@@ -218,9 +218,12 @@ export function usePluCompliance(options: UsePluComplianceOptions): ComplianceRe
   }, [fabricCanvasRef, debouncedRecalculate, recalculate]);
 
   // Recalculate when PLU rules or scale change (non-canvas-event changes)
+  // Use serialized key to avoid infinite loop — pluRules is a new object ref each render
+  const pluKey = JSON.stringify(pluRules ?? null);
   useEffect(() => {
     recalculate();
-  }, [pluRules, pixelsPerMeter, parcelAreaM2, recalculate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pluKey, pixelsPerMeter, parcelAreaM2, recalculate]);
 
   // Track mounted state for async safety
   useEffect(() => {
