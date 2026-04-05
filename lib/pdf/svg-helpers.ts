@@ -54,6 +54,23 @@ export interface BuildingDims {
 }
 
 /**
+ * Extended building data for the elevation layout engine.
+ *
+ * Adds canvas spatial coordinates (for 1D orthographic projection)
+ * and the `isExisting` timeline flag (for PC5.1 vs PC5.2 filtration).
+ */
+export interface ElevationBuilding extends BuildingDims {
+  /** Center X on the 2D site plan canvas (meters, parcel-relative) */
+  siteX: number;
+  /** Center Y on the 2D site plan canvas (meters, parcel-relative) */
+  siteY: number;
+  /** true = existing structure (shown in PC5.1), false = new (shown only in PC5.2) */
+  isExisting: boolean;
+  /** Back-reference to BuildingDetail.id */
+  buildingId?: string;
+}
+
+/**
  * Extract building dimensions from project data with sensible defaults.
  *
  * The 2D editor saves building3D as `{ buildings: [BuildingDetail, ...] }`.

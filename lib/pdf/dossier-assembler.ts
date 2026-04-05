@@ -133,7 +133,7 @@ export async function assembleDossier(
     results.push(r5);
   } catch (err) {
     console.error("[dossier] PC5 generation failed:", err);
-    drawErrorPage(doc, "PCMI 5", "Plans des Façades", err);
+    drawErrorPage(doc, "PCMI 5.1 / 5.2", "Plans des Façades", err);
   }
 
   onProgress?.("Finalisation du dossier...", 98);
@@ -260,7 +260,8 @@ function drawCoverPage(doc: jsPDF, project: DossierProjectData) {
     "PCMI 2 — Plan de masse des constructions",
     "PCMI 3 — Plan en coupe du terrain et de la construction",
     "PCMI 4 — Notice descriptive",
-    "PCMI 5 — Plans des façades (état initial et projeté)",
+    "PCMI 5.1 — Façades et toitures (état initial)",
+    "PCMI 5.2 — Façades et toitures (état projeté)",
   ];
 
   doc.setFont("helvetica", "normal");

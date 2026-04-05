@@ -22,6 +22,7 @@ import {
   getNGFValue,
   getSurfaceAreas,
   type BuildingDims,
+  type ElevationBuilding,
   type ParcelDims,
   type SurfaceAreas,
 } from "./svg-helpers";
@@ -348,6 +349,206 @@ function getProjectIdentity(project: DossierProjectData): ProjectIdentity {
   };
 }
 
+// ─── Canvas Position Cross-Reference ───────────────────────────────────────
+
+/**
+ * Extract building canvas positions from the Fabric.js canvasData JSON.
+ *
+ * The site-plan editor stores building positions in the `canvasData` field.
+ * Each canvas object with a `buildingDetailId` represents a building on the
+ * 2D plan. We extract their center coordinates (in canvas pixels) and
+ * convert to meters using the project's scale.
+ */
+function getCanvasPositions(
+  project: DossierProjectData,
+): Map<string, { centerXm: number; centerYm: number }> {
+  const result = new Map<string, { centerXm: number; centerYm: number }>();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = project.sitePlanData?.canvasData as any;
+  if (!raw) return result;
+
+  // Determine scale (pixels per meter)
+  const scaleStr = project.scale || "1:100";
+  const scaleMatch = scaleStr.match(/(\d+)\s*:\s*(\d+)/);
+  // Default: 1:100 → 10 px/m (from SCALES constant in site-plan)
+  let pxPerM = 10;
+  if (scaleMatch) {
+    const ratio = Number(scaleMatch[2]) / Number(scaleMatch[1]);
+    // At 1:100 the editor uses 10px/m, at 1:50 → 20px/m, at 1:200 → 5px/m
+    pxPerM = 1000 / ratio;
+  }
+
+  try {
+    const canvasJson = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const objects = Array.isArray(canvasJson?.objects) ? canvasJson.objects : [];
+
+    for (const obj of objects) {
+      const bdId = obj.buildingDetailId || obj._buildingDetailId;
+      if (!bdId) continue;
+
+      const left = Number(obj.left) || 0;
+      const top = Number(obj.top) || 0;
+      const w = (Number(obj.width) || 0) * (Number(obj.scaleX) || 1);
+      const h = (Number(obj.height) || 0) * (Number(obj.scaleY) || 1);
+
+      // Fabric stores top-left corner; compute center
+      const centerXpx = left + w / 2;
+      const centerYpx = top + h / 2;
+
+      result.set(bdId, {
+        centerXm: centerXpx / pxPerM,
+        centerYm: centerYpx / pxPerM,
+      });
+    }
+  } catch {
+    // Canvas data is corrupted or unparseable — fall back to no positions
+  }
+
+  return result;
+}
+
+// ─── Timeline-Filtered Building Extraction ─────────────────────────────────
+
+/**
+ * Determine whether `isExisting` is explicitly set on ANY building in the array.
+ * If at least one building has `isExisting === true` or `isExisting === false`,
+ * the flag is considered "reliable" and we trust the stored values.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasExplicitExistingFlag(buildings: Array<Record<string, any>>): boolean {
+  return buildings.some(
+    (b) => b.isExisting === true || b.isExisting === false,
+  );
+}
+
+/**
+ * Convert raw building3D entries into ElevationBuilding[] with canvas positions.
+ *
+ * SMART INFERENCE RULES for `isExisting`:
+ *   1. If buildings have explicit `isExisting` booleans → trust them.
+ *   2. If NO building has the flag (undefined everywhere):
+ *      - `new_construction` → ALL buildings are new → PC5.1 = empty plot.
+ *      - `existing_extension` | `outdoor` | anything else → the LARGEST
+ *        building (by footprint) is tagged existing. The rest are new.
+ *
+ * @param filter - 'initial' returns only isExisting buildings,
+ *                 'projected' returns ALL buildings.
+ * @param projectNature - inferred project nature string.
+ */
+function getElevationBuildings(
+  project: DossierProjectData,
+  filter: "initial" | "projected",
+  projectNature: string,
+): ElevationBuilding[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const b3dRaw = project.sitePlanData?.building3D as Record<string, any> | null;
+  const buildings = Array.isArray(b3dRaw?.buildings) ? b3dRaw!.buildings : [];
+
+  if (buildings.length === 0) {
+    // No building3D data — synthesize from job-level data
+    const primary = getBuildingData(project);
+    if (filter === "initial" && projectNature === "new_construction") {
+      // Pure new construction → PC5.1 shows "Terrain vierge"
+      return [];
+    }
+    return [{
+      ...primary,
+      siteX: 0,
+      siteY: 0,
+      isExisting: filter === "initial",
+    }];
+  }
+
+  const canvasPositions = getCanvasPositions(project);
+  const jobs = (project.projectDescription?.jobs || []) as unknown as Array<Record<string, unknown>>;
+  const mats = (project.projectDescription?.materials || {}) as Record<string, unknown>;
+
+  // ── Determine isExisting inference strategy ──
+  const flagsReliable = hasExplicitExistingFlag(buildings);
+
+  // If flags are unreliable AND project is NOT new_construction,
+  // find the largest building (by footprint) to tag as existing.
+  let largestIdx = -1;
+  if (!flagsReliable && projectNature !== "new_construction") {
+    let maxArea = 0;
+    buildings.forEach((b: Record<string, unknown>, i: number) => {
+      const area = (Number(b.width) || 0) * (Number(b.depth) || 0);
+      if (area > maxArea) {
+        maxArea = area;
+        largestIdx = i;
+      }
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapped: ElevationBuilding[] = buildings.map((b3d: Record<string, any>, idx: number) => {
+    const mainJob = jobs[0] || {};
+    const wallH =
+      Number(b3d.wallHeights?.ground) ||
+      Number(b3d.wallHeight) ||
+      Number(mainJob.wallHeight) ||
+      2.5;
+    const ridgeH =
+      Number(b3d.ridgeHeight) ||
+      (wallH > 0 ? wallH + 0.7 : 3.2);
+
+    const bdId = String(b3d.id || "");
+    const pos = canvasPositions.get(bdId);
+
+    // ── Resolve isExisting ──
+    let resolvedExisting: boolean;
+    if (flagsReliable) {
+      // Trust the explicitly stored boolean
+      resolvedExisting = b3d.isExisting === true;
+    } else if (projectNature === "new_construction") {
+      // All buildings are new
+      resolvedExisting = false;
+    } else {
+      // Extension/outdoor: largest building = existing, rest = new
+      resolvedExisting = idx === largestIdx;
+    }
+
+    return {
+      width: Number(b3d.width) || 8,
+      depth: Number(b3d.depth) || 6,
+      wallHeight: wallH,
+      ridgeHeight: ridgeH,
+      roofType: String(b3d.roof?.type || b3d.roofType || "gable"),
+      roofPitch: Number(b3d.roof?.pitch || b3d.roofPitch) || 30,
+      roofMaterial: String(
+        b3d.roof?.material ||
+        b3d.materials?.roof ||
+        (mats as Record<string, string>)?.roofCovering ||
+        "Tuiles"
+      ),
+      roofColor: String(b3d.roofColor || (mats as Record<string, string>)?.roofColor || ""),
+      wallMaterial: String(
+        b3d.materials?.walls ||
+        b3d.wallMaterial ||
+        (mats as Record<string, string>)?.wallMaterial ||
+        "Enduit"
+      ),
+      wallColor: String(b3d.wallColor || (mats as Record<string, string>)?.wallColor || ""),
+      name: String(b3d.name || (resolvedExisting ? "Maison existante" : "Construction projetée")),
+      // ── Elevation-specific fields ──
+      siteX: pos?.centerXm ?? 0,
+      siteY: pos?.centerYm ?? 0,
+      isExisting: resolvedExisting,
+      buildingId: bdId || undefined,
+    };
+  });
+
+  // Apply timeline filter
+  if (filter === "initial") {
+    const existing = mapped.filter((b) => b.isExisting);
+    return existing;
+  }
+
+  // 'projected' = all buildings (existing + new)
+  return mapped;
+}
+
 // ─── Main Interface & Function ─────────────────────────────────────────────
 
 export interface ExtractedProjectData {
@@ -377,6 +578,13 @@ export interface ExtractedProjectData {
   jobs: JobEntry[];
   /** Raw project data for edge cases */
   raw: DossierProjectData;
+
+  // ── PC5 Elevation Engine: timeline-filtered building arrays ──
+
+  /** Buildings for PC5.1 (Initial State): only isExisting === true */
+  initialBuildings: ElevationBuilding[];
+  /** Buildings for PC5.2 (Projected State): ALL buildings */
+  projectedBuildings: ElevationBuilding[];
 }
 
 /**
@@ -405,6 +613,9 @@ export function extractProjectData(project: DossierProjectData): ExtractedProjec
     regulatory: getRegulatoryContext(project),
     jobs,
     raw: project,
+    // ── PC5 Elevation Engine ──
+    initialBuildings: getElevationBuildings(project, "initial", nature),
+    projectedBuildings: getElevationBuildings(project, "projected", nature),
   };
 }
 
@@ -412,23 +623,22 @@ export function extractProjectData(project: DossierProjectData): ExtractedProjec
 
 /**
  * Extract existing building for PC5.1 initial state.
- * Returns null for new construction on virgin land ("Terrain vierge").
- * Returns building data for extensions/renovations (the existing structure to show).
+ *
+ * ALWAYS returns a building — PC5.1 must show the existing state of the
+ * property per French building permit requirements. Even for "new construction"
+ * projects (carports, garages), there is typically an existing house on the lot.
+ *
+ * The building data comes from (in priority order):
+ *   1. existingBuildingsData (dedicated existing building record)
+ *   2. building3D data (the main building in the 3D editor)
+ *   3. Job-level dimensions (footprint, wall heights from the job form)
+ *   4. Sensible defaults (8m × 6m, 2.5m walls)
  */
 function getExistingBuilding(
   project: DossierProjectData,
-  nature: string
+  _nature: string
 ): BuildingDims | null {
-  // For pure new construction, initial state is empty plot
-  const isExtensionOrRenovation =
-    nature === "existing_extension" ||
-    nature === "work_on_existing" ||
-    nature === "renovation" ||
-    nature === "extension";
-
-  if (!isExtensionOrRenovation) return null;
-
-  // Try existingBuildingsData first
+  // Try existingBuildingsData first (dedicated field for existing structures)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const existingData = (project as any).existingBuildingsData;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -436,7 +646,7 @@ function getExistingBuilding(
     ? existingData[0]
     : existingData || null;
 
-  // Fall back to building3D data (the user's building IS the existing one for extensions)
+  // Fall back to building3D data — in most projects the 3D building IS the existing house
   const building = getBuildingData(project);
   const jobs = (project.projectDescription?.jobs || []) as unknown as Array<Record<string, unknown>>;
   const mainJob = jobs[0] || {};
@@ -448,7 +658,7 @@ function getExistingBuilding(
       : 0) ||
     building.width;
 
-  const depth = Number(existing?.depth) || width * 0.75;
+  const depth = Number(existing?.depth) || Number(building.depth) || width * 0.75;
 
   return {
     width,
