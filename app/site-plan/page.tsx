@@ -103,6 +103,8 @@ import { usePluCompliance } from "@/hooks/usePluCompliance";
 import PluAlertBanner from "@/components/editor/PluAlertBanner";
 import { useVrdDrawing } from "@/hooks/useVrdDrawing";
 import VrdToolbar from "@/components/editor/VrdToolbar";
+import { attachSmartSnap } from "@/lib/canvas/smart-snap";
+import { useSitePlanMathSync } from "@/hooks/useSitePlanMathSync";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -303,6 +305,28 @@ function SitePlanContent() {
   // ── Auto-save hook: debounced 2s push to DB ──
   useAutoSave(projectIdFromUrl);
 
+  // ── Store hydration: pre-populate component state from persisted store ──
+  // The persist middleware hydrates the store from sessionStorage synchronously.
+  // Read the cached buildingDetails & processedSiteData into component state
+  // IMMEDIATELY so the 3D view has data before the async API fetch completes.
+  const storeHydratedRef = useRef(false);
+  useEffect(() => {
+    if (storeHydratedRef.current || !projectIdFromUrl) return;
+    const state = useEditorStore.getState();
+    if (state.projectId === projectIdFromUrl) {
+      if (state.buildingDetails.length > 0) {
+        setBuildingDetails(state.buildingDetails);
+      }
+      if (state.elevationPoints.length > 0) {
+        setElevationPoints(state.elevationPoints);
+      }
+      if (state.processedSiteData) {
+        setProcessedSiteData(state.processedSiteData);
+      }
+      storeHydratedRef.current = true;
+    }
+  }, [projectIdFromUrl]);
+
   // Canvas refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -493,6 +517,9 @@ function SitePlanContent() {
     debounceMs: 150,
   });
 
+  // ─── Real-Time CES / M² Restant Math Sync ─────────────────────────────────
+  useSitePlanMathSync(); // fire-and-forget — keeps math store in sync with editor
+
   // ─── VRD Drawing Engine (Polyline/Polygon state machine) ───────────────────
   const vrdDrawing = useVrdDrawing(fabricRef, {
     strokeWidth,
@@ -543,7 +570,7 @@ function SitePlanContent() {
   // ─── Dimension lines ───────────────────────────────────────────────────────
 
   const createDimensionLine = useCallback(
-    (x1: number, y1: number, x2: number, y2: number, parentId: string, offset = 20, color = "#fbbf24") => {
+    (x1: number, y1: number, x2: number, y2: number, parentId: string, offset = 15, color = "rgba(251, 191, 36, 0.7)") => {
       const canvas = fabricRef.current;
       if (!canvas) return [];
 
@@ -559,16 +586,19 @@ function SitePlanContent() {
 
       const mkM = (obj: any) => { obj.isMeasurement = true; obj.parentId = parentId; return obj; };
 
+      // Clean thin dimension line
       const dimensionLine = mkM(new fabric.Line([dimX1, dimY1, dimX2, dimY2], {
-        stroke: color, strokeWidth: 1, selectable: false, evented: false,
+        stroke: color, strokeWidth: 0.8, selectable: false, evented: false,
       }));
+      // Subtle extension lines
       const ext1 = mkM(new fabric.Line([x1, y1, dimX1, dimY1], {
-        stroke: color, strokeWidth: 0.5, selectable: false, evented: false,
+        stroke: color, strokeWidth: 0.4, selectable: false, evented: false,
       }));
       const ext2 = mkM(new fabric.Line([x2, y2, dimX2, dimY2], {
-        stroke: color, strokeWidth: 0.5, selectable: false, evented: false,
+        stroke: color, strokeWidth: 0.4, selectable: false, evented: false,
       }));
-      const arrowSize = 6;
+      // Small arrow ticks instead of big triangles
+      const arrowSize = 4;
       const arrow1 = mkM(new fabric.Polygon([
         { x: dimX1, y: dimY1 },
         { x: dimX1 + Math.cos(angle - Math.PI / 6) * arrowSize, y: dimY1 + Math.sin(angle - Math.PI / 6) * arrowSize },
@@ -581,9 +611,10 @@ function SitePlanContent() {
       ], { fill: color, selectable: false, evented: false }));
       const textAngle = (angle * 180) / Math.PI;
       const adjusted = textAngle > 90 || textAngle < -90 ? textAngle + 180 : textAngle;
+      // Compact label with subtle pill background
       const text = mkM(new fabric.Text(label, {
-        left: dimMidX, top: dimMidY - 8, fontSize: 12, fontFamily: "monospace",
-        fill: "#0f172a", backgroundColor: color, padding: 3,
+        left: dimMidX, top: dimMidY - 6, fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif",
+        fill: "#fef3c7", backgroundColor: "rgba(120, 53, 15, 0.75)", padding: 2,
         originX: "center", originY: "center", angle: adjusted,
         selectable: false, evented: false,
       }));
@@ -601,8 +632,8 @@ function SitePlanContent() {
       const width = (rect.width || 0) * (rect.scaleX || 1);
       const height = (rect.height || 0) * (rect.scaleY || 1);
       const m: fabric.FabricObject[] = [];
-      m.push(...createDimensionLine(left, top + height, left + width, top + height, id, 25, "#fbbf24"));
-      m.push(...createDimensionLine(left + width, top, left + width, top + height, id, 25, "#fbbf24"));
+      m.push(...createDimensionLine(left, top + height, left + width, top + height, id, 18, "rgba(251, 191, 36, 0.7)"));
+      m.push(...createDimensionLine(left + width, top, left + width, top + height, id, 18, "rgba(251, 191, 36, 0.7)"));
       measurementLabelsRef.current.set(id, m);
     },
     [createDimensionLine]
@@ -618,7 +649,7 @@ function SitePlanContent() {
         const p1 = points[i], p2 = points[(i + 1) % points.length];
         const t1 = fabric.util.transformPoint(new fabric.Point(p1.x, p1.y), matrix);
         const t2 = fabric.util.transformPoint(new fabric.Point(p2.x, p2.y), matrix);
-        measurements.push(...createDimensionLine(t1.x, t1.y, t2.x, t2.y, id, 25, "#22c55e"));
+        measurements.push(...createDimensionLine(t1.x, t1.y, t2.x, t2.y, id, 18, "rgba(34, 197, 94, 0.7)"));
       }
       measurementLabelsRef.current.set(id, measurements);
     },
@@ -627,7 +658,7 @@ function SitePlanContent() {
 
   const addLineMeasurement = useCallback(
     (line: fabric.Line, id: string) => {
-      const m = createDimensionLine(line.x1 || 0, line.y1 || 0, line.x2 || 0, line.y2 || 0, id, 20, "#fbbf24");
+      const m = createDimensionLine(line.x1 || 0, line.y1 || 0, line.x2 || 0, line.y2 || 0, id, 15, "rgba(251, 191, 36, 0.7)");
       measurementLabelsRef.current.set(id, m);
     },
     [createDimensionLine]
@@ -642,12 +673,12 @@ function SitePlanContent() {
       const radius = (circle.radius || 0) * (circle.scaleX || 1);
       const diameter = pixelsToMeters(radius * 2);
       const diamLine = new fabric.Line([centerX - radius, centerY, centerX + radius, centerY], {
-        stroke: "#fbbf24", strokeWidth: 1, strokeDashArray: [5, 3], selectable: false, evented: false,
+        stroke: "rgba(251, 191, 36, 0.5)", strokeWidth: 0.8, strokeDashArray: [5, 3], selectable: false, evented: false,
       }) as any;
       diamLine.isMeasurement = true; diamLine.parentId = id;
       const text = new fabric.Text(`\u00D8 ${formatMeasurement(diameter)}`, {
-        left: centerX, top: centerY - radius - 20, fontSize: 12, fontFamily: "monospace",
-        fill: "#0f172a", backgroundColor: "#fbbf24", padding: 3, originX: "center",
+        left: centerX, top: centerY - radius - 16, fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif",
+        fill: "#fef3c7", backgroundColor: "rgba(120, 53, 15, 0.75)", padding: 2, originX: "center",
         selectable: false, evented: false,
       }) as any;
       text.isMeasurement = true; text.parentId = id;
@@ -673,7 +704,7 @@ function SitePlanContent() {
       else if (obj.type === "polygon") addPolygonMeasurements(obj as fabric.Polygon, id);
       else if (obj.type === "line") addLineMeasurement(obj as fabric.Line, id);
       else if (obj.type === "circle") addCircleMeasurements(obj as fabric.Circle, id);
-      // Re-add template name label if this is a template element
+      // Re-add template name label if this is a template element — centered with pill background
       const tType = (obj as any).templateType;
       const eName = (obj as any).elementName;
       if (tType && eName && obj.type === "rect") {
@@ -683,11 +714,18 @@ function SitePlanContent() {
           const color = tpl?.color || "#888";
           const l = obj.left ?? 0;
           const t2 = obj.top ?? 0;
+          const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
           const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
           const labelText = new fabric.Text(eName, {
-            left: l + 4, top: t2 + 2,
-            fontSize: Math.min(12, h * 0.3), fontFamily: "sans-serif",
-            fill: color, selectable: false, evented: false,
+            left: l + w / 2, top: t2 + h / 2,
+            fontSize: Math.max(9, Math.min(11, h * 0.22)),
+            fontFamily: "'Inter', system-ui, sans-serif",
+            fontWeight: "600",
+            fill: "#ffffff",
+            backgroundColor: color + "CC",
+            padding: 3,
+            originX: "center", originY: "center",
+            selectable: false, evented: false,
           });
           (labelText as any).isMeasurement = true;
           (labelText as any).parentId = id;
@@ -950,6 +988,47 @@ function SitePlanContent() {
     canvas.on("path:created", onPathCreated);
     return () => { canvas.off("path:created", onPathCreated); };
   }, [updateLayers, pushUndoState]);
+
+  // ── CRITICAL: Debounced canvas → Zustand store sync ──────────────────────
+  // Without this, canvasJSON in the store never updates after user interactions,
+  // which means: (1) localStorage has stale data, (2) useAutoSave never triggers,
+  // (3) elements vanish on reload. This effect listens to ALL canvas mutations
+  // and syncs the serialized canvas + buildingDetails to the store within 800ms.
+  const storeCanvasSyncRef = useRef<number | null>(null);
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas || !canvasReady) return;
+
+    const syncToStore = () => {
+      // Don't sync during initial load or undo/redo restoration
+      if (!initialLoadCompleteRef.current || isRestoringRef.current) return;
+      if (storeCanvasSyncRef.current) window.clearTimeout(storeCanvasSyncRef.current);
+      storeCanvasSyncRef.current = window.setTimeout(() => {
+        storeCanvasSyncRef.current = null;
+        if (isRestoringRef.current) return;
+        try {
+          const json = JSON.stringify((canvas as any).toJSON([...CANVAS_PROPS]));
+          const store = useEditorStore.getState();
+          store.setCanvasData(json);
+          store.setBuildingDetails(buildingDetailsSnapshotRef.current);
+          store.setElevationPoints(
+            elevationPoints.map((p) => ({ id: p.id, x: p.x, y: p.y, value: p.value }))
+          );
+        } catch { /* serialization error — skip this sync cycle */ }
+      }, 800) as unknown as number;
+    };
+
+    canvas.on("object:added", syncToStore);
+    canvas.on("object:modified", syncToStore);
+    canvas.on("object:removed", syncToStore);
+
+    return () => {
+      canvas.off("object:added", syncToStore);
+      canvas.off("object:modified", syncToStore);
+      canvas.off("object:removed", syncToStore);
+      if (storeCanvasSyncRef.current) window.clearTimeout(storeCanvasSyncRef.current);
+    };
+  }, [canvasReady, elevationPoints]);
 
 
   // ─── Grid ──────────────────────────────────────────────────────────────────
@@ -1647,6 +1726,30 @@ function SitePlanContent() {
   useEffect(() => {
     if (currentProjectId && canvasReady) {
       setLoadingEditorData(true);
+
+      // ── Store-first fast-path: instant canvas restoration from sessionStorage ──
+      // The Zustand store (hydrated by persist middleware) may have a cached canvasJSON
+      // from the previous session. Load it into the canvas IMMEDIATELY so that objects
+      // with buildingDetailId exist for the 3D memo. The API fetch below will overwrite
+      // with the authoritative server data once it completes.
+      const cachedState = useEditorStore.getState();
+      if (cachedState.projectId === currentProjectId && cachedState.canvasJSON) {
+        const canvas = fabricRef.current;
+        if (canvas) {
+          try {
+            const json = typeof cachedState.canvasJSON === "string"
+              ? JSON.parse(cachedState.canvasJSON)
+              : cachedState.canvasJSON;
+            canvas.loadFromJSON(json, () => {
+              canvas.backgroundColor = "#0f172a";
+              canvas.renderAll();
+              // Bump canvasVersion so userBuildings3d recomputes with pre-loaded objects
+              setCanvasVersion((v) => v + 1);
+            });
+          } catch { /* cached data corrupt — will be overwritten by API */ }
+        }
+      }
+
       loadSitePlanRef.current(currentProjectId, () => {
         // After loadFromJSON replaces the entire canvas, any previously-drawn
         // parcels (e.g. from the retry effect) are wiped. Reset the guard so
@@ -1851,6 +1954,33 @@ function SitePlanContent() {
         }
       });
 
+      // ── Fix #6: Persist PC2 image to DB (blob: URLs die on page reload) ──
+      // If a PC2 capture exists in the Zustand generatedDocuments store,
+      // convert it from blob: URL → compressed JPEG base64 for DB storage.
+      let pc2ImageBase64: string | undefined;
+      try {
+        const pc2BlobUrl = useUrbAssistProjectStore.getState().generatedDocuments['PC2'];
+        if (pc2BlobUrl && pc2BlobUrl.startsWith('blob:')) {
+          const resp = await fetch(pc2BlobUrl);
+          const blob = await resp.blob();
+          // Re-encode as JPEG at 70% quality to reduce DB storage size
+          const bitmap = await createImageBitmap(blob);
+          const offscreen = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const ctx = offscreen.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(bitmap, 0, 0);
+            const jpegBlob = await offscreen.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+            const reader = new FileReader();
+            pc2ImageBase64 = await new Promise<string>((resolve) => {
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(jpegBlob);
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[saveSitePlan] PC2 image base64 conversion failed:', e);
+      }
+
       const res = await fetch(`/api/projects/${currentProjectId}/site-plan`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1862,6 +1992,7 @@ function SitePlanContent() {
           northAngle: projectData?.northAngle ?? null,
           building3D: buildingDetails.length > 0 ? { buildings: buildingDetails } : null,
           surfaceAreas,
+          ...(pc2ImageBase64 && { pc2ImageBase64 }),
         }),
       });
 
@@ -1931,8 +2062,8 @@ function SitePlanContent() {
       const rect = new fabric.Rect({
         left: centerX - wPx / 2, top: centerY - dPx / 2,
         width: wPx, height: dPx,
-        fill: isExisting ? "rgba(107, 114, 128, 0.2)" : "rgba(59, 130, 246, 0.2)",
-        stroke: isExisting ? "#6b7280" : "#3b82f6", strokeWidth: 2,
+        fill: isExisting ? "rgba(107, 114, 128, 0.15)" : "rgba(59, 130, 246, 0.25)",
+        stroke: isExisting ? "#6b7280" : "#3b82f6", strokeWidth: 1.5,
         ...(isExisting ? { strokeDashArray: [6, 3] } : {}),
       });
       (rect as any).id = b.id;
@@ -2157,7 +2288,15 @@ function SitePlanContent() {
 
 
 
-    return () => { setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
+    // ── Wire up magnetic smart-snap engine ──────────────────────────────
+    const cleanupSnap = attachSmartSnap(canvas, {
+      threshold: 15,
+      guideColor: "#06b6d4",  // Cyan guide lines matching the setback snap color
+      guideWidth: 1,
+      guideDash: [6, 3],
+    });
+
+    return () => { cleanupSnap(); setCanvasReady(false); fabricRef.current = null; canvas.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2810,7 +2949,7 @@ function SitePlanContent() {
     const rect = new fabric.Rect({
       left: center.x - wPx / 2, top: center.y - hPx / 2,
       width: wPx, height: hPx,
-      fill: template.color + "20", stroke: template.color, strokeWidth: 2,
+      fill: template.color + "35", stroke: template.color, strokeWidth: 1.5,
       ...(templateId === "parking" ? { strokeDashArray: [6, 3] } : {}),
     });
     (rect as any).id = shapeId;
@@ -2842,11 +2981,17 @@ function SitePlanContent() {
         canvas.add(wheel);
       });
     }
-    // Place label inside the rect (top-left corner) and track it so it moves with the shape
+    // Place label centered inside the rect with a pill background for readability
     const labelText = new fabric.Text(template.label, {
-      left: (center.x - wPx / 2) + 4, top: (center.y - hPx / 2) + 2,
-      fontSize: Math.min(12, hPx * 0.3), fontFamily: "sans-serif",
-      fill: template.color, selectable: false, evented: false,
+      left: center.x, top: center.y,
+      fontSize: Math.max(9, Math.min(11, hPx * 0.22)),
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontWeight: "600",
+      fill: "#ffffff",
+      backgroundColor: template.color + "CC",
+      padding: 3,
+      originX: "center", originY: "center",
+      selectable: false, evented: false,
     });
     (labelText as any).isMeasurement = true;
     (labelText as any).parentId = shapeId;
@@ -2914,8 +3059,12 @@ function SitePlanContent() {
     (triangle as any).elementName = "Access";
     canvas.add(triangle);
     const label = new fabric.Text("Access", {
-      left: center.x, top: center.y + size * 0.9, fontSize: 12, fontFamily: "sans-serif",
-      fill: "#f59e0b", originX: "center", originY: "top", fontWeight: "bold",
+      left: center.x, top: center.y + size * 0.8, fontSize: 9,
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontWeight: "600",
+      fill: "#ffffff", backgroundColor: "rgba(217, 119, 6, 0.8)",
+      padding: 2,
+      originX: "center", originY: "top",
     });
     (label as any).isMeasurement = true;
     (label as any).parentId = shapeId;

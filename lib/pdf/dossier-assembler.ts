@@ -197,6 +197,10 @@ function drawCoverPage(doc: jsPDF, project: DossierProjectData) {
   const { W, H, M } = A3L;
   const desc = project.projectDescription;
   const applicant = desc?.applicantName || "—";
+  const isDP = project.authorizationType === "DP";
+  const dossierTitle = isDP
+    ? "DOSSIER DE DÉCLARATION PRÉALABLE"
+    : "DOSSIER DE PERMIS DE CONSTRUIRE";
 
   // Full dark background
   doc.setFillColor(15, 23, 42);
@@ -210,7 +214,7 @@ function drawCoverPage(doc: jsPDF, project: DossierProjectData) {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
-  doc.text("DOSSIER DE PERMIS DE CONSTRUIRE", W / 2, H * 0.25, { align: "center" });
+  doc.text(dossierTitle, W / 2, H * 0.25, { align: "center" });
 
   doc.setFontSize(14);
   doc.setTextColor(165, 180, 252); // indigo-300

@@ -1,16 +1,16 @@
 /**
- * Editor Store — Zustand state for site-plan editor with sessionStorage persistence.
+ * Editor Store — Zustand state for site-plan editor with localStorage persistence.
  *
- * PURPOSE: Make the editor 100% resilient to page refresh (F5 / Cmd+R).
- * On refresh, the store hydrates from sessionStorage FIRST (instant), then the page
+ * PURPOSE: Make the editor 100% resilient to page refresh (F5 / Cmd+R) AND tab close.
+ * On refresh, the store hydrates from localStorage FIRST (instant), then the page
  * validates with a server fetch (eventual consistency).
  *
  * DESIGN:
- *  - Uses `persist` middleware with `sessionStorage` (auto-clears on tab close)
- *  - Storage key is dynamic per project: `urbassist-editor-{projectId}`
+ *  - Uses `persist` middleware with `localStorage` (survives tab close + hard reload)
+ *  - Storage key: "urbassist-editor-storage" (single key; projectId inside state)
  *  - Stores: canvasJSON, buildingDetails, elevationPoints, projectData
- *  - Large data (canvas JSON) is stored as a compressed string
  *  - `_lastSavedAt` timestamp enables stale detection
+ *  - Page reads cached state on mount (instant 3D) then overwrites from API (truth)
  */
 
 import { create } from "zustand";
@@ -85,14 +85,8 @@ export interface EditorState {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic storage key
+// (persist middleware uses static key "urbassist-editor-storage" in config below)
 // ---------------------------------------------------------------------------
-
-let activeProjectId: string | null = null;
-
-function getStorageKey(): string {
-  return `urbassist-editor-${activeProjectId || "unknown"}`;
-}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -116,28 +110,13 @@ export const useEditorStore = create<EditorState>()(
 
       initProject: (projectId: string) => {
         const current = get().projectId;
-        if (current === projectId) return; // already initialized
+        if (current === projectId) return; // already initialized — keep hydrated data
 
-        activeProjectId = projectId;
-
-        // Check sessionStorage for existing data for this project
-        try {
-          const key = getStorageKey();
-          const stored = sessionStorage.getItem(key);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed?.state?.projectId === projectId) {
-              // Hydrate from session storage
-              set({
-                ...parsed.state,
-                isDirty: false, // Fresh load = not dirty
-              });
-              return;
-            }
-          }
-        } catch { /* ignore parse errors */ }
-
-        // No cached data — initialize fresh
+        // Different project — reset state for the new project.
+        // The persist middleware will have hydrated the store from its static
+        // sessionStorage key ("urbassist-editor-storage"). If the hydrated
+        // projectId matches, we already returned above. If it doesn't match,
+        // we must reset so stale data from a different project isn't used.
         set({
           ...INITIAL_STATE,
           projectId,
@@ -185,7 +164,7 @@ export const useEditorStore = create<EditorState>()(
     {
       name: "urbassist-editor-storage",
       storage: createJSONStorage(() => {
-        // SSR guard: sessionStorage is only available in the browser
+        // SSR guard: localStorage is only available in the browser
         if (typeof window === "undefined") {
           return {
             getItem: () => null,
@@ -193,7 +172,7 @@ export const useEditorStore = create<EditorState>()(
             removeItem: () => {},
           };
         }
-        return sessionStorage;
+        return localStorage;
       }),
       // Only persist essential data — skip transient UI state
       partialize: (state) => ({

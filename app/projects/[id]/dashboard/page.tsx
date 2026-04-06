@@ -7,7 +7,7 @@ import {
     MapPin, Loader2, ArrowRight, FileText, Download, Box,
     ClipboardList, Sparkles, CheckCircle2, Clock, ChevronRight,
     FolderKanban, Layers, Check, CreditCard, Map,
-    Eye, X, Search,
+    Eye, X, Search, Shield, Package, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLanguage } from "@/lib/language-context";
@@ -25,6 +25,29 @@ interface ProjectDescription {
     dpcDetermination?: string;
 }
 
+interface DocumentInfo {
+    id: string;
+    type: string;
+    name?: string;
+    fileUrl: string | null;
+    fileData: string | null;
+    creditsUsed?: number;
+}
+
+interface RegulatoryAnalysis {
+    id: string;
+    zoneType: string | null;
+    protectedZones?: string | null;
+    analyzedAt?: string | null;
+    pdfUrl?: string | null;
+}
+
+interface FeasibilityReport {
+    id: string;
+    isFeasible: boolean | null;
+    generatedAt?: string | null;
+}
+
 interface Project {
     id: string;
     name: string;
@@ -34,9 +57,11 @@ interface Project {
     authorizationType?: string | null;
     authorizationExplanation?: string | null;
     paidAt?: string | null;
-    documents?: { id: string; type: string; fileUrl: string | null; fileData: string | null }[];
+    documents?: DocumentInfo[];
     projectDescription?: ProjectDescription | null;
     protectedAreas?: { type: string; name: string }[] | null;
+    regulatoryAnalysis?: RegulatoryAnalysis | null;
+    feasibilityReport?: FeasibilityReport | null;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -72,22 +97,41 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             .finally(() => setLoading(false));
     }, [projectId, user, authLoading]);
 
-    // ── Derived ───────────────────────────────────────────────────────────────
+    // ── Derived — ALL from REAL data, no fakes ───────────────────────────────
     const hasAddress = !!project?.address;
     const hasAuthorization = !!project?.authorizationType;
-    const hasDocuments = hasAuthorization;
     const hasPaid = !!project?.paidAt;
     const hasDescription = !!(
         project?.projectDescription?.terrainInitial ||
         (project?.projectDescription?.jobs?.length ?? 0) > 0
     );
-    const docCount = project?.documents?.filter(d => d.fileUrl || d.fileData).length ?? 0;
-    const totalDocs = 6;
 
-    // For demo: mark analysis, 3D, and complete as done if description is done
-    const hasAnalysis = hasDescription;
-    const has3D = hasDescription;
-    const hasCompleteFile = hasDescription;
+    // Real document tracking
+    const generatedDocs = project?.documents?.filter(d => d.fileUrl || d.fileData) ?? [];
+    const docCount = generatedDocs.length;
+    const hasDocuments = docCount > 0;
+    const totalDocs = project?.authorizationType === "PC" ? 8 : 6;
+
+    // Real PLU analysis - check if regulatoryAnalysis has actually been analyzed
+    const hasAnalysis = !!(
+        project?.regulatoryAnalysis?.analyzedAt ||
+        project?.regulatoryAnalysis?.pdfUrl ||
+        project?.regulatoryAnalysis?.protectedZones
+    );
+
+    // Real feasibility check
+    const hasFeasibility = !!project?.feasibilityReport;
+
+    // Real 3D - check if SITE_PLAN document exists
+    const hasSitePlan = !!(project?.documents?.some(d => d.type === "SITE_PLAN" && (d.fileUrl || d.fileData)));
+
+    // Real complete file check — at least 4 docs generated
+    const hasCompleteFile = docCount >= 4;
+
+    // ABF / protected area detection
+    const hasABF = (project?.protectedAreas || []).some(
+        a => ["ABF", "HERITAGE", "abf", "heritage", "MONUMENT_HISTORIQUE", "SITE_PATRIMONIAL"].includes(a.type)
+    );
 
     // ── Workflow steps ────────────────────────────────────────────────────────
     const workflowSteps = [
@@ -104,15 +148,24 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             id: "authorization", icon: FileText, label: isEn ? "Authorization" : "Autorisation",
             done: hasAuthorization,
             viewData: hasAuthorization ? [
-                { label: isEn ? "Type" : "Type", value: project?.authorizationType || "—" },
+                { label: isEn ? "Type" : "Type", value: project?.authorizationType === "PC" ? (isEn ? "Building Permit (PC)" : "Permis de Construire (PC)") : (isEn ? "Prior Declaration (DP)" : "Déclaration Préalable (DP)") },
                 { label: isEn ? "Details" : "Détails", value: project?.authorizationExplanation || "—" },
             ] : null,
         },
         {
-            id: "documents", icon: ClipboardList, label: isEn ? "Documents" : "Documents",
-            done: hasDocuments,
-            viewData: hasDocuments ? [
-                { label: isEn ? "Auth type" : "Type", value: project?.authorizationType || "—" },
+            id: "description", icon: ClipboardList, label: isEn ? "Description" : "Description",
+            done: hasDescription,
+            viewData: hasDescription ? [
+                { label: isEn ? "Terrain" : "Terrain", value: (project?.projectDescription?.terrainInitial || "").slice(0, 100) || "—" },
+                { label: isEn ? "Works" : "Travaux", value: `${project?.projectDescription?.jobs?.length ?? 0} ${isEn ? "jobs" : "travaux"}` },
+            ] : null,
+        },
+        {
+            id: "analysis", icon: Search, label: isEn ? "PLU Analysis" : "Analyse PLU",
+            done: hasAnalysis,
+            viewData: hasAnalysis ? [
+                { label: isEn ? "Zone" : "Zone", value: project?.regulatoryAnalysis?.zoneType || "—" },
+                { label: isEn ? "Analyzed" : "Analysé", value: project?.regulatoryAnalysis?.analyzedAt ? new Date(project.regulatoryAnalysis.analyzedAt).toLocaleDateString(isEn ? "en-GB" : "fr-FR") : "—" },
             ] : null,
         },
         {
@@ -123,34 +176,19 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             ] : null,
         },
         {
-            id: "description", icon: ClipboardList, label: isEn ? "Description" : "Description",
-            done: hasDescription,
-            viewData: hasDescription ? [
-                { label: isEn ? "Terrain" : "Terrain", value: (project?.projectDescription?.terrainInitial || "").slice(0, 100) || "—" },
-                { label: isEn ? "Works" : "Travaux", value: String(project?.projectDescription?.jobs?.length ?? 0) },
-            ] : null,
-        },
-        {
-            id: "analysis", icon: Search, label: isEn ? "PLU Analysis" : "Analyse PLU",
-            done: hasAnalysis,
-            viewData: hasAnalysis ? [
-                { label: isEn ? "Zone" : "Zone", value: "Zone U" },
-                { label: isEn ? "Status" : "Statut", value: isEn ? "Compliant ✓" : "Conforme ✓" },
-            ] : null,
-        },
-        {
-            id: "3d-design", icon: Box, label: isEn ? "3D Design" : "3D Design",
-            done: has3D,
-            viewData: has3D ? [
-                { label: isEn ? "Model" : "Modèle", value: isEn ? "Validated ✓" : "Validé ✓" },
+            id: "documents", icon: Package, label: isEn ? "Documents" : "Documents",
+            done: hasDocuments,
+            viewData: hasDocuments ? [
+                { label: isEn ? "Generated" : "Générés", value: `${docCount}/${totalDocs}` },
+                ...(generatedDocs.slice(0, 3).map(d => ({ label: d.type, value: d.name || "✓" }))),
             ] : null,
         },
         {
             id: "complete-file", icon: FolderKanban, label: isEn ? "Complete File" : "Dossier Complet",
             done: hasCompleteFile,
             viewData: hasCompleteFile ? [
-                { label: isEn ? "Documents" : "Documents", value: "PC1–PC6" },
-                { label: isEn ? "Status" : "Statut", value: isEn ? "Ready ✓" : "Prêt ✓" },
+                { label: isEn ? "Documents" : "Documents", value: `${docCount}/${totalDocs} ${isEn ? "ready" : "prêts"}` },
+                { label: isEn ? "Status" : "Statut", value: docCount >= totalDocs ? (isEn ? "Complete ✓" : "Complet ✓") : (isEn ? "In progress" : "En cours") },
             ] : null,
         },
     ];
@@ -182,10 +220,10 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             subtitle: isEn ? "Design your project in 3D with our intelligent site plan editor." : "Concevez votre projet en 3D avec notre éditeur intelligent.",
             cta: isEn ? "Open editor" : "Ouvrir l'éditeur",
             href: `/site-plan?project=${projectId}`,
-            status: has3D
-                ? { label: isEn ? "Completed ✓" : "Complété ✓", icon: CheckCircle2, color: "text-emerald-600" }
-                : { label: isEn ? "Ready" : "Prêt", icon: Sparkles, color: "text-blue-500" },
-            badge: has3D ? (isEn ? "Done" : "Fait") : null,
+            status: hasSitePlan
+                ? { label: isEn ? "Plan ready ✓" : "Plan prêt ✓", icon: CheckCircle2, color: "text-emerald-600" }
+                : { label: isEn ? "Ready to edit" : "Prêt à éditer", icon: Sparkles, color: "text-blue-500" },
+            badge: hasSitePlan ? (isEn ? "Done" : "Fait") : null,
         },
         {
             id: "documents", icon: FileText,
@@ -196,7 +234,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             cta: isEn ? "View documents" : "Voir les documents",
             href: `/projects/${projectId}/documents`,
             status: hasCompleteFile
-                ? { label: isEn ? "Completed ✓" : "Complété ✓", icon: CheckCircle2, color: "text-emerald-600" }
+                ? { label: isEn ? "Complete ✓" : "Complet ✓", icon: CheckCircle2, color: "text-emerald-600" }
                 : docCount > 0
                     ? { label: `${docCount}/${totalDocs} ${isEn ? "ready" : "prêts"}`, icon: CheckCircle2, color: "text-emerald-500" }
                     : { label: isEn ? "Pending" : "En attente", icon: Clock, color: "text-slate-400" },
@@ -209,7 +247,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
             title: isEn ? "Export & Submit" : "Exporter & Déposer",
             subtitle: isEn ? "Export your complete planning application as a PDF package ready to submit." : "Exportez votre dossier complet en PDF prêt à déposer.",
             cta: isEn ? "Export dossier" : "Exporter le dossier",
-            href: `/export?project=${projectId}`,
+            href: `/projects/${projectId}/project-description?step=8`,
             status: hasCompleteFile
                 ? { label: isEn ? "Ready to export" : "Prêt à exporter", icon: CheckCircle2, color: "text-emerald-600" }
                 : { label: isEn ? "When ready" : "Quand prêt", icon: Clock, color: "text-slate-400" },
@@ -279,6 +317,18 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                                             <CheckCircle2 className="w-3 h-3" />
                                             {isEn ? "Paid" : "Payé"}
+                                        </span>
+                                    )}
+                                    {hasABF && (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                            <Shield className="w-3 h-3" />
+                                            ABF
+                                        </span>
+                                    )}
+                                    {hasAnalysis && (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                                            <Sparkles className="w-3 h-3" />
+                                            {isEn ? "PLU Analyzed" : "PLU Analysé"}
                                         </span>
                                     )}
                                 </div>
@@ -431,7 +481,7 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                                 </p>
                             </div>
                             <Link
-                                href={`/export?project=${projectId}`}
+                                href={`/projects/${projectId}/project-description?step=8`}
                                 className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-green-700 font-semibold text-sm hover:bg-green-50 transition-colors"
                             >
                                 <Download className="w-4 h-4" />
@@ -442,16 +492,19 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
 
                     {/* ── Smart next-step banner ── */}
                     {!allDone && (() => {
-                        // Determine the first incomplete step and build CTA
                         const nextStep = !hasAddress
-                            ? { label: isEn ? "Set your project location" : "Définir l'emplacement de votre projet", href: `/projects/${projectId}`, icon: Map, color: "from-blue-600 to-cyan-600", lightColor: "text-blue-700", bgLight: "bg-blue-50" }
+                            ? { label: isEn ? "Set your project location" : "Définir l'emplacement de votre projet", href: `/projects/new`, icon: Map, color: "from-blue-600 to-cyan-600" }
                             : !hasAuthorization
-                                ? { label: isEn ? "Complete your authorization type" : "Complétez votre type d'autorisation", href: `/projects/${projectId}/authorization`, icon: FileText, color: "from-amber-500 to-orange-500", lightColor: "text-amber-700", bgLight: "bg-amber-50" }
+                                ? { label: isEn ? "Complete your authorization type" : "Complétez votre type d'autorisation", href: `/projects/${projectId}/authorization`, icon: FileText, color: "from-amber-500 to-orange-500" }
                                 : !hasDescription
-                                    ? { label: isEn ? "Describe your project" : "Décrivez votre projet", href: `/projects/${projectId}/project-description`, icon: ClipboardList, color: "from-violet-500 to-purple-600", lightColor: "text-violet-700", bgLight: "bg-violet-50" }
-                                    : !hasPaid
-                                        ? { label: isEn ? "Complete your payment" : "Complétez votre paiement", href: `/projects/${projectId}/payment`, icon: CreditCard, color: "from-emerald-500 to-teal-600", lightColor: "text-emerald-700", bgLight: "bg-emerald-50" }
-                                        : null;
+                                    ? { label: isEn ? "Describe your project" : "Décrivez votre projet", href: `/projects/${projectId}/project-description`, icon: ClipboardList, color: "from-violet-500 to-purple-600" }
+                                    : !hasAnalysis
+                                        ? { label: isEn ? "Run PLU regulatory analysis" : "Lancer l'analyse réglementaire PLU", href: `/projects/${projectId}/project-description?step=4`, icon: Search, color: "from-purple-500 to-pink-600" }
+                                        : !hasPaid
+                                            ? { label: isEn ? "Complete your payment" : "Complétez votre paiement", href: `/projects/${projectId}/payment`, icon: CreditCard, color: "from-emerald-500 to-teal-600" }
+                                            : !hasDocuments
+                                                ? { label: isEn ? "Generate your documents" : "Générer vos documents", href: `/projects/${projectId}/project-description?step=7`, icon: Package, color: "from-blue-500 to-indigo-600" }
+                                                : null;
 
                         if (!nextStep) return null;
                         const StepIcon = nextStep.icon;
@@ -479,6 +532,53 @@ export default function ProjectDashboardPage({ params }: { params: Promise<{ id:
                             </div>
                         );
                     })()}
+
+                    {/* ── Document Status Grid ── */}
+                    {docCount > 0 && (
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">
+                                {isEn ? "Document status" : "Statut des documents"}
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                                {(project?.documents || []).map((doc) => {
+                                    const hasFile = !!(doc.fileUrl || doc.fileData);
+                                    return (
+                                        <div
+                                            key={doc.id}
+                                            className={cn(
+                                                "rounded-xl border p-4 transition-all",
+                                                hasFile
+                                                    ? "bg-emerald-50/50 border-emerald-200"
+                                                    : "bg-slate-50 border-slate-200"
+                                            )}
+                                        >
+                                            <div className="flex items-center gap-2 mb-2">
+                                                {hasFile ? (
+                                                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                                                ) : (
+                                                    <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                                                )}
+                                                <span className={cn(
+                                                    "text-xs font-bold uppercase tracking-wider",
+                                                    hasFile ? "text-emerald-600" : "text-slate-400"
+                                                )}>
+                                                    {doc.type.replace(/_/g, " ")}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 truncate">
+                                                {doc.name || doc.type}
+                                            </p>
+                                            {hasFile && (
+                                                <span className="inline-block mt-2 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-semibold">
+                                                    {isEn ? "Ready" : "Prêt"}
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
 
                     {/* ── Action cards ── */}
                     <div>

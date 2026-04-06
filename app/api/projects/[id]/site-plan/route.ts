@@ -41,6 +41,7 @@ export async function PUT(
       northAngle: body.northAngle ?? null,
       terrainData: body.terrainData || null,
       building3D: body.building3D ?? null,
+      pc2ImageBase64: body.pc2ImageBase64 ?? null,
     },
     update: {
       ...(body.canvasData !== undefined && { canvasData: body.canvasData }),
@@ -53,6 +54,7 @@ export async function PUT(
       ...(body.northAngle !== undefined && { northAngle: body.northAngle }),
       ...(body.terrainData !== undefined && { terrainData: body.terrainData }),
       ...(body.building3D !== undefined && { building3D: body.building3D }),
+      ...(body.pc2ImageBase64 !== undefined && { pc2ImageBase64: body.pc2ImageBase64 }),
     },
   });
   return NextResponse.json({ sitePlan });

@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
             surfaceAreas: project.sitePlanData.surfaceAreas,
             northAngle: project.sitePlanData.northAngle,
             building3D: project.sitePlanData.building3D,
+            pc2ImageBase64: project.sitePlanData.pc2ImageBase64 ?? null,
           }
         : null,
       terrainData: project.terrainData

@@ -131,7 +131,7 @@ async function generateMapImage(
   containerHeightMM: number,
   scaleDenominator: number,
   addProjetLabel: boolean = false
-): Promise<string> {
+): Promise<{ image: string; effectiveScale: number }> {
   const layer = LAYERS[layerKey];
   if (!layer) throw new Error(`Unknown layer: ${layerKey}`);
 
@@ -151,13 +151,13 @@ async function generateMapImage(
     scaleDenominator
   );
 
-  const { grid, crop, zoom } = viewParams;
+  const { grid, crop, zoom, effectiveScale } = viewParams;
   const { startX, startY, endX, endY, tilesWide, tilesTall } = grid;
 
   const mosaicWidth = tilesWide * 256;
   const mosaicHeight = tilesTall * 256;
 
-  console.log(
+  console.debug(
     `[PC1] ${layerKey} z${zoom}: grid ${startX}-${endX} x ${startY}-${endY} ` +
     `(${tilesWide}×${tilesTall} tiles = ${mosaicWidth}×${mosaicHeight}px), ` +
     `crop: ${crop.left},${crop.top} ${crop.width}×${crop.height}, ` +
@@ -190,7 +190,7 @@ async function generateMapImage(
     tileBuffers.push(...results);
   }
 
-  console.log(`[PC1] ${layerKey}: compositing ${tileBuffers.length} tiles`);
+  console.debug(`[PC1] ${layerKey}: compositing ${tileBuffers.length} tiles`);
 
   // ── Build composite operations ──────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,12 +276,12 @@ async function generateMapImage(
     .jpeg({ quality: 90 })
     .toBuffer();
 
-  console.log(
+  console.debug(
     `[PC1] ${layerKey}: output image ${imageBuffer.length} bytes ` +
     `(${TARGET_PX_WIDTH}×${targetHeightPx})`
   );
 
-  return imageBuffer.toString("base64");
+  return { image: imageBuffer.toString("base64"), effectiveScale };
 }
 
 // ─── Parcel overlay SVG ─────────────────────────────────────────────────────
@@ -381,14 +381,14 @@ export async function POST(request: NextRequest) {
         ? JSON.parse(parcelGeoJson)
         : parcelGeoJson;
 
-    console.log("[PC1] lat:", lat, "lng:", lng);
-    console.log("[PC1] parcelGeoJson type:", parsedGeo?.type ?? "none");
+    console.debug("[PC1] lat:", lat, "lng:", lng);
+    console.debug("[PC1] parcelGeoJson type:", parsedGeo?.type ?? "none");
 
     // ── Mode 2: Multi-layer (no `layer` param) ────────────────────────
     const singleLayerMode = body.layer != null;
 
     if (!singleLayerMode) {
-      const [ignImage, cadastreImage, aerialImage] = await Promise.all([
+      const [ignResult, cadastreResult, aerialResult] = await Promise.all([
         generateMapImage(
           lat, lng, "IGN", parsedGeo,
           PDF_CONTAINERS.IGN.widthMM,
@@ -411,9 +411,12 @@ export async function POST(request: NextRequest) {
       ]);
 
       return NextResponse.json({
-        ignImage,
-        cadastreImage,
-        aerialImage,
+        ignImage: ignResult.image,
+        cadastreImage: cadastreResult.image,
+        aerialImage: aerialResult.image,
+        ignScale: ignResult.effectiveScale,
+        cadastreScale: cadastreResult.effectiveScale,
+        aerialScale: aerialResult.effectiveScale,
         projectData: projectData || null,
       });
     }
@@ -432,7 +435,7 @@ export async function POST(request: NextRequest) {
     const container = PDF_CONTAINERS[layerKey as keyof typeof PDF_CONTAINERS]
       || PDF_CONTAINERS.AERIAL;
 
-    const image = await generateMapImage(
+    const result = await generateMapImage(
       lat, lng, layerKey, parsedGeo,
       container.widthMM,
       container.heightMM,
@@ -441,8 +444,8 @@ export async function POST(request: NextRequest) {
 
     const b64 =
       layerKey === "AERIAL"
-        ? `data:image/jpeg;base64,${image}`
-        : `data:image/png;base64,${image}`;
+        ? `data:image/jpeg;base64,${result.image}`
+        : `data:image/png;base64,${result.image}`;
 
     return NextResponse.json({ image: b64 });
   } catch (err) {

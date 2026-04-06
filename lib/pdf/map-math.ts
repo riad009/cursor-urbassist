@@ -45,6 +45,8 @@ export interface MapViewParams {
   /** Pixel dimensions of the final output after crop */
   outputWidth: number;
   outputHeight: number;
+  /** Actual scale denominator used (may differ from requested if parcel is large) */
+  effectiveScale: number;
 }
 
 // ─── Web Mercator tile coordinate conversions ───────────────────────────────
@@ -447,8 +449,38 @@ export function computeMapViewParams(
   const mPerDegLng = 111320 * cosLat;
   const mPerDegLat = 111320;
 
-  const realWidthM = (scaleDenominator * containerWidthMM) / 1000;
-  const realHeightM = (scaleDenominator * containerHeightMM) / 1000;
+  // ── Dynamic scale: ensure the ENTIRE parcel fits with 20% padding ──
+  // If the parcel is larger than the fixed-scale viewport, bump the scale.
+  let effectiveScale = scaleDenominator;
+  if (tightBBox) {
+    const parcelWidthM = (tightBBox[2] - tightBBox[0]) * mPerDegLng;
+    const parcelHeightM = (tightBBox[3] - tightBBox[1]) * mPerDegLat;
+    const PADDING = 1.3; // 30% padding around parcel
+
+    // The viewport at this scale shows (containerWidthMM × scale / 1000) meters
+    const viewportWidthM = (effectiveScale * containerWidthMM) / 1000;
+    const viewportHeightM = (effectiveScale * containerHeightMM) / 1000;
+
+    // If parcel + padding exceeds viewport on either axis, increase scale
+    const neededScaleW = (parcelWidthM * PADDING * 1000) / containerWidthMM;
+    const neededScaleH = (parcelHeightM * PADDING * 1000) / containerHeightMM;
+    const neededScale = Math.max(neededScaleW, neededScaleH);
+
+    if (neededScale > effectiveScale) {
+      // Round up to next clean scale for label display (e.g., 2500, 3000, 5000)
+      const CLEAN_SCALES = [1000, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000, 15000, 20000];
+      effectiveScale = CLEAN_SCALES.find(s => s >= neededScale) ?? Math.ceil(neededScale / 1000) * 1000;
+      console.debug(
+        `[map-math] Parcel too large for 1:${scaleDenominator} — ` +
+        `parcel ${parcelWidthM.toFixed(0)}×${parcelHeightM.toFixed(0)}m, ` +
+        `viewport ${viewportWidthM.toFixed(0)}×${viewportHeightM.toFixed(0)}m → ` +
+        `using 1:${effectiveScale}`
+      );
+    }
+  }
+
+  const realWidthM = (effectiveScale * containerWidthMM) / 1000;
+  const realHeightM = (effectiveScale * containerHeightMM) / 1000;
 
   const halfWidthDeg = realWidthM / 2 / mPerDegLng;
   const halfHeightDeg = realHeightM / 2 / mPerDegLat;
@@ -482,5 +514,7 @@ export function computeMapViewParams(
     crop,
     outputWidth: targetWidthPx,
     outputHeight: targetHeightPx,
+    effectiveScale,
   };
 }
+
