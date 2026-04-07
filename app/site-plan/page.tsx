@@ -21,7 +21,7 @@ import {
   Trash2,
   ZoomIn,
   ZoomOut,
-  Grid3X3,
+
   Layers,
   Home,
   Car,
@@ -349,7 +349,7 @@ function SitePlanContent() {
   const [zoom, setZoom] = useState(95);
   const [activeColor, setActiveColor] = useState("#3b82f6");
   const [strokeWidth, setStrokeWidth] = useState(2);
-  const [showGrid, setShowGrid] = useState(true);
+  const showGrid = false;
   const [snapEnabled, setSnapEnabled] = useState(true);
   const snapEnabledRef = useRef(snapEnabled);
   snapEnabledRef.current = snapEnabled;
@@ -2204,7 +2204,7 @@ function SitePlanContent() {
     fabricRef.current = canvas;
     setCanvasReady(true);
 
-    if (showGrid) drawGrid(canvas);
+
 
     canvas.on("selection:created", (e) => { if (e.selected?.[0]) setSelectedObject(e.selected[0]); });
     canvas.on("selection:updated", (e) => { if (e.selected?.[0]) setSelectedObject(e.selected[0]); });
@@ -2895,13 +2895,8 @@ function SitePlanContent() {
     setLayers([]);
     setSelectedObject(null);
     
-    // Ensure dark background is preserved and redraw grid
+    // Ensure dark background is preserved
     canvas.backgroundColor = "#0f172a";
-    if (showGrid) {
-      // Remove existing grid lines and redraw
-      canvas.getObjects().filter((o: any) => o.isGrid).forEach((o) => canvas.remove(o));
-      drawGrid(canvas);
-    }
     
     updateLayers(canvas);
     canvas.renderAll();
@@ -4046,7 +4041,7 @@ function SitePlanContent() {
           </button>
           <button onClick={() => setPreviewMode(!previewMode)} className={cn("p-2 rounded-lg", previewMode ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:text-slate-900")} title="Preview mode (read-only)"><Eye className="w-4 h-4" /></button>
 
-          <button onClick={() => setShowGrid(!showGrid)} className={cn("p-2 rounded-lg", showGrid ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-900")} title="Toggle grid"><Grid3X3 className="w-4 h-4" /></button>
+
           <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("p-2 rounded-lg", snapEnabled ? "bg-purple-100 text-purple-600" : "text-slate-400 hover:text-slate-900")} title="Snap"><Magnet className="w-4 h-4" /></button>
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
             <button onClick={() => handleZoom(-25)} className="p-1 text-slate-400 hover:text-slate-900"><ZoomOut className="w-4 h-4" /></button>
@@ -4380,7 +4375,7 @@ function SitePlanContent() {
           {/* === 3D Viewer Layer (kept mounted to prevent heavy unmount/rebuild lag) === */}
           <div className={cn("absolute inset-0 transition-opacity duration-300 flex overflow-hidden", viewMode === "3d" ? "opacity-100 z-30 pointer-events-auto" : "opacity-0 -z-10 pointer-events-none")} style={{ background: "#111827" }}>
             {/* 3D canvas — fills remaining width */}
-            <div className="flex-1 relative min-w-0 overflow-hidden" style={{ background: "#c8ddf0" }}>
+            <div className="flex-1 relative min-w-0 overflow-hidden">
               <Terrain3DViewer
                 key="3d-terrain-stable"
                 processedSiteData={processedSiteData}
