@@ -872,8 +872,40 @@ export default function ProjectDescriptionPage({
         setAnalysisComplete(false);
         setGenerationError(null);
 
+        // ── Re-fetch PDF URL if lost after page reload ──────────────────
+        // pluDocUrl lives in React state → lost on reload. The page loads it
+        // from the DB or re-fetches async, but the user may click "Start Analysis"
+        // before that async fetch completes. Fix: synchronously re-fetch here.
+        let effectivePdfUrl = pluDocUrl;
+        if (!pluFile && useAutoDoc && !effectivePdfUrl && projectData?.coordinates) {
+            try {
+                const coords = JSON.parse(projectData.coordinates);
+                const coordArray = Array.isArray(coords)
+                    ? coords
+                    : [coords.lng ?? coords.longitude, coords.lat ?? coords.latitude];
+                if (coordArray.length >= 2 && (coordArray[0] !== 0 || coordArray[1] !== 0)) {
+                    console.log("[PLU] pluDocUrl is null after reload — re-fetching from PLU detection API...");
+                    const pluRes = await fetch("/api/plu-detection", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ coordinates: coordArray }),
+                    });
+                    if (pluRes.ok) {
+                        const pluData = await pluRes.json();
+                        if (pluData?.plu?.pdfUrl) {
+                            effectivePdfUrl = pluData.plu.pdfUrl;
+                            setPluDocUrl(effectivePdfUrl); // Cache for future use
+                            console.log(`[PLU] ✓ Re-fetched PDF URL: ${effectivePdfUrl?.slice(0, 80)}`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("[PLU] Failed to re-fetch PDF URL:", e);
+            }
+        }
+
         // Validate: need either a PDF file or auto-fetched URL
-        const hasDoc = !!pluFile || (useAutoDoc && !!pluDocUrl);
+        const hasDoc = !!pluFile || (useAutoDoc && !!effectivePdfUrl);
         if (!hasDoc) {
             setGenerationError("Veuillez uploader un document PLU en PDF ou utiliser le document auto-détecté.");
             setAnalysisProgress(100);
@@ -899,8 +931,8 @@ export default function ProjectDescriptionPage({
             // a) PLU document: user-uploaded file takes priority over auto-detected URL
             if (pluFile) {
                 formData.append("pluPdfFile", pluFile);
-            } else if (useAutoDoc && pluDocUrl) {
-                formData.append("pluPdfUrl", pluDocUrl);
+            } else if (useAutoDoc && effectivePdfUrl) {
+                formData.append("pluPdfUrl", effectivePdfUrl);
             }
 
             // b) Optional lotissement (subdivision rules) file
@@ -935,11 +967,12 @@ export default function ProjectDescriptionPage({
             if (!res.ok) {
                 const isDownloadFailed = (data as Record<string, unknown>).downloadFailed === true;
                 if (isDownloadFailed) {
-                    // PDF URL was provided but the file doesn't exist (404) — tell user to upload manually
+                    // PDF URL was provided but download failed OR placeholder detected
                     clearInterval(interval);
+                    // Use the backend's specific error message (distinguishes placeholder vs 404 vs timeout)
                     setGenerationError(
-                        "⚠ Le document PLU automatique n'a pas pu être téléchargé (fichier introuvable sur le serveur national). " +
-                        "Veuillez télécharger le règlement depuis le site de votre mairie et l'importer manuellement via le bouton « Importer un fichier PDF » ci-dessus, puis relancer l'analyse."
+                        (data.error as string) ||
+                        "⚠ Le document PLU automatique n'a pas pu être téléchargé. Veuillez importer le règlement manuellement."
                     );
                     setAnalysisProgress(100);
                     setAnalysisComplete(true);
@@ -997,8 +1030,8 @@ export default function ProjectDescriptionPage({
                     const feasFormData = new FormData();
                     if (pluFile) {
                         feasFormData.append("pdfFile", pluFile);
-                    } else if (useAutoDoc && pluDocUrl) {
-                        feasFormData.append("pdfUrl", pluDocUrl);
+                    } else if (useAutoDoc && effectivePdfUrl) {
+                        feasFormData.append("pdfUrl", effectivePdfUrl);
                     }
                     feasFormData.append("pluZone", projectZoneType || "non spécifiée");
                     feasFormData.append("projectIntent", intent);
@@ -3441,60 +3474,7 @@ export default function ProjectDescriptionPage({
                                                     {isEn ? "Re-open Site Plan Editor" : "Rouvrir l'éditeur de plan de masse"}
                                                 </button>
                                             </div>
-                                            {/* Download Full Dossier */}
-                                            <button
-                                                type="button"
-                                                disabled={dossierGenerating}
-                                                onClick={async () => {
-                                                    try {
-                                                        // Fix #5: Block download if site plan has unsaved changes
-                                                        const editorState = useEditorStore.getState();
-                                                        if (editorState.isDirty && editorState.projectId === projectId) {
-                                                            const msg = isEn
-                                                                ? 'Your site plan has unsaved changes. Please go back to the Site Plan Editor and save before downloading.'
-                                                                : 'Votre plan de masse a des modifications non sauvegardées. Veuillez retourner à l\'éditeur et sauvegarder avant de télécharger.';
-                                                            alert(msg);
-                                                            return;
-                                                        }
-                                                        setDossierGenerating(true);
-                                                        setDossierProgress({ msg: isEn ? "Fetching project data..." : "Chargement des données...", pct: 5 });
-                                                        const baseUrl = window.location.origin;
-                                                        const data = await fetchDossierData(projectId, baseUrl);
-                                                        const imgs: DossierCapturedImages = {
-                                                            // Fix #6: fall back to DB-persisted pc2ImageBase64 if blob URL is gone
-                                                            PC2: capturedImages['PC2'] || (data.sitePlanData as any)?.pc2ImageBase64 || undefined,
-                                                            PC3: capturedImages['PC3'] || undefined,
-                                                            'PC5.2': capturedImages['PC5.2'] || undefined,
-                                                        };
-                                                        const doc = await assembleDossier(data, {
-                                                            projectId,
-                                                            baseUrl,
-                                                            capturedImages: imgs,
-                                                            onProgress: (msg, pct) => setDossierProgress({ msg, pct }),
-                                                        });
-                                                        const filename = `Dossier_PC_${sanitizeFilename(projectData?.address || projectName || 'projet')}.pdf`;
-                                                        savePdfDoc(doc, filename);
-                                                    } catch (err) {
-                                                        console.error('[Dossier] Generation failed:', err);
-                                                        alert(isEn ? 'PDF generation failed. Please try again.' : 'La génération du PDF a échoué. Veuillez réessayer.');
-                                                    } finally {
-                                                        setDossierGenerating(false);
-                                                        setDossierProgress({ msg: '', pct: 0 });
-                                                    }
-                                                }}
-                                                className={cn(
-                                                    "inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md",
-                                                    dossierGenerating
-                                                        ? "bg-slate-300 text-slate-500 cursor-wait"
-                                                        : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white hover:shadow-lg"
-                                                )}
-                                            >
-                                                {dossierGenerating ? (
-                                                    <><Loader2 className="w-4 h-4 animate-spin" /> {dossierProgress.msg || (isEn ? "Generating..." : "Génération...")}</>
-                                                ) : (
-                                                    <><Download className="w-4 h-4" /> {isEn ? "Download Complete Dossier (PDF)" : "Télécharger le dossier complet"}</>
-                                                )}
-                                            </button>
+
                                         </div>
                                         </div>
 

@@ -137,8 +137,8 @@ const MODEL_NAME = "gemini-2.5-flash"; // 2.5-flash — fastest available model 
 const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB — File API handles large files natively
 const FILE_API_POLL_INTERVAL_MS = 2_000; // Poll every 2s while waiting for file to become ACTIVE
 const FILE_API_MAX_POLL_ATTEMPTS = 22; // Max 44s of polling (22 * 2s) — leave time for Gemini calls
-const GEMINI_CALL_TIMEOUT_MS = 50_000; // 50s max per individual Gemini call
-const MASTER_DEADLINE_MS = 115_000; // 115s — hard ceiling to return before Vercel kills us at 120s
+const GEMINI_CALL_TIMEOUT_MS = 90_000; // 90s max per individual Gemini call
+const MASTER_DEADLINE_MS = 180_000; // 180s — generous deadline (Vercel Pro allows 300s, local has no limit)
 
 // ─── Gemini responseSchema for PluRules ──────────────────────────────────────
 // This guarantees the output JSON matches our TypeScript interface exactly.
@@ -304,10 +304,12 @@ export async function POST(request: NextRequest) {
       // Some municipalities upload a tiny placeholder PDF that says
       // "visit our website to download the real documents".
       // These pass %PDF validation but have no useful regulatory content.
+      // For URL-fetched PDFs, also reject files < 50KB (too small to be real regulations).
       if (rawPdfBuffer) {
-        const phCheck = await detectPlaceholderPdf(rawPdfBuffer);
+        const isFromUrl = !pdfFile; // If no file was uploaded, the PDF came from a URL
+        const phCheck = await detectPlaceholderPdf(rawPdfBuffer, isFromUrl);
         if (phCheck.isPlaceholder) {
-          console.warn(`[analyze-plu] ⚠ Placeholder PDF detected from URL — discarding. ${phCheck.reason}`);
+          console.warn(`[analyze-plu] ⚠ Placeholder PDF detected — discarding. ${phCheck.reason}`);
           rawPdfBuffer = null; // Force pipeline to fall through to text-only / manual upload
           // Store info so we can return it in the response
           (request as unknown as Record<string, unknown>).__placeholderInfo = phCheck;
@@ -459,9 +461,29 @@ export async function POST(request: NextRequest) {
     // ── Check if we have any usable data ─────────────────────────────────
     const hasFileApiPdf = uploadedFileUris.length > 0;
     if (!hasFileApiPdf && !degradedModeText && !zoneFocusedText && pdfUrl.trim()) {
-      // PDF URL was provided but ALL download strategies failed (404, timeout, corrupted, etc.)
-      console.error(`[analyze-plu] ✗ All PDF download strategies failed for URL: ${pdfUrl.slice(0, 200)}`);
+      const placeholderInfo = (request as unknown as Record<string, unknown>).__placeholderInfo as { isPlaceholder: boolean; suggestedUrl: string | null; reason: string | null } | undefined;
       cleanupTmpFiles(tmpFilesToCleanup);
+
+      if (placeholderInfo?.isPlaceholder) {
+        // PDF was downloaded but it's a placeholder/redirect/tiny document
+        console.error(`[analyze-plu] ✗ PDF is a placeholder — ${placeholderInfo.reason}`);
+        return NextResponse.json(
+          {
+            error: `Le document PLU détecté automatiquement n'est pas un vrai règlement (${placeholderInfo.reason}). ` +
+              (placeholderInfo.suggestedUrl
+                ? `Le vrai document est disponible ici : ${placeholderInfo.suggestedUrl}. Téléchargez-le et importez-le manuellement.`
+                : `Veuillez télécharger le règlement depuis le site de votre collectivité et l'importer via le bouton « Importer un fichier PDF ».`),
+            downloadFailed: true,
+            placeholderDetected: true,
+            suggestedUrl: placeholderInfo.suggestedUrl,
+            failedUrl: pdfUrl.slice(0, 300),
+          },
+          { status: 422 }
+        );
+      }
+
+      // PDF URL was provided but ALL download strategies failed (404, timeout, etc.)
+      console.error(`[analyze-plu] ✗ All PDF download strategies failed for URL: ${pdfUrl.slice(0, 200)}`);
       return NextResponse.json(
         {
           error: "Le document PLU n'a pas pu être téléchargé (le fichier est introuvable ou le serveur ne répond pas). Veuillez télécharger le règlement manuellement depuis le site de votre collectivité et l'importer via le bouton « Importer un fichier PDF ».",
@@ -1003,7 +1025,11 @@ async function callGeminiWithFileApi(
     model: MODEL_NAME,
     systemInstruction: systemPrompt,
     generationConfig,
-  });
+    // Disable "thinking" for gemini-2.5-flash — thinking wastes 20-40s on internal
+    // reasoning tokens before responding, causing timeouts. We need fast extraction.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...(MODEL_NAME.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } as any : {}),
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
   // Real timeout via Promise.race — if Gemini hangs, we move on
   const timeoutPromise = new Promise<never>((_, reject) =>

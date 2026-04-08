@@ -70,7 +70,6 @@ const Terrain3DViewer = dynamic(() => import("@/components/three/Terrain3DViewer
 import type { UserBuilding3D } from "@/components/three/Terrain3DViewer";
 import { BuildingDetailPanel,
   createDefaultBuilding,
-  createBuildingFromOSM,
 } from "@/components/site-plan/BuildingDetailPanel";
 import { ElementPropertiesPanel } from "@/components/site-plan/ElementPropertiesPanel";
 import Terrain3DRightPanel from "@/components/site-plan/Terrain3DRightPanel";
@@ -180,33 +179,6 @@ const SCALES = [
   { label: "1:500", value: 5, pixelsPerMeter: 2 },
 ];
 
-const tools = [
-  { id: "select", label: "Select", icon: MousePointer2, shortcut: "V", tooltip: "Select and move objects" },
-  { id: "pan", label: "Pan", icon: Move, shortcut: "H", tooltip: "Pan the canvas" },
-  { id: "line", label: "Line", icon: Minus, shortcut: "L", tooltip: "Draw walls, fences, or segments" },
-  { id: "rectangle", label: "Rectangle", icon: Square, shortcut: "R", tooltip: "Quick rectangle for buildings or surfaces" },
-  { id: "polygon", label: "Polygon", icon: Pentagon, shortcut: "P", tooltip: "Free shape: click points, double-click to close" },
-  { id: "circle", label: "Circle", icon: Circle, shortcut: "C", tooltip: "Circles or round surfaces" },
-  { id: "pencil", label: "Pencil", icon: Pencil, shortcut: "B", tooltip: "Freehand drawing" },
-  { id: "text", label: "Text", icon: Type, shortcut: "T", tooltip: "Click to add editable text" },
-  { id: "arrow", label: "Arrow", icon: ArrowRight, shortcut: "W", tooltip: "Arrow annotation" },
-  { id: "callout", label: "Callout", icon: MessageSquare, shortcut: "K", tooltip: "Callout bubble annotation" },
-  { id: "measure", label: "Measure", icon: Ruler, shortcut: "M", tooltip: "Measure distance between two points" },
-  { id: "elevation", label: "Elevation", icon: Ruler, shortcut: "E", tooltip: "Click to place elevation point (m)" },
-  { id: "section", label: "Section line", icon: Minus, shortcut: "S", tooltip: "Draw section cut line" },
-  { id: "parcel", label: "Land Parcel", icon: MapPin, shortcut: "A", tooltip: "Draw parcel boundary (polygon)" },
-  { id: "vrd", label: "VRD Networks", icon: Zap, shortcut: "D", tooltip: "Utilities: water, wastewater, electricity, etc." },
-  { id: "vegetation", label: "Vegetation", icon: Trees, shortcut: "G", tooltip: "Place existing vegetation (trees, shrubs)" },
-  { id: "viewpoint", label: "Viewpoint", icon: Eye, shortcut: "W", tooltip: "Place PC7/PC8 camera viewpoint with direction" },
-];
-
-/** Phase 8: Tool groups with section labels for grouped toolbar rendering */
-const TOOL_GROUPS = [
-  { label: "Select", ids: ["select", "pan"] },
-  { label: "Draw", ids: ["line", "rectangle", "polygon", "circle", "pencil"] },
-  { label: "Annotate", ids: ["text", "arrow", "callout", "measure", "elevation", "section"] },
-  { label: "Place", ids: ["parcel", "vrd", "vegetation", "viewpoint"] },
-];
 
 const templatesList = [
   { id: "access", label: "Access", icon: Triangle, color: "#f59e0b", width: 0, height: 0 }, // Site access: triangle + label
@@ -482,7 +454,7 @@ function SitePlanContent() {
 
   // Elevation points (spec 2.5): click to place, value in m (e.g. 0.00 / -0.20 / +1.50)
   const [elevationPoints, setElevationPoints] = useState<{ id: string; x: number; y: number; value: number }[]>([]);
-  const [loadingIgnTerrain, setLoadingIgnTerrain] = useState(false);
+
   // Section line: user-placed line for section cut (spec 2.9)
   const [previewMode, setPreviewMode] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -1581,72 +1553,6 @@ function SitePlanContent() {
     setLoadingParcelsGeoJSON(false);
   }, [currentProjectId, processedSiteData, projectData?.parcelsGeoJSON, projectData?.parcelGeometry, currentScale.pixelsPerMeter, canvasSize, updateLayers]);
 
-  // Load 3D terrain from IGN RGE ALTI® and add as elevation points
-  const loadTerrainFromIgn = useCallback(async () => {
-    const canvas = fabricRef.current;
-    if (!currentProjectId || !canvas) return;
-    setLoadingIgnTerrain(true);
-    try {
-      const w = canvasSize.width;
-      const h = canvasSize.height;
-      const ppm = currentScale.pixelsPerMeter;
-      const res = await fetch(
-        `/api/projects/${currentProjectId}/terrain-from-ign?canvasWidth=${w}&canvasHeight=${h}&pixelsPerMeter=${ppm}`
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to load terrain from IGN");
-        return;
-      }
-      const points = data.points ?? [];
-      if (points.length === 0) {
-        alert("No elevation data for this location (RGE ALTI® may not cover it).");
-        return;
-      }
-      const r = 8;
-      const newPts: { id: string; x: number; y: number; value: number }[] = [];
-      points.forEach((pt: { x: number; y: number; value: number }, i: number) => {
-        const id = `ign-${Date.now()}-${i}`;
-        newPts.push({ id, x: pt.x, y: pt.y, value: pt.value });
-        const circle = new fabric.Circle({
-          left: pt.x - r,
-          top: pt.y - r,
-          radius: r,
-          fill: "#0ea5e9",
-          stroke: "#0284c7",
-          strokeWidth: 1,
-        });
-        (circle as any).id = id;
-        (circle as any).isElevationPoint = true;
-        (circle as any).elevationValue = pt.value;
-        (circle as any).excludeFromExport = false;
-        canvas.add(circle);
-        const label = new fabric.Text(`${pt.value >= 0 ? "+" : ""}${pt.value.toFixed(2)}`, {
-          left: pt.x,
-          top: pt.y + r + 2,
-          fontSize: 10,
-          fontFamily: "monospace",
-          fill: "#0ea5e9",
-          originX: "center",
-          originY: "top",
-        });
-        (label as any).isMeasurement = true;
-        (label as any).parentId = id;
-        canvas.add(label);
-      });
-      setElevationPoints((prev) => [...prev, ...newPts]);
-      canvas.renderAll();
-      updateLayers(canvas);
-      pushUndoState();
-      setIsDirty(true);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to load terrain from IGN");
-    } finally {
-      setLoadingIgnTerrain(false);
-    }
-  }, [currentProjectId, canvasSize, currentScale.pixelsPerMeter, updateLayers, pushUndoState]);
-
   // Load saved site plan; after load, optionally draw parcel outlines from project data
   const loadSitePlan = useCallback(
     (projectId: string, onLoaded?: () => void) => {
@@ -2668,6 +2574,59 @@ function SitePlanContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── Middle-mouse-button pan (CAD-standard navigation) ─────────────────────
+  // Intercepts middle-click (button 1) for viewport panning regardless of active tool.
+  // This is the industry-standard UX for CAD/design tools (Figma, AutoCAD, Rhino).
+  const middlePanRef = useRef<{ active: boolean; lastX: number; lastY: number }>({ active: false, lastX: 0, lastY: 0 });
+  useEffect(() => {
+    const el = containerRef.current;
+    const canvas = fabricRef.current;
+    if (!el || !canvas) return;
+
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 1) return; // Only middle click
+      e.preventDefault();
+      middlePanRef.current = { active: true, lastX: e.clientX, lastY: e.clientY };
+      el.style.cursor = "grabbing";
+    };
+    const onMove = (e: MouseEvent) => {
+      const pan = middlePanRef.current;
+      if (!pan.active) return;
+      e.preventDefault();
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return;
+      const dx = e.clientX - pan.lastX;
+      const dy = e.clientY - pan.lastY;
+      pan.lastX = e.clientX;
+      pan.lastY = e.clientY;
+      const newVpt: [number, number, number, number, number, number] = [
+        vpt[0], vpt[1], vpt[2], vpt[3],
+        vpt[4] + dx, vpt[5] + dy,
+      ];
+      canvas.setViewportTransform(newVpt);
+      canvas.renderAll();
+    };
+    const onUp = (e: MouseEvent) => {
+      if (e.button !== 1 && !middlePanRef.current.active) return;
+      middlePanRef.current.active = false;
+      el.style.cursor = "";
+    };
+    // Prevent default middle-click auto-scroll behavior
+    const onAuxClick = (e: MouseEvent) => { if (e.button === 1) e.preventDefault(); };
+
+    el.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    el.addEventListener("auxclick", onAuxClick);
+    return () => {
+      el.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      el.removeEventListener("auxclick", onAuxClick);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Delete selected ────────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
     const canvas = fabricRef.current;
@@ -2808,36 +2767,6 @@ function SitePlanContent() {
   // mousePos (state) intentionally removed — use mousePosRef.current to avoid render cascade.
   }, [polygonPoints, activeTool, activeColor, calculateDistance, formatMeasurement, viewMode]);
 
-  // ─── Actions ───────────────────────────────────────────────────────────────
-
-  const handleToolSelect = (tool: Tool) => {
-    setActiveTool(tool); setPolygonPoints([]); setCurrentMeasurement("");
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    if (tool === "pencil") {
-      canvas.isDrawingMode = true;
-      // PencilBrush for freehand
-      const brush = new fabric.PencilBrush(canvas);
-      brush.color = activeColor;
-      brush.width = strokeWidth;
-      canvas.freeDrawingBrush = brush;
-      canvas.selection = false;
-    } else {
-      canvas.isDrawingMode = false;
-      canvas.selection = tool === "select";
-      
-      // Fix: Bulk toggle interactability for drawn objects
-      const isSelect = tool === "select";
-      canvas.getObjects().forEach((o: any) => {
-        // Skip grid, measurements, and other system overlays
-        if (o.isGrid || o.isMeasurement || o.isPolygonPreview || o.isRegulatoryFootprint || o.excludeFromExport) return;
-        o.set("selectable", isSelect);
-        o.set("evented", isSelect);
-      });
-      if (!isSelect) canvas.discardActiveObject();
-      canvas.requestRenderAll();
-    }
-  };
 
   const handleZoom = (delta: number) => {
     const nz = Math.max(25, Math.min(400, zoom + delta));
@@ -3067,252 +2996,6 @@ function SitePlanContent() {
     canvas.setActiveObject(triangle);
     canvas.renderAll();
     updateLayers(canvas);
-  };
-
-  const addNorthArrow = () => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    const arrowId = `compass-${Date.now()}`;
-    const northAngle = projectData?.northAngle ?? 0;
-    const s = metersToPixels(2);
-    // Position compass at top-right of the canvas
-    const cx = canvasSize.width - s * 2;
-    const cy = s * 2;
-
-    // North arrow (main pointer)
-    const points = [
-      { x: 0, y: -s }, { x: -s * 0.3, y: s * 0.15 },
-      { x: 0, y: -s * 0.1 }, { x: s * 0.3, y: s * 0.15 },
-    ];
-    const arrow = new fabric.Polygon(points, {
-      left: cx, top: cy, originX: "center", originY: "center",
-      fill: "#1e293b", stroke: "#64748b", strokeWidth: 1,
-    });
-    (arrow as any).id = arrowId;
-    (arrow as any).elementName = "Compass";
-    arrow.set({ angle: -northAngle });
-    canvas.add(arrow);
-
-    // Compass circle
-    const compassCircle = new fabric.Circle({
-      left: cx - s * 0.9, top: cy - s * 0.9,
-      radius: s * 0.9, fill: "transparent", stroke: "#94a3b8", strokeWidth: 1,
-      selectable: false, evented: false,
-    });
-    (compassCircle as any).isMeasurement = true;
-    (compassCircle as any).parentId = arrowId;
-    canvas.add(compassCircle);
-
-    // Cardinal labels N/S/E/W
-    const labels = [
-      { text: "N", x: cx, y: cy - s * 1.15, weight: "bold" as const },
-      { text: "S", x: cx, y: cy + s * 1.0, weight: "normal" as const },
-      { text: "E", x: cx + s * 1.05, y: cy - 4, weight: "normal" as const },
-      { text: "W", x: cx - s * 1.1, y: cy - 4, weight: "normal" as const },
-    ];
-    labels.forEach(({ text, x, y, weight }) => {
-      const lbl = new fabric.Text(text, {
-        left: x, top: y, fontSize: text === "N" ? 14 : 10, fontFamily: "sans-serif",
-        fontWeight: weight, fill: text === "N" ? "#1e293b" : "#94a3b8",
-        originX: "center", originY: "center",
-        selectable: false, evented: false,
-      });
-      (lbl as any).isMeasurement = true;
-      (lbl as any).parentId = arrowId;
-      canvas.add(lbl);
-    });
-
-    canvas.renderAll();
-  };
-
-  /** Auto-add dimension lines from each building to nearest parcel boundary edges */
-  const autoAddBoundaryDimensions = () => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    const ppm = currentScale.pixelsPerMeter;
-
-    // Find parcel polygon(s)
-    const parcels = canvas.getObjects().filter((o: any) => o.isParcel);
-    if (parcels.length === 0) { alert("No parcel boundary found. Draw a parcel first."); return; }
-
-    // Find buildings
-    const buildings = canvas.getObjects().filter((o: any) =>
-      (o as any).templateType || (o as any).surfaceType === "building"
-    );
-    if (buildings.length === 0) { alert("No buildings found on the plan."); return; }
-
-    // Remove existing boundary dimensions
-    canvas.getObjects().filter((o: any) => o.isBoundaryDimension).forEach(o => canvas.remove(o));
-
-    parcels.forEach((parcel: any) => {
-      // Get parcel edge segments
-      const points = parcel.points || [];
-      if (points.length < 3) return;
-      const mat = parcel.calcTransformMatrix();
-      const worldPts = points.map((p: { x: number; y: number }) => {
-        const pt = fabric.util.transformPoint(new fabric.Point(p.x, p.y), mat);
-        return { x: pt.x, y: pt.y };
-      });
-
-      // ── Classify each parcel edge into front/rear/side-left/side-right ──
-      // Compute parcel centroid
-      let pcx = 0, pcy = 0;
-      worldPts.forEach((p: { x: number; y: number }) => { pcx += p.x; pcy += p.y; });
-      pcx /= worldPts.length; pcy /= worldPts.length;
-
-      // Determine "front" direction — bottom of canvas is usually the road/street side
-      // We use the downward direction (positive Y) as the default road direction
-      const roadAngle = Math.PI / 2; // pointing down = road
-
-      interface EdgeInfo {
-        idx: number;
-        a: { x: number; y: number };
-        b: { x: number; y: number };
-        midX: number;
-        midY: number;
-        angle: number; // bearing from centroid to edge midpoint
-        category: "front" | "rear" | "side-left" | "side-right";
-      }
-
-      const edges: EdgeInfo[] = [];
-      for (let i = 0; i < worldPts.length; i++) {
-        const a = worldPts[i];
-        const b = worldPts[(i + 1) % worldPts.length];
-        const midX = (a.x + b.x) / 2;
-        const midY = (a.y + b.y) / 2;
-        const angle = Math.atan2(midY - pcy, midX - pcx); // bearing from centroid to edge mid
-
-        // Compare with road direction to classify
-        let diff = angle - roadAngle;
-        while (diff > Math.PI) diff -= 2 * Math.PI;
-        while (diff < -Math.PI) diff += 2 * Math.PI;
-        const absDiff = Math.abs(diff);
-
-        let category: EdgeInfo["category"];
-        if (absDiff < Math.PI / 4) category = "front";
-        else if (absDiff > 3 * Math.PI / 4) category = "rear";
-        else category = diff > 0 ? "side-right" : "side-left";
-
-        edges.push({ idx: i, a, b, midX, midY, angle, category });
-      }
-
-      // Colors for each boundary type
-      const categoryStyles: Record<string, { color: string; label: string }> = {
-        "front": { color: "#f97316", label: "Front" },
-        "rear": { color: "#8b5cf6", label: "Rear" },
-        "side-left": { color: "#06b6d4", label: "Left" },
-        "side-right": { color: "#ec4899", label: "Right" },
-      };
-
-      buildings.forEach((bldg: any) => {
-        const bc = (bldg as fabric.Object).getCenterPoint();
-        // Get building bounding box for edge-to-edge measurement
-        const br = (bldg as fabric.Object).getBoundingRect();
-        const bldgCorners = [
-          { x: br.left, y: br.top },
-          { x: br.left + br.width, y: br.top },
-          { x: br.left + br.width, y: br.top + br.height },
-          { x: br.left, y: br.top + br.height },
-        ];
-
-        // For each boundary category, find the closest edge and distance from building
-        const categoriesUsed = new Set<string>();
-
-        // Group edges by category, find closest edge per category
-        const byCategory: Record<string, { dist: number; projPt: { x: number; y: number }; bldgPt: { x: number; y: number } }> = {};
-
-        edges.forEach((edge) => {
-          // Find closest point from any building corner/center to this edge
-          const pointsToCheck = [...bldgCorners, bc];
-          let bestDist = Infinity;
-          let bestProj = { x: 0, y: 0 };
-          let bestBldgPt: { x: number; y: number } = { x: bc.x, y: bc.y };
-
-          for (const pt of pointsToCheck) {
-            const dx = edge.b.x - edge.a.x, dy = edge.b.y - edge.a.y;
-            const lenSq = dx * dx + dy * dy;
-            let t = lenSq > 0 ? ((pt.x - edge.a.x) * dx + (pt.y - edge.a.y) * dy) / lenSq : 0;
-            t = Math.max(0, Math.min(1, t));
-            const proj = { x: edge.a.x + t * dx, y: edge.a.y + t * dy };
-            const d = Math.sqrt((pt.x - proj.x) ** 2 + (pt.y - proj.y) ** 2);
-            if (d < bestDist) {
-              bestDist = d;
-              bestProj = proj;
-              bestBldgPt = pt;
-            }
-          }
-
-          const cat = edge.category;
-          if (!byCategory[cat] || bestDist < byCategory[cat].dist) {
-            byCategory[cat] = { dist: bestDist, projPt: bestProj, bldgPt: bestBldgPt };
-          }
-        });
-
-        // Draw dimension lines for ALL 4 boundary categories
-        Object.entries(byCategory).forEach(([cat, info]) => {
-          const distM = info.dist / ppm;
-          const style = categoryStyles[cat] || categoryStyles["front"];
-          const dimId = `bdim-${cat}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-          // Dimension line from building edge to parcel boundary
-          const dimLine = new fabric.Line(
-            [info.bldgPt.x, info.bldgPt.y, info.projPt.x, info.projPt.y],
-            {
-              stroke: style.color, strokeWidth: 1.5, strokeDashArray: [4, 3],
-              selectable: false, evented: false,
-            }
-          );
-          (dimLine as any).isBoundaryDimension = true;
-          (dimLine as any).isMeasurement = true;
-          (dimLine as any).parentId = dimId;
-          (dimLine as any).boundaryCategory = cat;
-          canvas.add(dimLine);
-
-          // Small endpoint circles
-          [info.bldgPt, info.projPt].forEach((pt) => {
-            const dot = new fabric.Circle({
-              left: pt.x - 2, top: pt.y - 2, radius: 2,
-              fill: style.color, stroke: "transparent",
-              selectable: false, evented: false,
-            });
-            (dot as any).isBoundaryDimension = true;
-            (dot as any).isMeasurement = true;
-            (dot as any).parentId = dimId;
-            canvas.add(dot);
-          });
-
-          // Label with category and distance
-          const mx = (info.bldgPt.x + info.projPt.x) / 2;
-          const my = (info.bldgPt.y + info.projPt.y) / 2;
-
-          // Check against PLU setback rules if available
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const pluSetbacks = (projectData as any)?.pluSetbacks || {};
-          const setbackRule = (pluSetbacks as Record<string, number>)[cat] || 0;
-          const isCompliant = setbackRule <= 0 || distM >= setbackRule;
-          const complianceTag = setbackRule > 0
-            ? (isCompliant ? " ✓" : ` ✗ (min ${setbackRule}m)`)
-            : "";
-
-          const label = new fabric.Text(
-            `${style.label}: ${distM.toFixed(2)}m${complianceTag}`,
-            {
-              left: mx, top: my - 12, fontSize: 10, fontFamily: "monospace",
-              fill: isCompliant ? style.color : "#ef4444",
-              backgroundColor: "rgba(255,255,255,0.92)", padding: 3,
-              originX: "center", originY: "bottom",
-              selectable: false, evented: false,
-            }
-          );
-          (label as any).isBoundaryDimension = true;
-          (label as any).isMeasurement = true;
-          (label as any).parentId = dimId;
-          canvas.add(label);
-        });
-      });
-    });
-
-    canvas.renderAll();
   };
 
   // ─── Phase 6: Parcel Management & Geometry ───────────────────────────────
@@ -3567,25 +3250,6 @@ function SitePlanContent() {
     }
   };
 
-  const addBuildingToCanvas = (b: BuildingDetail, isExisting: boolean) => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-    const center = canvas.getCenterPoint();
-    addBuildingToCanvasAt(b, isExisting, center.x, center.y, "house");
-  };
-
-  const addExistingBuilding = () => {
-    const b = createDefaultBuilding({ isExisting: true, name: "Existing Building", color: "#6b7280" });
-    setBuildingDetails((prev) => [...prev, b]);
-    addBuildingToCanvas(b, true);
-  };
-
-  const addNewBuilding = () => {
-    const b = createDefaultBuilding({ name: "New Construction", color: "#3b82f6" });
-    setBuildingDetails((prev) => [...prev, b]);
-    addBuildingToCanvas(b, false);
-  };
-
   // ─── Computed values ───────────────────────────────────────────────────────
 
   const BUILDING_TEMPLATES = ["house", "garage", "terrace", "pool"];
@@ -3818,163 +3482,182 @@ function SitePlanContent() {
       {/* Real-time PLU Compliance Banner — powered by plu-math.ts engine */}
       <PluAlertBanner report={pluComplianceReport} />
 
-      {/* Top Bar */}
-      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 gap-3 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          {(() => {
-            const backHref = returnToUrl || (currentProjectId ? `/projects/${currentProjectId}/dashboard` : "/projects");
-            return (
-              <button
-                type="button"
-                onClick={async () => {
-                  if (isDirty && currentProjectId) await saveSitePlan();
-                  router.push(backHref);
-                }}
-                className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors shrink-0"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span className="text-sm font-medium hidden sm:block">
-                  {returnToUrl ? "Back to Project" : "Back to Dashboard"}
-                </span>
-              </button>
-            );
-          })()}
-          <div className="h-6 w-px bg-white/10 shrink-0" />
-          <h1 className="text-lg font-semibold text-slate-900 truncate">
-            Site Plan / Plan de Masse
+      {/* ═══ Production-Grade Toolbar ═══ */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap');
+        .sp-toolbar { font-family: 'DM Sans', system-ui, -apple-system, sans-serif; }
+        .sp-toolbar * { font-family: inherit; }
+        .sp-seg-btn { position: relative; transition: all 0.2s cubic-bezier(0.4,0,0.2,1); }
+        .sp-seg-btn::after { content: ''; position: absolute; inset: 0; border-radius: inherit; opacity: 0; transition: opacity 0.15s; background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent); }
+        .sp-seg-btn:hover::after { opacity: 1; }
+        .sp-icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; transition: all 0.15s ease; position: relative; }
+        .sp-icon-btn:hover { background: rgba(0,0,0,0.06); }
+        .sp-icon-btn:active { transform: scale(0.92); }
+        .sp-icon-btn.sp-active { background: rgba(99,102,241,0.1); color: #6366f1; }
+        .sp-divider { width: 1px; height: 24px; background: linear-gradient(180deg, transparent, rgba(0,0,0,0.08), transparent); margin: 0 4px; flex-shrink: 0; }
+        .sp-save-pulse { animation: sp-save-glow 2s ease-out forwards; }
+        @keyframes sp-save-glow { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); } 50% { box-shadow: 0 0 0 6px rgba(16,185,129,0); } 100% { box-shadow: none; } }
+      `}</style>
+      <div className="sp-toolbar h-12 bg-white border-b border-slate-200/80 flex items-center px-3 gap-0 shrink-0" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+
+        {/* ── Group 1: Navigation ── */}
+        {(() => {
+          const backHref = returnToUrl || (currentProjectId ? `/projects/${currentProjectId}/dashboard` : "/projects");
+          return (
+            <button
+              type="button"
+              onClick={async () => {
+                if (isDirty && currentProjectId) await saveSitePlan();
+                router.push(backHref);
+              }}
+              className="sp-icon-btn text-slate-400 hover:text-slate-700 shrink-0"
+              title={returnToUrl ? "Back to Project" : "Back to Dashboard"}
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          );
+        })()}
+        <div className="sp-divider" />
+
+        {/* ── Group 2: Title + Scale Badge ── */}
+        <div className="flex items-center gap-2 min-w-0 mr-1">
+          <h1 className="text-[13px] font-semibold text-slate-800 truncate leading-none whitespace-nowrap">
+            Site Plan
           </h1>
-          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-600 text-xs font-medium shrink-0">
+          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wide uppercase shrink-0"
+            style={{ background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', color: '#059669', letterSpacing: '0.05em' }}
+          >
             {currentScale.label}
           </span>
+        </div>
+        <div className="sp-divider" />
 
+        {/* ── Group 3: View Mode Toggle (2D / 3D) ── */}
+        <div className="flex items-center rounded-lg p-0.5 shrink-0" style={{ background: '#f1f5f9' }}>
+          <button
+            onClick={() => {
+              setViewMode("2d");
+              setSelectedBuildingId3d(null);
+              setTimeout(() => fabricRef.current?.requestRenderAll(), 50);
+            }}
+            className={cn(
+              "sp-seg-btn px-3 py-1 rounded-md text-[12px] font-semibold transition-all flex items-center gap-1.5",
+              viewMode === "2d"
+                ? "text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+            style={viewMode === "2d" ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)' } : {}}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            2D
+          </button>
+          <button
+            onClick={() => {
+              const canvas = fabricRef.current;
+              if (canvas) {
+                const positions: Record<string, { x: number; y: number; angle: number }> = {};
+                buildingDetails.forEach((b) => {
+                  const obj = canvas.getObjects().find((o: any) =>
+                    (o.id === b.id || o.buildingDetailId === b.id)
+                  );
+                  if (obj) {
+                    const l = obj.left ?? 0;
+                    const t = obj.top ?? 0;
+                    const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
+                    const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
+                    positions[b.id] = { x: l + w / 2, y: t + h / 2, angle: obj.angle || 0 };
+                  }
+                });
+                buildingPositionsRef.current = positions;
+              }
+              setScene3dVersion(v => v + 1);
+              setViewMode("3d");
+            }}
+            className={cn(
+              "sp-seg-btn px-3 py-1 rounded-md text-[12px] font-semibold transition-all flex items-center gap-1.5",
+              viewMode === "3d"
+                ? "text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+            style={viewMode === "3d" ? { background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' } : {}}
+          >
+            <CuboidIcon className="w-3.5 h-3.5" />
+            3D
+          </button>
+        </div>
+        <div className="sp-divider" />
 
-          {/* 2D / 3D Toggle */}
-          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
-            <button
-              onClick={() => {
-                setViewMode("2d");
-                setSelectedBuildingId3d(null);
-                // Force canvas re-render on switch back
-                setTimeout(() => fabricRef.current?.requestRenderAll(), 50);
-              }}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
-                viewMode === "2d" ? "bg-blue-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
-              )}
-            >
-              <LayoutGrid className="w-4 h-4" />
-              2D
-            </button>
-            <button
-              onClick={() => {
-                // Cache building positions from canvas before switching
-                const canvas = fabricRef.current;
-                if (canvas) {
-                  const positions: Record<string, { x: number; y: number; angle: number }> = {};
-                  buildingDetails.forEach((b) => {
-                    const obj = canvas.getObjects().find((o: any) =>
-                      (o.id === b.id || o.buildingDetailId === b.id)
-                    );
-                    if (obj) {
-                      const l = obj.left ?? 0;
-                      const t = obj.top ?? 0;
-                      const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
-                      const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
-                      positions[b.id] = { x: l + w / 2, y: t + h / 2, angle: obj.angle || 0 };
-                    }
-                  });
-                  buildingPositionsRef.current = positions;
-                }
-                setScene3dVersion(v => v + 1);
-                setViewMode("3d");
-              }}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1",
-                viewMode === "3d" ? "bg-violet-500 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
-              )}
-            >
-              <CuboidIcon className="w-4 h-4" />
-              View in 3D
-            </button>
-          </div>
-
-          {/* Guided vs Free design */}
-          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
-            <button
-              onClick={() => setCreationMode("guided")}
-              className={cn(
-                "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
-                creationMode === "guided" ? "bg-amber-500/80 text-slate-900 shadow" : "text-slate-400 hover:text-slate-900"
-              )}
-            >
-              Guided
-            </button>
-            <button
-              onClick={() => { setCreationMode("free"); setPlacementMode(false); }}
-              className={cn(
-                "px-2.5 py-1.5 rounded-md text-xs font-medium transition-all",
-                creationMode === "free" ? "bg-slate-200 text-slate-900" : "text-slate-400 hover:text-slate-900"
-              )}
-            >
-              Free design
-            </button>
-          </div>
+        {/* ── Group 4: Creation Mode (Guided / Free) ── */}
+        <div className="flex items-center rounded-lg p-0.5 shrink-0" style={{ background: '#f1f5f9' }}>
+          <button
+            onClick={() => setCreationMode("guided")}
+            className={cn(
+              "sp-seg-btn px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+              creationMode === "guided"
+                ? "text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+            style={creationMode === "guided" ? { background: 'linear-gradient(135deg, #f59e0b, #d97706)' } : {}}
+          >
+            Guided
+          </button>
+          <button
+            onClick={() => { setCreationMode("free"); setPlacementMode(false); }}
+            className={cn(
+              "sp-seg-btn px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+              creationMode === "free"
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            Free
+          </button>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {projects.length > 0 && (
-            <select
-              value={currentProjectId || ""}
-              onChange={(e) => setCurrentProjectId(e.target.value || null)}
-              className="px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm max-w-[200px]"
-            >
-              <option value="">No project</option>
-              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+        {/* ── Spacer ── */}
+        <div className="flex-1 min-w-2" />
+
+        {/* ── Group 5: Save Status + Actions ── */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {saveStatus === 'saved' && (
+            <span className="sp-save-pulse flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 text-emerald-600 text-[11px] font-semibold">
+              <CheckCircle2 className="w-3 h-3" /> Saved
+            </span>
           )}
+          {saveStatus === 'error' && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-50 text-red-500 text-[11px] font-semibold">
+              <AlertTriangle className="w-3 h-3" /> Failed
+            </span>
+          )}
+          {editorCanProceed && (
+            <span className="hidden lg:flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold"
+              style={{ background: 'linear-gradient(135deg, #ecfdf5, #d1fae5)', color: '#059669' }}
+            >
+              <CheckCircle2 className="w-3 h-3" /> Complete
+            </span>
+          )}
+
           {currentProjectId && (
             <>
               <button onClick={saveSitePlan} disabled={saving}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-600 hover:bg-emerald-200 disabled:opacity-50 text-sm">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all disabled:opacity-50"
+                style={{ background: '#f0fdf4', color: '#059669', border: '1px solid #bbf7d0' }}
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 Save
               </button>
 
-              {saveStatus === 'saved' && (
-                <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-600 text-xs font-medium animate-pulse">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Saved!
-                </span>
-              )}
-              {saveStatus === 'error' && (
-                <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-red-500 text-xs font-medium">
-                  <AlertTriangle className="w-3.5 h-3.5" /> Save failed
-                </span>
-              )}
-              {editorCanProceed && (
-                <span className="hidden sm:inline flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-100 text-emerald-600 text-xs font-medium">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Site plan completed
-                </span>
-              )}
               {(() => {
                 const nextHref = returnToUrl ? decodeURIComponent(returnToUrl) : `/projects/${currentProjectId}/project-description?designed=1`;
-                const nextLabel = "Continue to Complete File";
-                
                 return (
                   <button
                     type="button"
                     onClick={async () => {
                       if (isDirty && currentProjectId) await saveSitePlan();
-
-                      // ── Enterprise Document Capture Engine ─────────────────
-                      // All captures complete BEFORE navigation (no race condition).
-                      // All results stored as memory-safe Blob URLs (not raw Base64).
                       const { setGeneratedDocument } = useUrbAssistProjectStore.getState();
                       const { captureFabricCanvas, capture3DOrthographic, getStaticMapUrl, extractCentroid } = await import('@/lib/captureEngine');
                       const { getActive3DContext } = await import('@/components/three/Terrain3DViewer');
-
                       const capturePromises: Promise<void>[] = [];
-
-                      // PC1: Static OSM neighborhood map (NOT a canvas screenshot)
                       capturePromises.push((async () => {
                         try {
                           const boundary = useUrbAssistProjectStore.getState().parcelBoundary;
@@ -3985,8 +3668,6 @@ function SitePlanContent() {
                           }
                         } catch (e) { console.warn('[capture] PC1 static map failed:', e); }
                       })());
-
-                      // PC2: 2D Fabric.js canvas → Blob URL
                       capturePromises.push((async () => {
                         try {
                           const canvas2d = fabricRef.current;
@@ -3996,62 +3677,102 @@ function SitePlanContent() {
                           }
                         } catch (e) { console.warn('[capture] PC2 fabric capture failed:', e); }
                       })());
-
-                      // PC3 + PC5.2: Real 3D WebGL orthographic captures
                       capturePromises.push((async () => {
                         try {
                           const ctx = getActive3DContext();
                           if (ctx) {
-                            // PC3: Side orthographic (cross-section view)
                             const pc3Blob = await capture3DOrthographic(ctx, 'side');
                             setGeneratedDocument('PC3', pc3Blob);
-
-                            // PC5.2: Front orthographic (facade view)
                             const pc52Blob = await capture3DOrthographic(ctx, 'front');
                             setGeneratedDocument('PC5.2', pc52Blob);
                           }
                         } catch (e) { console.warn('[capture] PC3/PC5.2 3D capture failed:', e); }
                       })());
-
-                      // Await ALL captures before navigating (fixes race condition)
                       await Promise.allSettled(capturePromises);
-
                       router.push(nextHref);
                     }}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-all shadow-sm hover:shadow-md"
+                    style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
                   >
-                    {nextLabel}
-                    <ArrowRight className="w-4 h-4" />
+                    Continue
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 );
               })()}
             </>
           )}
-          <div className="h-6 w-px bg-white/10" />
+        </div>
+        <div className="sp-divider" />
+
+        {/* ── Group 6: Document Settings ── */}
+        <div className="flex items-center gap-0.5 shrink-0">
           <select value={currentScale.label} onChange={(e) => { const s = SCALES.find((sc) => sc.label === e.target.value); if (s) setCurrentScale(s); }}
-            className="px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm">
+            className="px-1.5 py-1 rounded-md bg-transparent text-slate-600 text-[11px] font-medium border-0 outline-none cursor-pointer hover:bg-slate-100 transition-colors appearance-none pr-5"
+            style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}>
             {SCALES.map((s) => <option key={s.label} value={s.label}>{s.label}</option>)}
           </select>
-          <select value={paperSize} onChange={(e) => setPaperSize(e.target.value as "A4" | "A3")} className="px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-900 text-sm" title="Paper size for export (A3 recommended)">
+          <select value={paperSize} onChange={(e) => setPaperSize(e.target.value as "A4" | "A3")}
+            className="px-1.5 py-1 rounded-md bg-transparent text-slate-600 text-[11px] font-medium border-0 outline-none cursor-pointer hover:bg-slate-100 transition-colors appearance-none pr-5"
+            title="Paper size" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}>
             <option value="A4">A4</option>
             <option value="A3">A3</option>
           </select>
-          <button onClick={() => setIsFullScreen(!isFullScreen)} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title={isFullScreen ? "Exit full screen" : "Full screen"}>
-            {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
-          <button onClick={() => setPreviewMode(!previewMode)} className={cn("p-2 rounded-lg", previewMode ? "bg-amber-100 text-amber-600" : "text-slate-400 hover:text-slate-900")} title="Preview mode (read-only)"><Eye className="w-4 h-4" /></button>
-
-
-          <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("p-2 rounded-lg", snapEnabled ? "bg-purple-100 text-purple-600" : "text-slate-400 hover:text-slate-900")} title="Snap"><Magnet className="w-4 h-4" /></button>
-          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
-            <button onClick={() => handleZoom(-25)} className="p-1 text-slate-400 hover:text-slate-900"><ZoomOut className="w-4 h-4" /></button>
-            <span className="px-1.5 text-xs text-slate-900 min-w-[40px] text-center">{zoom}%</span>
-            <button onClick={() => handleZoom(25)} className="p-1 text-slate-400 hover:text-slate-900"><ZoomIn className="w-4 h-4" /></button>
-          </div>
-          <button onClick={handleUndo} disabled={!canUndo} className="p-2 rounded-lg text-slate-400 hover:text-slate-900 disabled:opacity-40" title="Undo"><Undo2 className="w-4 h-4" /></button>
-          <button onClick={handleRedo} disabled={!canRedo} className="p-2 rounded-lg text-slate-400 hover:text-slate-900 disabled:opacity-40" title="Redo"><Redo2 className="w-4 h-4" /></button>
-          <button onClick={handleClearAll} className="p-2 rounded-lg text-slate-400 hover:text-slate-900" title="Clear All"><RotateCcw className="w-4 h-4" /></button>
         </div>
+        <div className="sp-divider" />
+
+        {/* ── Group 7: Viewport Controls ── */}
+        <div className="flex items-center gap-0 shrink-0">
+          <button onClick={() => setIsFullScreen(!isFullScreen)} className={cn("sp-icon-btn text-slate-400", isFullScreen && "sp-active")} title={isFullScreen ? "Exit full screen" : "Full screen"}>
+            {isFullScreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={() => setPreviewMode(!previewMode)} className={cn("sp-icon-btn text-slate-400", previewMode && "sp-active")} title="Preview mode">
+            {previewMode ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={() => setSnapEnabled(!snapEnabled)} className={cn("sp-icon-btn text-slate-400", snapEnabled && "sp-active")} title="Smart snap">
+            <Magnet className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="sp-divider" />
+
+        {/* ── Group 8: Zoom Control ── */}
+        <div className="flex items-center gap-0 shrink-0 rounded-lg px-0.5 py-0.5" style={{ background: '#f8fafc' }}>
+          <button onClick={() => handleZoom(-25)} className="sp-icon-btn text-slate-400" title="Zoom out">
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <span className="px-1 text-[11px] font-mono font-semibold text-slate-600 min-w-[36px] text-center tabular-nums">{zoom}%</span>
+          <button onClick={() => handleZoom(25)} className="sp-icon-btn text-slate-400" title="Zoom in">
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="sp-divider" />
+
+        {/* ── Group 9: History Controls ── */}
+        <div className="flex items-center gap-0 shrink-0">
+          <button onClick={handleUndo} disabled={!canUndo} className="sp-icon-btn text-slate-400 disabled:opacity-30 disabled:pointer-events-none" title="Undo (Ctrl+Z)">
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={handleRedo} disabled={!canRedo} className="sp-icon-btn text-slate-400 disabled:opacity-30 disabled:pointer-events-none" title="Redo (Ctrl+Shift+Z)">
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={handleClearAll} className="sp-icon-btn text-slate-400 hover:text-red-500" title="Clear all">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* ── Hidden project selector (if needed) ── */}
+        {projects.length > 1 && (
+          <>
+            <div className="sp-divider" />
+            <select
+              value={currentProjectId || ""}
+              onChange={(e) => setCurrentProjectId(e.target.value || null)}
+              className="px-1.5 py-1 rounded-md bg-transparent text-slate-600 text-[11px] font-medium border-0 outline-none cursor-pointer hover:bg-slate-100 transition-colors max-w-[140px] truncate"
+            >
+              <option value="">No project</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </>
+        )}
       </div>
 
 
@@ -4060,31 +3781,6 @@ function SitePlanContent() {
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
           <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">
-            {/* ─── Drawing Tools ─── */}
-            <div className="flex flex-col gap-0 px-1">
-              {TOOL_GROUPS.map((group) => (
-                <div key={group.label} className="mb-0.5">
-                  <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest px-2 py-1">{group.label}</p>
-                  {tools.filter((t) => group.ids.includes(t.id)).map((tool) => {
-                    const Icon = tool.icon;
-                    const tooltip = (tool as { tooltip?: string }).tooltip || `${tool.label} (${tool.shortcut})`;
-                    return (
-                      <button key={tool.id} onClick={() => handleToolSelect(tool.id as Tool)}
-                        className={cn("w-full h-8 rounded-lg flex items-center gap-2 px-2.5 transition-all text-left",
-                          activeTool === tool.id
-                            ? "bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-md"
-                            : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                        )} title={tooltip}>
-                        <Icon className="w-4 h-4 shrink-0" />
-                        <span className="text-[11px] font-medium truncate">{tool.label}</span>
-                      </button>
-                    );
-                  })}
-                  <div className="h-px bg-slate-100 mx-2 my-0.5" />
-                </div>
-              ))}
-            </div>
-
             {/* ─── Add Elements (Templates) ─── */}
             <div className="px-2 pt-1 pb-1">
               <p className="text-[9px] font-bold uppercase text-amber-600 tracking-widest py-1">Add Elements</p>
@@ -4104,63 +3800,6 @@ function SitePlanContent() {
                   </button>
                 );
               })}
-            </div>
-            <div className="h-px bg-slate-200 mx-3 my-1.5" />
-
-            {/* ─── Buildings ─── */}
-            <div className="px-2 pb-0.5">
-              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest py-1">Buildings</p>
-            </div>
-            <div className="px-1.5 space-y-0.5">
-              <button onClick={() => { addExistingBuilding(); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200" title="Add Existing Building">
-                <Building2 className="w-4 h-4 shrink-0 text-gray-500" />
-                <span className="text-[11px] font-medium">Existing Building</span>
-              </button>
-              <button onClick={() => { addNewBuilding(); }} className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all border border-transparent hover:border-blue-200" title="Add New Construction">
-                <Plus className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">New Construction</span>
-              </button>
-            </div>
-            <div className="h-px bg-slate-200 mx-3 my-1.5" />
-
-            {/* ─── Utilities ─── */}
-            <div className="px-2 pb-0.5">
-              <p className="text-[9px] font-bold uppercase text-slate-400/70 tracking-widest py-1">Utilities</p>
-            </div>
-            <div className="px-1.5 space-y-0.5">
-              <button onClick={addNorthArrow} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-sky-500 hover:bg-sky-50 transition-all" title="North Arrow">
-                <Compass className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">North Arrow</span>
-              </button>
-              <button onClick={() => setShowLegend(v => !v)} className={cn("w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 transition-all", showLegend ? "bg-violet-50 text-violet-600" : "text-violet-500 hover:bg-violet-50")} title="Legend">
-                <FileText className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">Legend</span>
-              </button>
-              <button onClick={autoAddBoundaryDimensions} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-orange-500 hover:bg-orange-50 transition-all" title="Auto Boundary Dimensions">
-                <Ruler className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">Auto Dimensions</span>
-              </button>
-              {currentProjectId && (
-                <button
-                  onClick={loadTerrainFromIgn}
-                  disabled={loadingIgnTerrain}
-                  className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-emerald-600 hover:bg-emerald-50 transition-all disabled:opacity-50"
-                  title="Load terrain from IGN (RGE ALTI®)"
-                >
-                  {loadingIgnTerrain ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Mountain className="w-4 h-4 shrink-0" />}
-                  <span className="text-[11px] font-medium">Terrain IGN</span>
-                </button>
-              )}
-
-            </div>
-
-            {/* Spacer + Delete at bottom */}
-            <div className="flex-1" />
-            <div className="px-1.5 pb-1">
-              <button onClick={handleDelete} className="w-full h-8 rounded-lg flex items-center gap-2.5 px-2.5 text-red-500 hover:bg-red-50 transition-all" title="Delete Selected">
-                <Trash2 className="w-4 h-4 shrink-0" />
-                <span className="text-[11px] font-medium">Delete</span>
-              </button>
             </div>
           </div>
         )}

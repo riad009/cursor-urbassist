@@ -17,6 +17,7 @@ import {
   Bell,
   LogOut,
   Home,
+  Shield,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
@@ -126,12 +127,15 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
                 <span className="hidden sm:inline px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm border border-slate-200">
                   {user.credits} credits
                 </span>
-                <Link
-                  href="/admin"
-                  className="hidden sm:inline px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm hover:bg-slate-200 border border-slate-200"
-                >
-                  Plans
-                </Link>
+                {user.role === "ADMIN" && (
+                  <Link
+                    href="/admin"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 text-sm font-semibold hover:shadow-md transition-all border border-amber-200"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    Admin
+                  </Link>
+                )}
                 <button
                   onClick={() => logout()}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"

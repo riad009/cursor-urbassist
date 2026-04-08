@@ -20,6 +20,15 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
+      // Check if user is admin and redirect accordingly
+      const meRes = await fetch("/api/auth/me", { credentials: "include" });
+      if (meRes.ok) {
+        const { user: loggedUser } = await meRes.json();
+        if (loggedUser?.role === "ADMIN") {
+          router.push("/admin");
+          return;
+        }
+      }
       router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

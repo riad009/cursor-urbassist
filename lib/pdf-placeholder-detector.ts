@@ -42,28 +42,31 @@ const REDIRECT_PATTERNS = [
 ];
 
 /**
- * Maximum size for a PDF to be considered potentially a placeholder.
- * Real PLU regulation PDFs are typically 1MB+ (often 10-200MB).
- * Placeholder PDFs are usually < 100KB.
+ * Maximum size for a PDF to be scanned for placeholder patterns.
+ * PDFs larger than this are always considered real documents (skip scanning).
  */
-const PLACEHOLDER_MAX_SIZE_BYTES = 200 * 1024; // 200KB
+const PLACEHOLDER_SCAN_MAX_SIZE_BYTES = 500 * 1024; // 500KB — only scan small PDFs
 
-/** Maximum page count for placeholder detection. Real PLU regs have 10+ pages. */
+/** Maximum page count for redirect pattern detection. */
 const PLACEHOLDER_MAX_PAGES = 3;
 
 // ── Main Detection Function ─────────────────────────────────────────────────
 
 /**
- * Detects whether a PDF buffer is a placeholder/redirect document.
+ * Detects whether a PDF buffer is a placeholder/redirect document OR truly empty.
  *
- * A PDF is considered a placeholder if:
- *   1. It has very few pages (≤ 3)
- *   2. Its text content matches known redirect patterns
+ * A PDF is blocked if:
+ *   1. It's truly empty (0 bytes or not a valid PDF)
+ *   2. It has very few pages (≤ 3) AND matches known French redirect patterns
  *
- * The size check is done by the caller to avoid loading large PDFs unnecessarily.
+ * NO size floor — auto-detected PDFs of any size are allowed as long as they
+ * have real content. Only empty/corrupted/redirect PDFs are blocked.
+ *
+ * @param isFromUrl — true if the PDF was fetched from an auto-detected URL
  */
 export async function detectPlaceholderPdf(
   pdfBuffer: Buffer,
+  isFromUrl = false,
 ): Promise<PlaceholderDetectionResult> {
   const noResult: PlaceholderDetectionResult = {
     isPlaceholder: false,
@@ -71,16 +74,26 @@ export async function detectPlaceholderPdf(
     reason: null,
   };
 
-  // Quick size pre-check — real regulation PDFs are much larger
-  if (pdfBuffer.byteLength > PLACEHOLDER_MAX_SIZE_BYTES) {
+  // ── HARD REJECT: truly empty buffer (0 bytes) ──
+  if (!pdfBuffer || pdfBuffer.byteLength === 0) {
+    return {
+      isPlaceholder: true,
+      suggestedUrl: null,
+      reason: "Le fichier PDF est vide (0 octets).",
+    };
+  }
+
+  // ── Skip scanning for large PDFs — they're real documents ──
+  if (pdfBuffer.byteLength > PLACEHOLDER_SCAN_MAX_SIZE_BYTES) {
     return noResult;
   }
 
+  // ── Scan small PDFs for redirect patterns or zero content ──
   try {
     const doc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
     const pageCount = doc.getPageCount();
 
-    // Real PLU regulations have many pages
+    // PDFs with many pages are real documents
     if (pageCount > PLACEHOLDER_MAX_PAGES) {
       return noResult;
     }
@@ -92,26 +105,26 @@ export async function detectPlaceholderPdf(
     // Check for redirect patterns
     const matchedPatterns = REDIRECT_PATTERNS.filter(p => textLower.includes(p));
 
-    if (matchedPatterns.length === 0) {
-      return noResult;
+    if (matchedPatterns.length > 0) {
+      const suggestedUrl = extractUrlFromText(allText);
+      const reason = `PDF placeholder détecté (${pageCount} page${pageCount > 1 ? "s" : ""}, ${(pdfBuffer.byteLength / 1024).toFixed(0)}Ko). ` +
+        `Motifs trouvés: ${matchedPatterns.slice(0, 3).map(p => `"${p}"`).join(", ")}`;
+      console.log(`[pdf-placeholder-detector] ⚠ ${reason}${suggestedUrl ? `. URL extraite: ${suggestedUrl}` : ""}`);
+      return { isPlaceholder: true, suggestedUrl, reason };
     }
 
-    // Extract embedded URLs from the text
-    const suggestedUrl = extractUrlFromText(allText);
+    // For URL-sourced PDFs: flag if truly zero extractable text (empty/corrupted)
+    if (isFromUrl && allText.trim().length === 0 && pageCount <= 2) {
+      const reason = `PDF vide détecté (${pageCount} page${pageCount > 1 ? "s" : ""}, aucun texte extractible). ` +
+        `Ce fichier ne contient aucune donnée réglementaire exploitable.`;
+      console.log(`[pdf-placeholder-detector] ⚠ ${reason}`);
+      return { isPlaceholder: true, suggestedUrl: null, reason };
+    }
 
-    const reason = `PDF placeholder détecté (${pageCount} page${pageCount > 1 ? "s" : ""}, ${(pdfBuffer.byteLength / 1024).toFixed(0)}Ko). ` +
-      `Motifs trouvés: ${matchedPatterns.slice(0, 3).map(p => `"${p}"`).join(", ")}`;
-
-    console.log(`[pdf-placeholder-detector] ⚠ ${reason}${suggestedUrl ? `. URL extraite: ${suggestedUrl}` : ""}`);
-
-    return {
-      isPlaceholder: true,
-      suggestedUrl,
-      reason,
-    };
+    return noResult;
   } catch (err) {
     console.warn(`[pdf-placeholder-detector] Detection failed:`, (err as Error).message);
-    // If we can't parse it, assume it's not a placeholder (benefit of the doubt)
+    // If we can't parse it, let it through — benefit of the doubt
     return noResult;
   }
 }

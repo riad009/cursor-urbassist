@@ -77,8 +77,24 @@ async function main() {
     },
   });
 
+  // ── Second Admin Account ──────────────────────────────────────────────────
+  // Login: admin@gmail.com / 123456
+  const adminHash2 = await bcrypt.hash("123456", 10);
+  await prisma.user.upsert({
+    where: { email: "admin@gmail.com" },
+    update: { role: "ADMIN", credits: 1000 },
+    create: {
+      email: "admin@gmail.com",
+      passwordHash: adminHash2,
+      name: "Super Admin",
+      role: "ADMIN",
+      credits: 1000,
+    },
+  });
+
   console.log("✅ Seed completed successfully");
   console.log("   Admin login: admin@urbassist.fr / admin123");
+  console.log("   Admin login: admin@gmail.com / 123456");
 }
 
 main()
