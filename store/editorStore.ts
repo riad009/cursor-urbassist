@@ -1,16 +1,16 @@
 /**
- * Editor Store — Zustand state for site-plan editor with sessionStorage persistence.
+ * Editor Store — Zustand state for site-plan editor with localStorage persistence.
  *
- * PURPOSE: Make the editor 100% resilient to page refresh (F5 / Cmd+R).
- * On refresh, the store hydrates from sessionStorage FIRST (instant), then the page
+ * PURPOSE: Make the editor 100% resilient to page refresh (F5 / Cmd+R) AND tab close.
+ * On refresh, the store hydrates from localStorage FIRST (instant), then the page
  * validates with a server fetch (eventual consistency).
  *
  * DESIGN:
- *  - Uses `persist` middleware with `sessionStorage` (auto-clears on tab close)
- *  - Storage key is dynamic per project: `urbassist-editor-{projectId}`
+ *  - Uses `persist` middleware with `localStorage` (survives tab close + hard reload)
+ *  - Storage key: "urbassist-editor-storage" (single key; projectId inside state)
  *  - Stores: canvasJSON, buildingDetails, elevationPoints, projectData
- *  - Large data (canvas JSON) is stored as a compressed string
  *  - `_lastSavedAt` timestamp enables stale detection
+ *  - Page reads cached state on mount (instant 3D) then overwrites from API (truth)
  */
 
 import { create } from "zustand";
@@ -56,6 +56,8 @@ export interface EditorState {
   projectData: ProjectDataCache | null;
   /** Fully pre-processed GIS site data (boundary, edges, elevations) — persisted for refresh survival */
   processedSiteData: ProcessedSiteData | null;
+  /** Current view mode — persisted so 3D mode survives refresh */
+  viewMode: "2d" | "3d";
 
   // ── Tracking ────────────────────────────────────────────────────────────
   /** Timestamp of last persistence to this store */
@@ -76,6 +78,8 @@ export interface EditorState {
   setProcessedSiteData: (data: ProcessedSiteData | null) => void;
   /** Update project metadata */
   setProjectData: (data: ProjectDataCache) => void;
+  /** Set the current view mode (2D or 3D) */
+  setViewMode: (mode: "2d" | "3d") => void;
   /** Mark as dirty (unsaved changes) */
   markDirty: () => void;
   /** Mark as clean (just saved) */
@@ -85,14 +89,8 @@ export interface EditorState {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic storage key
+// (persist middleware uses static key "urbassist-editor-storage" in config below)
 // ---------------------------------------------------------------------------
-
-let activeProjectId: string | null = null;
-
-function getStorageKey(): string {
-  return `urbassist-editor-${activeProjectId || "unknown"}`;
-}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -105,6 +103,7 @@ const INITIAL_STATE = {
   elevationPoints: [] as ElevationPoint[],
   projectData: null as ProjectDataCache | null,
   processedSiteData: null as ProcessedSiteData | null,
+  viewMode: "2d" as "2d" | "3d",
   _lastSavedAt: 0,
   isDirty: false,
 };
@@ -116,28 +115,13 @@ export const useEditorStore = create<EditorState>()(
 
       initProject: (projectId: string) => {
         const current = get().projectId;
-        if (current === projectId) return; // already initialized
+        if (current === projectId) return; // already initialized — keep hydrated data
 
-        activeProjectId = projectId;
-
-        // Check sessionStorage for existing data for this project
-        try {
-          const key = getStorageKey();
-          const stored = sessionStorage.getItem(key);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (parsed?.state?.projectId === projectId) {
-              // Hydrate from session storage
-              set({
-                ...parsed.state,
-                isDirty: false, // Fresh load = not dirty
-              });
-              return;
-            }
-          }
-        } catch { /* ignore parse errors */ }
-
-        // No cached data — initialize fresh
+        // Different project — reset state for the new project.
+        // The persist middleware will have hydrated the store from its static
+        // sessionStorage key ("urbassist-editor-storage"). If the hydrated
+        // projectId matches, we already returned above. If it doesn't match,
+        // we must reset so stale data from a different project isn't used.
         set({
           ...INITIAL_STATE,
           projectId,
@@ -177,6 +161,8 @@ export const useEditorStore = create<EditorState>()(
           _lastSavedAt: Date.now(),
         }),
 
+      setViewMode: (mode) => set({ viewMode: mode }),
+
       markDirty: () => set({ isDirty: true }),
       markClean: () => set({ isDirty: false }),
 
@@ -185,7 +171,7 @@ export const useEditorStore = create<EditorState>()(
     {
       name: "urbassist-editor-storage",
       storage: createJSONStorage(() => {
-        // SSR guard: sessionStorage is only available in the browser
+        // SSR guard: localStorage is only available in the browser
         if (typeof window === "undefined") {
           return {
             getItem: () => null,
@@ -193,16 +179,46 @@ export const useEditorStore = create<EditorState>()(
             removeItem: () => {},
           };
         }
-        return sessionStorage;
+        // Quota-safe wrapper: if canvasJSON pushes us over the
+        // localStorage limit (~5MB), log a warning and strip it.
+        // The DB auto-save is the primary persistence layer.
+        return {
+          getItem: (name: string) => localStorage.getItem(name),
+          setItem: (name: string, value: string) => {
+            try {
+              localStorage.setItem(name, value);
+            } catch (e) {
+              // QuotaExceededError — canvasJSON may be very large
+              console.warn("[editorStore] localStorage quota exceeded, stripping canvasJSON");
+              try {
+                const parsed = JSON.parse(value);
+                if (parsed?.state?.canvasJSON) {
+                  parsed.state.canvasJSON = null;
+                  localStorage.setItem(name, JSON.stringify(parsed));
+                }
+              } catch {
+                // Last resort: clear and write minimal
+                localStorage.removeItem(name);
+              }
+            }
+          },
+          removeItem: (name: string) => localStorage.removeItem(name),
+        };
       }),
-      // Only persist essential data — skip transient UI state
+      // Only persist essential data — skip transient UI state.
+      // CRITICAL: processedSiteData is EXCLUDED — it can be tens of MB
+      // (topography grids, elevation arrays, boundary geometry) which
+      // exceeds localStorage's ~5MB limit and causes silent persist failure
+      // that kills ALL persistence. It's always fetched fresh from DB on load.
       partialize: (state) => ({
         projectId: state.projectId,
         canvasJSON: state.canvasJSON,
         buildingDetails: state.buildingDetails,
         elevationPoints: state.elevationPoints,
+        // projectData is small (parcel area, coords) — safe to persist
         projectData: state.projectData,
-        processedSiteData: state.processedSiteData,
+        // processedSiteData: EXCLUDED — too large for localStorage
+        viewMode: state.viewMode,
         _lastSavedAt: state._lastSavedAt,
       }),
     }

@@ -45,6 +45,9 @@ async function fetchAllMapImages(
   ignImage: string;
   cadastreImage: string;
   aerialImage: string;
+  ignScale: number;
+  cadastreScale: number;
+  aerialScale: number;
 }> {
   const payload = {
     lat,
@@ -67,6 +70,9 @@ async function fetchAllMapImages(
           ignImage: data.ignImage,
           cadastreImage: data.cadastreImage,
           aerialImage: data.aerialImage,
+          ignScale: data.ignScale ?? 5000,
+          cadastreScale: data.cadastreScale ?? 2000,
+          aerialScale: data.aerialScale ?? 2000,
         };
       }
 
@@ -177,6 +183,9 @@ export async function generatePC1(
   let ignImage: string | null = null;
   let cadastreImage: string | null = null;
   let aerialImage: string | null = null;
+  let ignScale = 5000;
+  let cadastreScale = 2000;
+  let aerialScale = 2000;
 
   try {
     const maps = await fetchAllMapImages(
@@ -188,12 +197,15 @@ export async function generatePC1(
     ignImage = maps.ignImage;
     cadastreImage = maps.cadastreImage;
     aerialImage = maps.aerialImage;
+    ignScale = maps.ignScale;
+    cadastreScale = maps.cadastreScale;
+    aerialScale = maps.aerialScale;
   } catch (err) {
     console.error("[PC1] Failed to fetch map images:", err);
   }
 
   // ── IGN map — left half ─────────────────────────────────────────────
-  drawMapHeader(doc, 10, 10, 200, 8, "PLAN IGN — 1/5000ème", 7);
+  drawMapHeader(doc, 10, 10, 200, 8, `PLAN IGN — 1/${ignScale}ème`, 7);
 
   if (ignImage) {
     try {
@@ -223,7 +235,7 @@ export async function generatePC1(
     75,
     195,
     8,
-    "PLAN DE COMPOSITION CADASTRALE — 1/2000ème",
+    `PLAN DE COMPOSITION CADASTRALE — 1/${cadastreScale}ème`,
     6
   );
 
@@ -246,7 +258,7 @@ export async function generatePC1(
   }
 
   // ── Aerial map — bottom right ───────────────────────────────────────
-  drawMapHeader(doc, 215, 168, 195, 7, "VUE AÉRIENNE — 1/2000ème", 6);
+  drawMapHeader(doc, 215, 168, 195, 7, `VUE AÉRIENNE — 1/${aerialScale}ème`, 6);
 
   if (aerialImage) {
     try {

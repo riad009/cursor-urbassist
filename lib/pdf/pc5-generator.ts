@@ -36,6 +36,7 @@ import {
   type ElevationLayout,
   type ViewportConfig,
   type SecondaryBuildingLayout,
+  type SiteElementLayout,
 } from "./elevation-layout";
 
 // ─── Drawing palette ───────────────────────────────────────────────────────
@@ -372,6 +373,11 @@ function drawLayoutOnPdf(
     drawSecondaryBuildingOnPdf(doc, sec, oX, oY);
   }
 
+  // ═══ Site Elements (pool, garden, terrace, parking) ═══
+  for (const el of layout.siteElements || []) {
+    drawSiteElementOnPdf(doc, el, oX, oY);
+  }
+
   // Panel caption
   doc.setTextColor(80, 80, 80);
   doc.setFont("helvetica", "bold");
@@ -613,6 +619,116 @@ function drawSecondaryBuildingOnPdf(
   // Dimensions
   drawDimLine(doc, sec.heightDim, oX, oY, true);
   drawDimLine(doc, sec.widthDim, oX, oY, false);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Site Element Drawing (pool, garden, terrace, parking)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function drawSiteElementOnPdf(
+  doc: jsPDF,
+  el: SiteElementLayout,
+  oX: number,
+  oY: number,
+) {
+  // Parse hex color to RGB
+  const hexToRgb = (hex: string): [number, number, number] => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return [r, g, b];
+  };
+
+  const fillRgb = hexToRgb(el.color);
+  const strokeRgb = hexToRgb(el.strokeColor);
+
+  // Main rectangle
+  doc.setFillColor(fillRgb[0], fillRgb[1], fillRgb[2]);
+  doc.setDrawColor(strokeRgb[0], strokeRgb[1], strokeRgb[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(oX + el.rect.x, oY + el.rect.y, el.rect.w, el.rect.h, 0.3, 0.3, "FD");
+
+  // Element-specific pattern decorations
+  switch (el.elementType) {
+    case "pool": {
+      // Water ripple lines
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(0.2);
+      const rippleCount = Math.max(2, Math.floor(el.rect.h / 1.5));
+      for (let i = 1; i <= rippleCount; i++) {
+        const ry = oY + el.rect.y + (el.rect.h * i) / (rippleCount + 1);
+        const rx1 = oX + el.rect.x + 1;
+        const rx2 = oX + el.rect.x + el.rect.w - 1;
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(0.15);
+        doc.line(rx1, ry, rx2, ry);
+      }
+      break;
+    }
+    case "garden": {
+      // Grass tufts along the top edge
+      doc.setDrawColor(76, 175, 80);
+      doc.setLineWidth(0.2);
+      const count = Math.max(3, Math.floor(el.rect.w / 3));
+      for (let i = 0; i < count; i++) {
+        const gx = oX + el.rect.x + 1 + (i * (el.rect.w - 2)) / count;
+        const gy = oY + el.rect.y;
+        const gh = 0.8 + (i % 3) * 0.3;
+        doc.line(gx, gy, gx - 0.2, gy - gh);
+        doc.line(gx + 0.6, gy, gx + 0.7, gy - gh * 0.7);
+      }
+      break;
+    }
+    case "terrace": {
+      // Paving grid
+      doc.setDrawColor(strokeRgb[0], strokeRgb[1], strokeRgb[2]);
+      doc.setLineWidth(0.1);
+      const spacing = Math.max(2, el.rect.w / 6);
+      for (let x = oX + el.rect.x + spacing; x < oX + el.rect.x + el.rect.w; x += spacing) {
+        doc.line(x, oY + el.rect.y, x, oY + el.rect.y + el.rect.h);
+      }
+      break;
+    }
+    case "parking": {
+      // Parking lane dashes
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(0.15);
+      const pSpacing = Math.max(2.5, el.rect.w / 5);
+      for (let x = oX + el.rect.x + pSpacing; x < oX + el.rect.x + el.rect.w; x += pSpacing) {
+        let cy = oY + el.rect.y + 0.5;
+        while (cy < oY + el.rect.y + el.rect.h - 0.5) {
+          doc.line(x, cy, x, Math.min(cy + 0.8, oY + el.rect.y + el.rect.h - 0.3));
+          cy += 1.5;
+        }
+      }
+      break;
+    }
+  }
+
+  // Label badge
+  const labelColors: Record<string, [number, number, number]> = {
+    pool:    [25, 118, 210],
+    garden:  [46, 125, 50],
+    terrace: [141, 110, 99],
+    parking: [84, 110, 122],
+  };
+  const lc = labelColors[el.elementType] || [84, 110, 122];
+  const lbl = el.label;
+  const textW = lbl.text.length * 1.3 + 4;
+  doc.setFillColor(lc[0], lc[1], lc[2]);
+  doc.roundedRect(oX + lbl.x - textW / 2, oY + lbl.y - 1.5, textW, 3.5, 0.5, 0.5, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(3.5);
+  doc.text(lbl.text, oX + lbl.x, oY + lbl.y + 0.5, { align: "center" });
+
+  // Width dimension
+  drawDimLine(doc, el.widthDim, oX, oY, false);
+
+  // Depth dimension (pool only)
+  if (el.depthDim) {
+    drawDimLine(doc, el.depthDim, oX, oY, true);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

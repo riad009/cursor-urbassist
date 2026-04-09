@@ -101,6 +101,8 @@ export interface SitePlanDataRow {
   surfaceAreas: unknown;
   northAngle: number | null;
   building3D: unknown;
+  /** Base64 JPEG of the PC2 site layout (persisted to DB to survive page reloads) */
+  pc2ImageBase64?: string | null;
 }
 
 export interface TerrainDataRow {

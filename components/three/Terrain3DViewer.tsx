@@ -76,9 +76,9 @@ function createSkyDome(scene: THREE.Scene): void {
         float y = dir.y;
 
         // Sky gradient: deep blue zenith -> light blue horizon
-        vec3 zenith = vec3(0.30, 0.55, 0.92);  // Deep sky blue
-        vec3 horizon = vec3(0.68, 0.80, 0.92); // Pale blue-grey horizon
-        vec3 belowHorizon = vec3(0.75, 0.82, 0.90); // Below horizon fade
+        vec3 zenith = vec3(0.32, 0.52, 0.88);  // Deep muted blue
+        vec3 horizon = vec3(0.72, 0.82, 0.90); // Soft haze horizon
+        vec3 belowHorizon = vec3(0.78, 0.84, 0.90); // Pale horizon fade
 
         float t = max(y, 0.0);
         vec3 skyColor = mix(horizon, zenith, pow(t, 0.5));
@@ -375,17 +375,22 @@ function computeBbox(coords: number[][]): { minLng: number; maxLng: number; minL
 // placement. All meshes use castShadow + receiveShadow for quality rendering.
 // ═════════════════════════════════════════════════════════════════════════════
 
-function _box(g:THREE.Group,w:number,h:number,d:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:0.75,metalness:0.02,...opts}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;}
-function _cyl(g:THREE.Group,rt:number,rb:number,h:number,segs:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segs),new THREE.MeshStandardMaterial({color,roughness:0.7,metalness:0.05,...opts}));m.castShadow=true;g.add(m);return m;}
+function _box(g:THREE.Group,w:number,h:number,d:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:0.55,metalness:0.02,...opts}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;}
+function _cyl(g:THREE.Group,rt:number,rb:number,h:number,segs:number,color:number,opts?:Partial<THREE.MeshStandardMaterialParameters>):THREE.Mesh{const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,Math.max(segs,12)),new THREE.MeshStandardMaterial({color,roughness:0.50,metalness:0.08,...opts}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;}
 
 function _addWindows(g:THREE.Group,count:number,wallW:number,centerX:number,centerY:number,wallZ:number):void{
   const ww=Math.min(0.65,wallW/count*0.5),wh=0.6,sp=wallW/count;
   for(let i=0;i<count;i++){
     const wx=centerX-wallW/2+sp*(i+0.5);
-    const fr=new THREE.Mesh(new THREE.BoxGeometry(ww+0.08,wh+0.08,0.05),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.5}));
-    fr.position.set(wx,centerY,wallZ+0.005);g.add(fr);
-    const gl=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,0.04),new THREE.MeshStandardMaterial({color:0x90caf9,roughness:0.04,metalness:0.2,transparent:true,opacity:0.8}));
-    gl.position.set(wx,centerY,wallZ+0.03);g.add(gl);
+    // Window frame — painted wood
+    const fr=new THREE.Mesh(new THREE.BoxGeometry(ww+0.08,wh+0.08,0.05),new THREE.MeshStandardMaterial({color:0xf5f5f5,roughness:0.45,metalness:0.02}));
+    fr.position.set(wx,centerY,wallZ+0.005);fr.castShadow=true;g.add(fr);
+    // Glass — physical material with realistic reflection
+    const gl=new THREE.Mesh(new THREE.BoxGeometry(ww,wh,0.04),new THREE.MeshPhysicalMaterial({color:0x7eadd4,roughness:0.02,metalness:0.15,transparent:true,opacity:0.75,clearcoat:1.0,clearcoatRoughness:0.02,reflectivity:0.6}));
+    gl.position.set(wx,centerY,wallZ+0.03);gl.castShadow=true;g.add(gl);
+    // Window sill — stone ledge
+    const sill=new THREE.Mesh(new THREE.BoxGeometry(ww+0.14,0.04,0.08),new THREE.MeshStandardMaterial({color:0xbdbdbd,roughness:0.7,metalness:0.04}));
+    sill.position.set(wx,centerY-wh/2-0.02,wallZ+0.04);sill.castShadow=true;g.add(sill);
   }
 }
 
@@ -399,10 +404,18 @@ function _buildGableRoof(g:THREE.Group,w:number,d:number,pitchDeg:number,overhan
   const m=new THREE.Mesh(geom,new THREE.MeshStandardMaterial({color,roughness:0.70,metalness:0.04}));m.castShadow=true;m.receiveShadow=true;g.add(m);return m;
 }
 
-function _buildTree(g:THREE.Group,x:number,y:number,z:number){
-  const trunk=_cyl(g,0.08,0.10,0.8,8,0x5d4037,{roughness:0.9});trunk.position.set(x,y+0.4,z);
-  const crown=new THREE.Mesh(new THREE.SphereGeometry(0.48,10,8),new THREE.MeshStandardMaterial({color:0x2e7d32,roughness:0.85}));
-  crown.position.set(x,y+0.8+0.38,z);crown.castShadow=true;g.add(crown);
+function _buildTree(g:THREE.Group,x:number,y:number,z:number,scale:number=1.0){
+  // Trunk — tapered cylinder with bark roughness
+  const trunk=_cyl(g,0.06*scale,0.12*scale,1.2*scale,12,0x5d4037,{roughness:0.95,metalness:0.0});trunk.position.set(x,y+0.6*scale,z);
+  // Multi-tiered foliage for natural look (3 overlapping spheres)
+  const leafMat=new THREE.MeshStandardMaterial({color:0x2e7d32,roughness:0.88,metalness:0.0});
+  const leafMatLite=new THREE.MeshStandardMaterial({color:0x43a047,roughness:0.85,metalness:0.0});
+  const c1=new THREE.Mesh(new THREE.SphereGeometry(0.55*scale,16,12),leafMat);
+  c1.position.set(x,y+1.4*scale,z);c1.castShadow=true;c1.receiveShadow=true;g.add(c1);
+  const c2=new THREE.Mesh(new THREE.SphereGeometry(0.42*scale,14,10),leafMatLite);
+  c2.position.set(x+0.15*scale,y+1.8*scale,z+0.1*scale);c2.castShadow=true;g.add(c2);
+  const c3=new THREE.Mesh(new THREE.SphereGeometry(0.32*scale,12,8),leafMat);
+  c3.position.set(x-0.1*scale,y+2.0*scale,z-0.08*scale);c3.castShadow=true;g.add(c3);
 }
 
 function _buildLampPost(g:THREE.Group,x:number,y:number,z:number){
@@ -423,16 +436,16 @@ function buildPremiumHouse(ub:UBLike,gY:number,lx:number,lz:number,ry:number):TH
   const totalH=((ub.wallHeights?.ground||0)+(ub.wallHeights?.first||0)+(ub.wallHeights?.second||0))||(isGarage?3.0:3.8);
   const pH=0.18;
 
-  // Plinth
-  const plinth=_box(g,w+0.12,pH,d+0.12,0x90a4ae,{roughness:0.95});plinth.position.y=pH/2;
+  // Plinth — stone foundation
+  const plinth=_box(g,w+0.12,pH,d+0.12,0x78909c,{roughness:0.85,metalness:0.02});plinth.position.y=pH/2;
 
-  // Main walls
-  const wallColor=isGarage?0xf5f5f5:0xfafafa;
+  // Main walls — smooth stucco finish
+  const wallColor=isGarage?0xeceff1:0xfaf9f6;
   const wallGeom=new THREE.BoxGeometry(w,totalH,d);
-  const walls=new THREE.Mesh(wallGeom,new THREE.MeshStandardMaterial({color:wallColor,roughness:0.68,metalness:0.01}));
+  const walls=new THREE.Mesh(wallGeom,new THREE.MeshStandardMaterial({color:wallColor,roughness:0.48,metalness:0.01}));
   walls.position.y=pH+totalH/2;walls.castShadow=true;walls.receiveShadow=true;g.add(walls);
-  // Edge outline
-  const el=new THREE.LineSegments(new THREE.EdgesGeometry(wallGeom,20),new THREE.LineBasicMaterial({color:0xbdbdbd,opacity:0.4,transparent:true}));
+  // Subtle edge outline
+  const el=new THREE.LineSegments(new THREE.EdgesGeometry(wallGeom,20),new THREE.LineBasicMaterial({color:0xd0d0d0,opacity:0.2,transparent:true}));
   el.position.y=walls.position.y;g.add(el);
 
   const baseY=pH;
@@ -457,9 +470,9 @@ function buildPremiumHouse(ub:UBLike,gY:number,lx:number,lz:number,ry:number):TH
     // Front door
     const doorFrame=_box(g,0.88,2.05,0.055,0x4e342e,{roughness:0.65});doorFrame.position.set(0,baseY+1.025,d/2+0.01);
     const door=_box(g,0.72,1.9,0.05,0x6d4c41,{roughness:0.7});door.position.set(0,baseY+0.95,d/2+0.035);
-    // Door knob
-    const knob=new THREE.Mesh(new THREE.SphereGeometry(0.045,6,5),new THREE.MeshStandardMaterial({color:0xf9a825,roughness:0.15,metalness:0.9}));
-    knob.position.set(0.26,baseY+0.85,d/2+0.065);g.add(knob);
+    // Door knob — polished brass
+    const knob=new THREE.Mesh(new THREE.SphereGeometry(0.045,12,10),new THREE.MeshStandardMaterial({color:0xf9a825,roughness:0.10,metalness:0.92}));
+    knob.position.set(0.26,baseY+0.85,d/2+0.065);knob.castShadow=true;g.add(knob);
     // Door step
     const step=_box(g,0.95,0.10,0.28,0x9e9e9e,{roughness:0.9});step.position.set(0,baseY+0.05,d/2+0.16);
     void doorFrame;void door;void step;
@@ -518,10 +531,10 @@ function buildPremiumPool(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THR
   // Pool basin
   _box(g,w,0.22,d,0x1565c0,{roughness:0.5}).position.y=dH/2+0.11;
 
-  // Water surface
+  // Water surface — realistic physical water
   const water=new THREE.Mesh(new THREE.PlaneGeometry(w-0.06,d-0.06),
-    new THREE.MeshPhysicalMaterial({color:0x26c6da,roughness:0.01,metalness:0.1,transparent:true,opacity:0.88,transmission:0.22,clearcoat:1.0,clearcoatRoughness:0.04}));
-  water.rotation.x=-Math.PI/2;water.position.y=dH+0.21;g.add(water);
+    new THREE.MeshPhysicalMaterial({color:0x1e99c7,roughness:0.008,metalness:0.08,transparent:true,opacity:0.85,transmission:0.45,clearcoat:1.0,clearcoatRoughness:0.02,ior:1.33}));
+  water.rotation.x=-Math.PI/2;water.position.y=dH+0.21;water.receiveShadow=true;g.add(water);
 
   // White pool edge tiles
   const eM=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.4});
@@ -529,10 +542,10 @@ function buildPremiumPool(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THR
     const e=new THREE.Mesh(new THREE.BoxGeometry(ew,0.055,ed),eM);e.position.set(ex,dH+0.225,ez);g.add(e);
   }
 
-  // Stainless ladder
-  const lM=new THREE.MeshStandardMaterial({color:0xe0e0e0,roughness:0.15,metalness:0.88});
-  const rail=new THREE.Mesh(new THREE.CylinderGeometry(0.024,0.024,0.9,6),lM);rail.position.set(w/2-0.12,dH+0.5,d/2-0.04);g.add(rail);
-  for(let r=0;r<3;r++){const rg=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.04,0.04),lM);rg.position.set(w/2-0.12,dH+0.2+r*0.22,d/2-0.04);g.add(rg);}
+  // Stainless steel ladder — polished
+  const lM=new THREE.MeshStandardMaterial({color:0xd8d8d8,roughness:0.10,metalness:0.90});
+  const rail=new THREE.Mesh(new THREE.CylinderGeometry(0.024,0.024,0.9,12),lM);rail.position.set(w/2-0.12,dH+0.5,d/2-0.04);rail.castShadow=true;g.add(rail);
+  for(let r=0;r<3;r++){const rg=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.04,0.04),lM);rg.position.set(w/2-0.12,dH+0.2+r*0.22,d/2-0.04);rg.castShadow=true;g.add(rg);}
 
   // Lounge chairs × 4
   const chM=new THREE.MeshStandardMaterial({color:0xfff9c4,roughness:0.7});
@@ -544,11 +557,11 @@ function buildPremiumPool(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THR
       const lg=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,0.10,5),lM2);lg.position.set(cx+lsx,dH+0.05,cz+lsz);g.add(lg);
     }
   }
-  // Parasol
-  const pp=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.035,2.0,8),new THREE.MeshStandardMaterial({color:0xbdbdbd,roughness:0.28,metalness:0.72}));
-  pp.position.set(-(w/2+0.9),dH+1.0,0);g.add(pp);
-  const pr=new THREE.Mesh(new THREE.ConeGeometry(1.05,0.20,12,1,true),new THREE.MeshStandardMaterial({color:0xf44336,roughness:0.62,side:THREE.DoubleSide}));
-  pr.position.set(-(w/2+0.9),dH+1.95,0);g.add(pr);
+  // Parasol — higher detail
+  const pp=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.035,2.0,12),new THREE.MeshStandardMaterial({color:0xb0b0b0,roughness:0.20,metalness:0.78}));
+  pp.position.set(-(w/2+0.9),dH+1.0,0);pp.castShadow=true;g.add(pp);
+  const pr=new THREE.Mesh(new THREE.ConeGeometry(1.05,0.20,16,1,true),new THREE.MeshStandardMaterial({color:0xd32f2f,roughness:0.55,side:THREE.DoubleSide}));
+  pr.position.set(-(w/2+0.9),dH+1.95,0);pr.castShadow=true;g.add(pr);
   return g;
 }
 
@@ -557,8 +570,8 @@ function buildPremiumGarden(ub:UBLike,gY:number,lx:number,lz:number,ry:number):T
   const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
   const w=ub.width||8,d=ub.depth||8;
 
-  // Lush base lawn
-  const lawn=_box(g,w,0.16,d,0x43a047,{roughness:0.97});lawn.position.y=0.08;
+  // Lush base lawn — natural grass green
+  const lawn=_box(g,w,0.16,d,0x388e3c,{roughness:0.92});lawn.position.y=0.08;
 
   // Gravel path (central cross)
   const pM=new THREE.MeshStandardMaterial({color:0xd7ccc8,roughness:0.93});
@@ -570,8 +583,8 @@ function buildPremiumGarden(ub:UBLike,gY:number,lx:number,lz:number,ry:number):T
     for(let fi=0;fi<3;fi++){
       const bed=_box(g,w*0.22,0.10,d*0.07,0x6d4c41,{roughness:0.97});bed.position.set(-w*0.22+fi*w*0.22,0.21,fz);
       const fc=flColors[fi%flColors.length];
-      const bloom=new THREE.Mesh(new THREE.SphereGeometry(0.17,6,5),new THREE.MeshStandardMaterial({color:fc,roughness:0.82}));
-      bloom.position.set(-w*0.22+fi*w*0.22,0.42,fz);bloom.castShadow=true;g.add(bloom);void bed;void side;
+      const bloom=new THREE.Mesh(new THREE.SphereGeometry(0.17,12,10),new THREE.MeshStandardMaterial({color:fc,roughness:0.72}));
+      bloom.position.set(-w*0.22+fi*w*0.22,0.42,fz);bloom.castShadow=true;bloom.receiveShadow=true;g.add(bloom);void bed;void side;
     }
   }
 
@@ -681,6 +694,81 @@ function buildPremiumCarport(ub:UBLike,gY:number,lx:number,lz:number,ry:number):
   return g;
 }
 
+// ── TERRACE ──────────────────────────────────────────────────────────────────
+function buildPremiumTerrace(ub:UBLike,gY:number,lx:number,lz:number,ry:number):THREE.Group{
+  const g=new THREE.Group();g.position.set(lx,gY,lz);g.rotation.y=ry;
+  const w=ub.width||6,d=ub.depth||5;
+  const deckH=0.18;
+
+  // Wood deck surface — warm oak
+  const deckMat=new THREE.MeshStandardMaterial({color:0xb0793c,roughness:0.65,metalness:0.02});
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(w,deckH,d),deckMat);
+  deck.position.y=deckH/2;deck.castShadow=true;deck.receiveShadow=true;g.add(deck);
+
+  // Plank grooves — subtle darker lines
+  const grooveMat=new THREE.MeshStandardMaterial({color:0x8d6535,roughness:0.72,metalness:0.02});
+  const plankCount=Math.floor(d/0.30);
+  for(let i=0;i<plankCount;i++){
+    const groove=new THREE.Mesh(new THREE.BoxGeometry(w-0.04,0.006,0.04),grooveMat);
+    groove.position.set(0,deckH+0.003,-d/2+0.15+i*0.30);groove.castShadow=true;g.add(groove);
+  }
+
+  // Railing posts — wood
+  const postMat=new THREE.MeshStandardMaterial({color:0x6d4c41,roughness:0.72,metalness:0.04});
+  const postH=0.95;
+  const postsPerSide=Math.max(3,Math.floor(w/1.2));
+  for(let pi=0;pi<postsPerSide;pi++){
+    const px=-w/2+(w/(postsPerSide-1))*pi;
+    for(const pz of [d/2,-d/2]){
+      const post=new THREE.Mesh(new THREE.BoxGeometry(0.08,postH,0.08),postMat);
+      post.position.set(px,deckH+postH/2,pz);post.castShadow=true;g.add(post);
+    }
+  }
+
+  // Top rails — horizontal beams
+  const railMat=new THREE.MeshStandardMaterial({color:0x6d4c41,roughness:0.68,metalness:0.04});
+  for(const rz of [d/2,-d/2]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(w,0.06,0.06),railMat);
+    rail.position.set(0,deckH+postH*0.85,rz);rail.castShadow=true;g.add(rail);
+  }
+  for(const rx of [-w/2,w/2]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.06,d),railMat);
+    rail.position.set(rx,deckH+postH*0.85,0);rail.castShadow=true;g.add(rail);
+  }
+
+  // Patio table — round marble-like top
+  const tableTop=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,0.05,16),
+    new THREE.MeshStandardMaterial({color:0xf5f0e8,roughness:0.35,metalness:0.05}));
+  tableTop.position.set(0,deckH+0.72,0);tableTop.castShadow=true;g.add(tableTop);
+  const tableLeg=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.70,12),
+    new THREE.MeshStandardMaterial({color:0x757575,roughness:0.25,metalness:0.65}));
+  tableLeg.position.set(0,deckH+0.35,0);tableLeg.castShadow=true;g.add(tableLeg);
+
+  // 2 chairs
+  const chairMat=new THREE.MeshStandardMaterial({color:0x8d6e63,roughness:0.68,metalness:0.04});
+  for(const cx of [-0.85,0.85]){
+    const seat=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.045,0.42),chairMat);
+    seat.position.set(cx,deckH+0.42,0);seat.castShadow=true;g.add(seat);
+    const back=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.48,0.05),chairMat);
+    back.position.set(cx,deckH+0.66,-0.18);back.castShadow=true;g.add(back);
+    // Legs
+    const legMat=new THREE.MeshStandardMaterial({color:0x616161,roughness:0.28,metalness:0.62});
+    for(const[lox,loz] of [[-0.16,-0.16],[0.16,-0.16],[-0.16,0.16],[0.16,0.16]] as [number,number][]){
+      const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.42,8),legMat);
+      leg.position.set(cx+lox,deckH+0.21,loz);g.add(leg);
+    }
+  }
+
+  // Parasol
+  const poleMat=new THREE.MeshStandardMaterial({color:0xa0a0a0,roughness:0.18,metalness:0.78});
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.035,2.2,12),poleMat);
+  pole.position.set(0,deckH+1.1,0);pole.castShadow=true;g.add(pole);
+  const canopy=new THREE.Mesh(new THREE.ConeGeometry(1.15,0.22,16,1,true),
+    new THREE.MeshStandardMaterial({color:0xc62828,roughness:0.55,side:THREE.DoubleSide}));
+  canopy.position.set(0,deckH+2.15,0);canopy.castShadow=true;g.add(canopy);
+
+  return g;
+}
 
 // ─── Module-Level 3D Context Registry (for cross-module capture access) ─────
 // Only one Terrain3DViewer exists at a time. This singleton exposes the active
@@ -963,8 +1051,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     // ═══════════════════════════════════════════════════════════════════════
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xc8ddf0);  // Sky-matching pale blue
-    scene.fog = null; // No fog — terrain must stay fully colored at all zoom distances
+    scene.background = new THREE.Color(0xd6e4f0);  // Soft atmospheric blue-grey
+    scene.fog = new THREE.FogExp2(0xd6e4f0, 0.0018);  // Subtle exponential fog for depth
 
     const far = Math.max(6000, tSpan * 12);
     const camera = new THREE.PerspectiveCamera(35, W / H, 0.3, far);
@@ -979,7 +1067,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.5; // Brighter for vibrant satellite colors
+    renderer.toneMappingExposure = 1.35; // Natural balanced exposure
 
     container.innerHTML = "";
     const cvs = renderer.domElement;
@@ -1002,8 +1090,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     // Lighting
     const sd = Math.max(80, tSpan * 1.5);
-    const sun = new THREE.DirectionalLight(0xfff8e8, 2.5);  // Warm sunlight — boosted
-    sun.position.set(sd * 0.4, sd * 1.0, sd * 0.35);
+    const sun = new THREE.DirectionalLight(0xfff5e0, 2.2);  // Warm golden sunlight
+    sun.position.set(sd * 0.5, sd * 1.0, sd * 0.4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.camera.near = 0.5;
@@ -1014,9 +1102,9 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     sun.shadow.camera.bottom = -sd;
     sun.shadow.bias = -0.0002;
     scene.add(sun);
-    scene.add(new THREE.DirectionalLight(0xc8d8e8, 0.5));  // Cool fill — boosted
-    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a7b4e, 0.55));
-    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.3));
+    scene.add(new THREE.DirectionalLight(0xd4e0f0, 0.45));  // Cool sky fill
+    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x4a6741, 0.50));  // Sky/ground ambient
+    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.25));  // Soft base fill
 
     // ── SKY DOME ──
     createSkyDome(scene);
@@ -1135,7 +1223,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.65,
+      roughness: 0.78,
       metalness: 0.0,
       side: THREE.DoubleSide,
     });
@@ -1222,19 +1310,65 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     bottomCap.receiveShadow = true;
     scene.add(bottomCap);
 
-    // ── Parcel boundary outline on terrain (green line) ──
+    // ── Parcel boundary outline on terrain (terrain-hugging tube) ──
     if (bCoords.length >= 3) {
-      const boundaryPts3D = bCoords.map(([lng, lat]) => {
-        const sx = (lng - refPoint.lng) * METERS_PER_DEG * cosLat;
-        const sz = -(lat - refPoint.lat) * METERS_PER_DEG;
-        // Sample terrain height via IDW
-        const groundY = normPts.length >= 3 ? idwInterpolate(sx, sz, normPts, 2) : 0;
-        return new THREE.Vector3(sx, groundY + 0.3, sz); // +0.3m above terrain to avoid z-fight
-      });
-      const bLineGeom = new THREE.BufferGeometry().setFromPoints(boundaryPts3D);
-      const bLineMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 2, depthTest: true });
-      const bLine = new THREE.LineLoop(bLineGeom, bLineMat);
-      scene.add(bLine);
+      // Raycast against actual terrain mesh for pixel-perfect ground following
+      const boundaryRaycaster = new THREE.Raycaster();
+      const rayDir = new THREE.Vector3(0, -1, 0);
+
+      // Build densely-sampled boundary points that follow terrain exactly
+      const rawBoundaryPts: THREE.Vector3[] = [];
+      for (let ci = 0; ci < bCoords.length; ci++) {
+        const [lng0, lat0] = bCoords[ci];
+        const [lng1, lat1] = bCoords[(ci + 1) % bCoords.length];
+        // Subdivide each edge into segments for smooth terrain following
+        const segCount = Math.max(4, Math.ceil(
+          Math.sqrt(
+            Math.pow((lng1 - lng0) * METERS_PER_DEG * cosLat, 2) +
+            Math.pow((lat1 - lat0) * METERS_PER_DEG, 2)
+          ) / 1.5 // ~1.5m per segment
+        ));
+        for (let si = 0; si < segCount; si++) {
+          const t = si / segCount;
+          const lng = lng0 + (lng1 - lng0) * t;
+          const lat = lat0 + (lat1 - lat0) * t;
+          const sx = (lng - refPoint.lng) * METERS_PER_DEG * cosLat;
+          const sz = -(lat - refPoint.lat) * METERS_PER_DEG;
+
+          // Raycast down onto terrain mesh for exact surface Y
+          boundaryRaycaster.set(new THREE.Vector3(sx, 500, sz), rayDir);
+          const hits = boundaryRaycaster.intersectObject(terrainMesh);
+          const groundY = hits.length > 0
+            ? hits[0].point.y
+            : (normPts.length >= 3 ? idwInterpolate(sx, sz, normPts, 2) : 0);
+
+          rawBoundaryPts.push(new THREE.Vector3(sx, groundY + 0.08, sz));
+        }
+      }
+
+      if (rawBoundaryPts.length >= 3) {
+        // Close the loop
+        rawBoundaryPts.push(rawBoundaryPts[0].clone());
+
+        // Create a CatmullRom curve for smooth interpolation then sample it
+        const boundaryCurve = new THREE.CatmullRomCurve3(rawBoundaryPts, false, 'catmullrom', 0.25);
+        const smoothPts = boundaryCurve.getPoints(rawBoundaryPts.length * 2);
+
+        // TubeGeometry for a solid, visible boundary line
+        const tubeCurve = new THREE.CatmullRomCurve3(smoothPts, false, 'catmullrom', 0.1);
+        const tubeGeo = new THREE.TubeGeometry(tubeCurve, smoothPts.length, 0.12, 6, false);
+        const tubeMat = new THREE.MeshStandardMaterial({
+          color: 0xcbd5e1,
+          roughness: 0.45,
+          metalness: 0.08,
+          emissive: 0xcbd5e1,
+          emissiveIntensity: 0.12,
+        });
+        const boundaryTube = new THREE.Mesh(tubeGeo, tubeMat);
+        boundaryTube.castShadow = true;
+        boundaryTube.receiveShadow = true;
+        scene.add(boundaryTube);
+      }
     }
 
     // No floor plane needed — sky dome provides the background
@@ -1269,6 +1403,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
             assetGroup = buildPremiumParking(ub, groundY, localX, localZ, rotY);
           } else if (buildingType.includes('carport')) {
             assetGroup = buildPremiumCarport(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('terrace') || buildingType.includes('terrasse') || buildingType.includes('deck') || buildingType.includes('patio')) {
+            assetGroup = buildPremiumTerrace(ub, groundY, localX, localZ, rotY);
           } else {
             assetGroup = buildPremiumHouse(ub, groundY, localX, localZ, rotY);
           }
@@ -1412,6 +1548,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
             assetGroup = buildPremiumParking(ub, groundY, localX, localZ, rotY);
           } else if (buildingType.includes('carport')) {
             assetGroup = buildPremiumCarport(ub, groundY, localX, localZ, rotY);
+          } else if (buildingType.includes('terrace') || buildingType.includes('terrasse') || buildingType.includes('deck') || buildingType.includes('patio')) {
+            assetGroup = buildPremiumTerrace(ub, groundY, localX, localZ, rotY);
           } else {
             assetGroup = buildPremiumHouse(ub, groundY, localX, localZ, rotY);
           }
@@ -1579,7 +1717,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
   }, [zScale]);
 
   return (
-    <div className="relative w-full h-full" style={{ minHeight: 300, background: "#c8ddf0" }}>
+    <div className="relative w-full h-full" style={{ minHeight: 300, background: "transparent" }}>
       <div ref={containerRef} className="w-full h-full" />
 
 

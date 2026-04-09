@@ -156,6 +156,23 @@ export interface SecondaryBuildingLayout {
   widthDim: DimLine;       // building width dimension
 }
 
+// ─── Site Element Layout (ground-level: pool, garden, terrace, parking) ────
+
+export interface SiteElementLayout {
+  rect: { x: number; y: number; w: number; h: number };
+  label: { x: number; y: number; text: string };
+  widthDim: DimLine;
+  depthDim?: DimLine;       // for pool (sunken depth)
+  elementType: string;      // 'pool' | 'garden' | 'terrace' | 'parking'
+  color: string;
+  strokeColor: string;
+  pattern?: 'water' | 'grass' | 'paving' | 'gravel';
+  /** Width in meters (for label) */
+  widthM: number;
+  /** Depth in meters (for label) */
+  depthM: number;
+}
+
 /**
  * Layout for a single building in the multi-building elevation array.
  * Each building gets its own wall/roof/windows/door/chimney/foundation
@@ -285,6 +302,9 @@ export interface ElevationLayout {
   /** All buildings laid out with absolute positioning and Z-depth order.
    *  Sorted back-to-front (painter's algorithm). */
   buildings: BuildingLayout[];
+
+  // ── Site elements (ground-level: pool, garden, terrace, parking) ──
+  siteElements: SiteElementLayout[];
 
   // ── Labels ──
   direction: string;      // "ÉLÉVATION NORD projetée"
@@ -649,6 +669,7 @@ export function computeElevationLayout(
       building: null,
       secondaryBuildings: [],
       buildings: [],
+      siteElements: [],
       direction: dirLabel,
       emptyPlotText: "Terrain vierge — aucune construction existante",
       emptyPlotSub: "(Aucune élévation à représenter)",
@@ -852,6 +873,7 @@ export function computeElevationLayout(
   // ═══════════════════════════════════════════════════════════════════════════
 
   const secondaryBuildings: SecondaryBuildingLayout[] = [];
+  const siteElements: SiteElementLayout[] = [];
   const secBuildings = secondaryBuildingsInput || [];
 
   if (secBuildings.length > 0) {
@@ -871,9 +893,80 @@ export function computeElevationLayout(
       fence: "#A0916B",
     };
 
+    // Site element config for flat landscape items
+    const SITE_ELEMENT_CONFIG: Record<string, { color: string; strokeColor: string; pattern: SiteElementLayout["pattern"]; depthM: number; label: string; yOffset: number }> = {
+      pool:    { color: "#87CEEB", strokeColor: "#2196F3", pattern: "water",  depthM: 1.5,  label: "Piscine",  yOffset: 0 },
+      garden:  { color: "#90EE90", strokeColor: "#4CAF50", pattern: "grass",  depthM: 0.3,  label: "Jardin",   yOffset: 0 },
+      terrace: { color: "#E8D5B7", strokeColor: "#A0916B", pattern: "paving", depthM: 0.15, label: "Terrasse", yOffset: -Math.max(2, pxPerM * 0.1) },
+      parking: { color: "#C8D6E5", strokeColor: "#78909C", pattern: "gravel", depthM: 0.1,  label: "Parking",  yOffset: 0 },
+    };
+
     for (const secBldg of secBuildings) {
-      // Skip non-structural items (garden, pool with 0 wall height)
       const secWallH = secBldg.wallHeight;
+      const btype = (secBldg.name || "Structure").toLowerCase().replace(/^construction\s*/i, "");
+
+      // ── Route flat elements (wallHeight <= 0) to siteElements[] ──
+      // Also match 'carport' as a parking alias
+      const normalizedName = btype.replace(/carport/g, "parking");
+      const detectedFlatType = Object.keys(SITE_ELEMENT_CONFIG).find(t => normalizedName.includes(t));
+      if (secWallH <= 0 && detectedFlatType) {
+        const config = SITE_ELEMENT_CONFIG[detectedFlatType];
+        const secFacadeLen = dirConfig.facadeDimension === "width" ? secBldg.width : secBldg.depth;
+        const secWidthPx = Math.max(secFacadeLen * pxPerM, 20);
+        const secDepthPx = Math.max(config.depthM * pxPerM, 4);
+        const secX = nextX;
+        const secCenterX = secX + secWidthPx / 2;
+
+        // Cap: don't overflow viewport — skip this one but try remaining
+        if (secX + secWidthPx > w - 20) continue;
+
+        // Pool is sunken below ground; terrace sits slightly above; others are at ground
+        const rectY = detectedFlatType === "pool"
+          ? groundY  // starts at ground, extends down
+          : groundY + config.yOffset - secDepthPx;
+
+        const secBwDimY = detectedFlatType === "pool"
+          ? groundY + secDepthPx + 6
+          : groundY + 6;
+
+        siteElements.push({
+          rect: { x: secX, y: rectY, w: secWidthPx, h: secDepthPx },
+          label: {
+            x: secCenterX,
+            y: detectedFlatType === "pool" ? groundY + secDepthPx + (plotSpan > 500 ? 16 : 24) : groundY + (plotSpan > 500 ? 9 : 20),
+            text: config.label,
+          },
+          widthDim: {
+            x1: secX, y1: secBwDimY,
+            x2: secX + secWidthPx, y2: secBwDimY,
+            tickLen: 2,
+            label: `${secFacadeLen.toFixed(1)}m`,
+            labelX: secCenterX,
+            labelY: secBwDimY,
+            vertical: false,
+          },
+          depthDim: detectedFlatType === "pool" ? {
+            x1: secX - 8, y1: groundY,
+            x2: secX - 8, y2: groundY + secDepthPx,
+            tickLen: 2,
+            label: `${config.depthM.toFixed(1)}m`,
+            labelX: secX - 10,
+            labelY: groundY + secDepthPx / 2,
+            vertical: true,
+          } : undefined,
+          elementType: detectedFlatType,
+          color: config.color,
+          strokeColor: config.strokeColor,
+          pattern: config.pattern,
+          widthM: secFacadeLen,
+          depthM: config.depthM,
+        });
+
+        nextX = secX + secWidthPx + gapPx;
+        continue;
+      }
+
+      // ── Skip non-structural items with no wall height and no flat-type match ──
       if (secWallH <= 0) continue;
 
       const secFacadeLen = dirConfig.facadeDimension === "width" ? secBldg.width : secBldg.depth;
@@ -888,7 +981,8 @@ export function computeElevationLayout(
       const secRidgeTop = groundY - secRidgeHPx;
 
       // Cap: don't overflow viewport
-      if (secX + secWidthPx > w - 20) break;
+      // Cap: don't overflow viewport — skip this one but try remaining
+      if (secX + secWidthPx > w - 20) continue;
 
       // Roof
       const secRoof = computeRoofLayout(
@@ -906,7 +1000,6 @@ export function computeElevationLayout(
       };
 
       // Label
-      const btype = (secBldg.name || "Structure").toLowerCase().replace(/^construction\s*/i, "");
       const displayName = btype.charAt(0).toUpperCase() + btype.slice(1);
 
       // Height dimension (left of secondary building)
@@ -933,7 +1026,7 @@ export function computeElevationLayout(
         vertical: false,
       };
 
-      const detectedType = Object.keys(typeColors).find(t => btype.includes(t)) || "garage";
+      const detectedType = Object.keys(typeColors).find(t => normalizedName.includes(t)) || "garage";
 
       secondaryBuildings.push({
         rect: { x: secX, y: secWallTop, w: secWidthPx, h: secWallHPx },
@@ -1020,6 +1113,7 @@ export function computeElevationLayout(
     },
     secondaryBuildings,
     buildings: allBuildings,
+    siteElements,
     direction: dirLabel,
     emptyPlotText: "",
     emptyPlotSub: "",
@@ -1140,17 +1234,31 @@ export function computeMultiBuildingLayout(
   terrain?: TerrainProfile,
   setbacks?: { front?: number | null; side?: number | null; rear?: number | null },
 ): ElevationLayout {
+  // ── Separate flat site elements from structural buildings ──
+  const FLAT_ELEMENT_TYPES = ["pool", "garden", "terrace", "parking"];
+  const structuralBuildings = buildings.filter((b) => {
+    if (b.wallHeight > 0) return true;
+    const name = (b.name || "").toLowerCase().replace(/carport/g, "parking");
+    return !FLAT_ELEMENT_TYPES.some(t => name.includes(t));
+  });
+  const flatElements = buildings.filter((b) => {
+    if (b.wallHeight > 0) return false;
+    const name = (b.name || "").toLowerCase().replace(/carport/g, "parking");
+    return FLAT_ELEMENT_TYPES.some(t => name.includes(t));
+  });
+
   // Empty array = empty plot
-  if (buildings.length === 0) {
+  if (structuralBuildings.length === 0 && flatElements.length === 0) {
     return computeElevationLayout(
       parcel, null, ngf, materials, dirConfig, suffix, viewport, terrain, setbacks,
     );
   }
 
   // ── Pick the primary building (largest footprint among non-existing, or just largest) ──
+  const buildingsToSearch = structuralBuildings.length > 0 ? structuralBuildings : buildings;
   let primaryIdx = 0;
   let maxArea = 0;
-  buildings.forEach((b, i) => {
+  buildingsToSearch.forEach((b, i) => {
     const area = b.width * b.depth;
     // Prefer non-existing buildings as primary
     if (!b.isExisting && area > maxArea) {
@@ -1160,7 +1268,7 @@ export function computeMultiBuildingLayout(
   });
   // If all are existing, just pick the largest
   if (maxArea === 0) {
-    buildings.forEach((b, i) => {
+    buildingsToSearch.forEach((b, i) => {
       const area = b.width * b.depth;
       if (area > maxArea) {
         maxArea = area;
@@ -1168,16 +1276,17 @@ export function computeMultiBuildingLayout(
       }
     });
   }
-  const primary = buildings[primaryIdx];
+  const primary = buildingsToSearch[primaryIdx];
 
   // ── Check if any buildings have real site positions ──
   const hasPositions = buildings.some((b) => b.siteX !== 0 || b.siteY !== 0);
 
   if (!hasPositions) {
     // No canvas positions → fall back to legacy single-building layout
+    // Pass flat elements as secondaryBuildingsInput so they get routed to siteElements[]
     const secondary: BuildingDims[] = buildings
-      .filter((_, i) => i !== primaryIdx)
-      .filter((b) => b.wallHeight > 0);
+      .filter((b) => b !== primary)
+      .filter((b) => structuralBuildings.includes(b) || flatElements.includes(b));
 
     const layout = computeElevationLayout(
       parcel, primary, ngf, materials, dirConfig, suffix, viewport,
@@ -1217,8 +1326,8 @@ export function computeMultiBuildingLayout(
   // The facade dimension of the parcel in meters (determines the elevation's X extent)
   const facadeLenM = dirConfig.facadeDimension === "width" ? parcel.widthM : parcel.depthM;
 
-  // ── Project all buildings and sort back-to-front ──
-  const projected = buildings.map((b) => {
+  // ── Project all structural buildings and sort back-to-front ──
+  const projected = structuralBuildings.map((b) => {
     // The building's facade width in this elevation direction
     const bFacadeLen = dirConfig.facadeDimension === "width" ? b.width : b.depth;
 
@@ -1345,9 +1454,75 @@ export function computeMultiBuildingLayout(
     } as BuildingLayout;
   });
 
+  // ── Compute site elements for flat landscape items in the multi-building path ──
+  const computedSiteElements: SiteElementLayout[] = [];
+  const SITE_EL_CFG: Record<string, { color: string; strokeColor: string; pattern: SiteElementLayout["pattern"]; depthM: number; label: string }> = {
+    pool:    { color: "#87CEEB", strokeColor: "#2196F3", pattern: "water",  depthM: 1.5,  label: "Piscine" },
+    garden:  { color: "#90EE90", strokeColor: "#4CAF50", pattern: "grass",  depthM: 0.3,  label: "Jardin" },
+    terrace: { color: "#E8D5B7", strokeColor: "#A0916B", pattern: "paving", depthM: 0.15, label: "Terrasse" },
+    parking: { color: "#C8D6E5", strokeColor: "#78909C", pattern: "gravel", depthM: 0.1,  label: "Parking" },
+  };
+
+  for (const flatB of flatElements) {
+    const fname = (flatB.name || "").toLowerCase().replace(/carport/g, "parking");
+    const ftype = Object.keys(SITE_EL_CFG).find(t => fname.includes(t));
+    if (!ftype) continue;
+    const cfg = SITE_EL_CFG[ftype];
+
+    const bFacadeLen = dirConfig.facadeDimension === "width" ? flatB.width : flatB.depth;
+    const { svgXm } = projectSiteToElevation(
+      flatB.siteX, flatB.siteY, bFacadeLen,
+      parcel.widthM, parcel.depthM, dirConfig.direction,
+    );
+    const bWidthPx = Math.max(bFacadeLen * pxPerM, 20);
+    const depthPx = Math.max(cfg.depthM * pxPerM, 4);
+
+    const facadeLenM = dirConfig.facadeDimension === "width" ? parcel.widthM : parcel.depthM;
+    const rawBX = leftBX + (facadeLenM > 0 ? (svgXm / facadeLenM) * plotSpanPx : plotSpanPx / 2);
+    const elX = Math.max(leftBX - 5, Math.min(rawBX, rightBX - bWidthPx + 5));
+    const elCenterX = elX + bWidthPx / 2;
+
+    const rectY = ftype === "pool" ? ground.y : ground.y - depthPx;
+    const dimY = ftype === "pool" ? ground.y + depthPx + 6 : ground.y + 6;
+
+    computedSiteElements.push({
+      rect: { x: elX, y: rectY, w: bWidthPx, h: depthPx },
+      label: {
+        x: elCenterX,
+        y: ftype === "pool" ? ground.y + depthPx + 16 : ground.y + 12,
+        text: cfg.label,
+      },
+      widthDim: {
+        x1: elX, y1: dimY,
+        x2: elX + bWidthPx, y2: dimY,
+        tickLen: 2,
+        label: `${bFacadeLen.toFixed(1)}m`,
+        labelX: elCenterX,
+        labelY: dimY,
+        vertical: false,
+      },
+      depthDim: ftype === "pool" ? {
+        x1: elX - 8, y1: ground.y,
+        x2: elX - 8, y2: ground.y + depthPx,
+        tickLen: 2,
+        label: `${cfg.depthM.toFixed(1)}m`,
+        labelX: elX - 10,
+        labelY: ground.y + depthPx / 2,
+        vertical: true,
+      } : undefined,
+      elementType: ftype,
+      color: cfg.color,
+      strokeColor: cfg.strokeColor,
+      pattern: cfg.pattern,
+      widthM: bFacadeLen,
+      depthM: cfg.depthM,
+    });
+  }
+
   return {
     ...baseLayout,
     buildings: allBuildings,
     secondaryBuildings: [], // unified into buildings[]
+    siteElements: [...(baseLayout.siteElements || []), ...computedSiteElements],
   };
 }

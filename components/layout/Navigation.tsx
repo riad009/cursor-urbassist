@@ -17,11 +17,11 @@ import {
   Bell,
   LogOut,
   Home,
+  Shield,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import dynamic from "next/dynamic";
 
-const DataDebugModal = dynamic(() => import("@/components/debug/DataDebugModal"), { ssr: false });
+
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/ui/LanguageToggle";
 import { getProjectIdFromRoute } from "@/lib/step-flow";
@@ -38,7 +38,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showDataModal, setShowDataModal] = useState(false);
+
   const { user, loading: authLoading, logout } = useAuth();
   const { t } = useLanguage();
   const projectId = getProjectIdFromRoute(pathname, searchParams.get("project"));
@@ -114,12 +114,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
             <button className="p-2 rounded-full hover:bg-slate-100 transition-colors">
               <Settings className="w-5 h-5 text-slate-500" />
             </button>
-            <button
-              onClick={() => setShowDataModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/25 transition-all"
-            >
-              🔍 ShowData
-            </button>
+
             <div className="w-px h-8 bg-slate-200" />
             {authLoading ? (
               /* Auth hydrating — show skeleton to prevent sign-in flash */
@@ -132,12 +127,15 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
                 <span className="hidden sm:inline px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm border border-slate-200">
                   {user.credits} credits
                 </span>
-                <Link
-                  href="/admin"
-                  className="hidden sm:inline px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-sm hover:bg-slate-200 border border-slate-200"
-                >
-                  Plans
-                </Link>
+                {user.role === "ADMIN" && (
+                  <Link
+                    href="/admin"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 text-sm font-semibold hover:shadow-md transition-all border border-amber-200"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    Admin
+                  </Link>
+                )}
                 <button
                   onClick={() => logout()}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
@@ -236,8 +234,7 @@ function NavigationInner({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Data Debug Modal */}
-      <DataDebugModal open={showDataModal} onClose={() => setShowDataModal(false)} />
+
     </div>
   );
 }

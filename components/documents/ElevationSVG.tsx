@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import type { ElevationLayout, BuildingLayout, WindowLayout, DimLine, MatAnnotation, SetbackDim, SecondaryBuildingLayout } from "@/lib/pdf/elevation-layout";
+import type { ElevationLayout, BuildingLayout, WindowLayout, DimLine, MatAnnotation, SetbackDim, SecondaryBuildingLayout, SiteElementLayout } from "@/lib/pdf/elevation-layout";
 
 // ─── Colors ────────────────────────────────────────────────────────────────
 
@@ -556,6 +556,121 @@ function MultiBuildingArray({ buildings }: { buildings: BuildingLayout[] }) {
   );
 }
 
+// ─── Site Elements Renderer (Pool, Garden, Terrace, Parking) ───────────────
+
+function SiteElementItem({ el }: { el: SiteElementLayout }) {
+  const { rect, label, widthDim, depthDim, elementType, color, strokeColor } = el;
+  const labelTextW = (label.text.length * 5) + 12;
+
+  // Element-type-specific decorations
+  const renderPattern = () => {
+    switch (elementType) {
+      case "pool": {
+        // Water ripple lines
+        const ripples: React.ReactNode[] = [];
+        const rippleCount = Math.max(2, Math.floor(rect.h / 3));
+        for (let i = 1; i <= rippleCount; i++) {
+          const y = rect.y + (rect.h * i) / (rippleCount + 1);
+          ripples.push(
+            <path
+              key={i}
+              d={`M${rect.x + 3},${y} Q${rect.x + rect.w * 0.25},${y - 1.5} ${rect.x + rect.w * 0.5},${y} Q${rect.x + rect.w * 0.75},${y + 1.5} ${rect.x + rect.w - 3},${y}`}
+              stroke="rgba(255,255,255,0.5)"
+              strokeWidth="0.6"
+              fill="none"
+            />,
+          );
+        }
+        return <>{ripples}</>;
+      }
+      case "garden": {
+        // Grass tufts along the element
+        const tufts: React.ReactNode[] = [];
+        const count = Math.max(3, Math.floor(rect.w / 8));
+        for (let i = 0; i < count; i++) {
+          const x = rect.x + 3 + (i * (rect.w - 6)) / count;
+          const h = 2 + (i % 3) * 0.8;
+          tufts.push(
+            <g key={i}>
+              <line x1={x} y1={rect.y} x2={x - 0.6} y2={rect.y - h} stroke="#4CAF50" strokeWidth="0.6" />
+              <line x1={x + 1.5} y1={rect.y} x2={x + 1.8} y2={rect.y - h * 0.7} stroke="#66BB6A" strokeWidth="0.5" />
+              <line x1={x + 3} y1={rect.y} x2={x + 2.8} y2={rect.y - h * 0.85} stroke="#4CAF50" strokeWidth="0.5" />
+            </g>,
+          );
+        }
+        return <>{tufts}</>;
+      }
+      case "terrace": {
+        // Paving grid lines
+        const lines: React.ReactNode[] = [];
+        const spacing = Math.max(3, rect.w / 6);
+        for (let x = rect.x + spacing; x < rect.x + rect.w; x += spacing) {
+          lines.push(
+            <line key={`v${x}`} x1={x} y1={rect.y} x2={x} y2={rect.y + rect.h}
+              stroke={strokeColor} strokeWidth="0.3" opacity="0.4" />,
+          );
+        }
+        return <>{lines}</>;
+      }
+      case "parking": {
+        // Parking lane dashes
+        const dashes: React.ReactNode[] = [];
+        const spacing = Math.max(4, rect.w / 5);
+        for (let x = rect.x + spacing; x < rect.x + rect.w; x += spacing) {
+          dashes.push(
+            <line key={`p${x}`} x1={x} y1={rect.y + 1} x2={x} y2={rect.y + rect.h - 1}
+              stroke="#FFFFFF" strokeWidth="0.5" strokeDasharray="2,1.5" opacity="0.6" />,
+          );
+        }
+        return <>{dashes}</>;
+      }
+      default:
+        return null;
+    }
+  };
+
+  // Label background color per type
+  const labelBg = {
+    pool: "#1976D2",
+    garden: "#2E7D32",
+    terrace: "#8D6E63",
+    parking: "#546E7A",
+  }[elementType] || "#546E7A";
+
+  return (
+    <g>
+      {/* Main shape */}
+      <rect
+        x={rect.x} y={rect.y} width={rect.w} height={rect.h}
+        fill={color} stroke={strokeColor} strokeWidth="1"
+        rx="1"
+      />
+      {/* Pattern decoration */}
+      {renderPattern()}
+      {/* Label badge */}
+      <rect x={label.x - labelTextW / 2} y={label.y - 5} width={labelTextW} height={10} rx="2"
+        fill={labelBg} opacity="0.9" />
+      <text x={label.x} y={label.y + 3} fill="#FFFFFF" fontSize="6.5"
+        fontWeight="bold" textAnchor="middle">{label.text}</text>
+      {/* Width dimension */}
+      <DimensionLine dim={widthDim} />
+      {/* Depth dimension (pool only) */}
+      {depthDim && <DimensionLine dim={depthDim} isLeft />}
+    </g>
+  );
+}
+
+function SiteElementsArray({ elements }: { elements: SiteElementLayout[] }) {
+  if (!elements || !elements.length) return null;
+  return (
+    <>
+      {elements.map((el, i) => (
+        <SiteElementItem key={i} el={el} />
+      ))}
+    </>
+  );
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────
 
 export function ElevationSVG({
@@ -616,6 +731,9 @@ export function ElevationSVG({
 
         {/* Legacy secondary structures (fallback) */}
         <SecondaryBuildings buildings={layout.secondaryBuildings} />
+
+        {/* Site elements: pool, garden, terrace, parking */}
+        <SiteElementsArray elements={layout.siteElements} />
       </svg>
     </div>
   );

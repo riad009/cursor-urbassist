@@ -38,55 +38,57 @@ import {
 } from "@/lib/polygon-offset";
 import { polygonToSetbackSegments, type SetbackSegment } from "@/lib/setback-snap";
 
-// ─── Image 3 Matching Styles ─────────────────────────────────────────────────
+// ─── Premium CAD Styles (French PC2 permit standard) ────────────────────────
 
-/** Parcel boundary: red dashed "Limite de propriété" */
+/** Parcel boundary: refined architectural "Limite de propriété" */
 const PARCEL_BORDER = {
-  stroke: "#dc2626",             // Red-600 — exact French cadastral red
-  strokeWidth: 2.5,
+  stroke: "#94a3b8",             // Slate-400 — professional, clear against dark canvas
+  strokeWidth: 1.6,
   strokeDashArray: [8, 4],
   strokeLineJoin: "miter" as const,
   strokeLineCap: "butt" as const,
   miterLimit: 12,
 };
 
-/** Parcel fill: light mint green */
-const PARCEL_FILL = "rgba(134, 239, 172, 0.25)";
+/** Parcel fill: very subtle tint so shapes stand out */
+const PARCEL_FILL = "rgba(148, 163, 184, 0.06)";
 
-/** Per-parcel dimension label: red italic text */
+/** Per-parcel dimension label: compact dark pill with crisp white text */
 const DIMENSION_LABEL = {
-  fontSize: 11,
+  fontSize: 9,
   fontFamily: "'Inter', system-ui, sans-serif",
-  fontWeight: "600" as const,
+  fontWeight: "500" as const,
   fontStyle: "italic" as const,
-  fill: "#dc2626",
+  fill: "#e2e8f0",
+  backgroundColor: "rgba(15, 23, 42, 0.72)",
+  padding: 2,
 };
 
-/** Vertex marker style */
+/** Vertex marker style — subtle small dots */
 const VERTEX_MARKER = {
-  radius: 3.5,
-  fill: "transparent",
-  stroke: "#dc2626",
-  strokeWidth: 1.5,
+  radius: 2,
+  fill: "#64748b",
+  stroke: "#94a3b8",
+  strokeWidth: 0.5,
 };
 
 /** NGF elevation label */
 const ELEVATION_LABEL = {
-  fontSize: 9,
+  fontSize: 8,
   fontFamily: "'Inter', system-ui, sans-serif",
-  fontWeight: "600" as const,
-  fill: "#64748b",
-  backgroundColor: "rgba(15, 23, 42, 0.65)",
-  padding: 3,
+  fontWeight: "500" as const,
+  fill: "#94a3b8",
+  backgroundColor: "rgba(15, 23, 42, 0.55)",
+  padding: 2,
 };
 
-/** "Limite de propriété" edge text */
+/** "Limite de propriété" edge text — very subtle */
 const BOUNDARY_LABEL = {
-  fontSize: 8,
+  fontSize: 7,
   fontFamily: "'Inter', system-ui, sans-serif",
   fontWeight: "400" as const,
   fontStyle: "italic" as const,
-  fill: "#dc2626",
+  fill: "rgba(148, 163, 184, 0.5)",
 };
 
 // ─── Tag names for selective clearing ────────────────────────────────────────
@@ -252,9 +254,9 @@ export function renderProcessedSite(
         });
         canvas.add(textObj);
 
-        // 3c: "Limite de propriété" text — only on longer edges (> 8m)
-        if (edgeLabel.lengthMeters >= 8) {
-          const offsetFactor = 1.6;
+        // 3c: "Limite de propriété" text — only on very long edges (> 20m) to avoid clutter
+        if (edgeLabel.lengthMeters >= 20) {
+          const offsetFactor = 1.8;
           const midX = (edgeLabel.from.x + edgeLabel.to.x) / 2;
           const midY = (edgeLabel.from.y + edgeLabel.to.y) / 2;
           const dx = edgeLabel.position.x - midX;
@@ -280,15 +282,13 @@ export function renderProcessedSite(
       });
     }
 
-    // 3d: Vertex markers at parcel corners — at absolute canvas positions
+    // 3d: Vertex markers at parcel corners — clean small dots only (no crosshair arms)
     if (parcel.absolutePoints && parcel.absolutePoints.length > 0) {
       const drawnKeys = new Set<string>();
       parcel.absolutePoints.forEach((pt) => {
         const key = `${Math.round(pt.x * 2)},${Math.round(pt.y * 2)}`;
         if (drawnKeys.has(key)) return;
         drawnKeys.add(key);
-
-        const armLen = 5;
 
         const marker = new fabric.Circle({
           left: pt.x,
@@ -306,32 +306,6 @@ export function renderProcessedSite(
           isMeasurement: true,
         });
         canvas.add(marker);
-
-        const hLine = new fabric.Line(
-          [pt.x - armLen, pt.y, pt.x + armLen, pt.y],
-          {
-            stroke: VERTEX_MARKER.stroke,
-            strokeWidth: 1,
-            selectable: false,
-            evented: false,
-            [TAG_PARCEL_GROUP]: true,
-            excludeFromExport: true,
-            isMeasurement: true,
-          }
-        );
-        const vLine = new fabric.Line(
-          [pt.x, pt.y - armLen, pt.x, pt.y + armLen],
-          {
-            stroke: VERTEX_MARKER.stroke,
-            strokeWidth: 1,
-            selectable: false,
-            evented: false,
-            [TAG_PARCEL_GROUP]: true,
-            excludeFromExport: true,
-            isMeasurement: true,
-          }
-        );
-        canvas.add(hLine, vLine);
       });
     }
   });

@@ -484,14 +484,18 @@ function getElevationBuildings(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapped: ElevationBuilding[] = buildings.map((b3d: Record<string, any>, idx: number) => {
     const mainJob = jobs[0] || {};
-    const wallH =
-      Number(b3d.wallHeights?.ground) ||
-      Number(b3d.wallHeight) ||
-      Number(mainJob.wallHeight) ||
-      2.5;
+    const wallH = (() => {
+      const ground = b3d.wallHeights?.ground;
+      if (ground !== undefined && ground !== null && ground !== "") return Number(ground);
+      const wh = b3d.wallHeight;
+      if (wh !== undefined && wh !== null && wh !== "") return Number(wh);
+      const jWh = (mainJob as Record<string, unknown>).wallHeight;
+      if (jWh !== undefined && jWh !== null && jWh !== "") return Number(jWh);
+      return 2.5;
+    })();
     const ridgeH =
       Number(b3d.ridgeHeight) ||
-      (wallH > 0 ? wallH + 0.7 : 3.2);
+      (wallH > 0 ? wallH + 0.7 : 0);
 
     const bdId = String(b3d.id || "");
     const pos = canvasPositions.get(bdId);

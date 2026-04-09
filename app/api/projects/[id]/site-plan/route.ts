@@ -21,6 +21,24 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  return _upsertSitePlan(request, params);
+}
+
+/**
+ * POST handler — required for navigator.sendBeacon() which ALWAYS sends POST.
+ * Without this, the beforeunload auto-save silently returns 405 and data is lost.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return _upsertSitePlan(request, params);
+}
+
+async function _upsertSitePlan(
+  request: NextRequest,
+  params: Promise<{ id: string }>
+) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
@@ -41,6 +59,7 @@ export async function PUT(
       northAngle: body.northAngle ?? null,
       terrainData: body.terrainData || null,
       building3D: body.building3D ?? null,
+      pc2ImageBase64: body.pc2ImageBase64 ?? null,
     },
     update: {
       ...(body.canvasData !== undefined && { canvasData: body.canvasData }),
@@ -53,7 +72,9 @@ export async function PUT(
       ...(body.northAngle !== undefined && { northAngle: body.northAngle }),
       ...(body.terrainData !== undefined && { terrainData: body.terrainData }),
       ...(body.building3D !== undefined && { building3D: body.building3D }),
+      ...(body.pc2ImageBase64 !== undefined && { pc2ImageBase64: body.pc2ImageBase64 }),
     },
   });
   return NextResponse.json({ sitePlan });
 }
+

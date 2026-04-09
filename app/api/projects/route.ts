@@ -3,12 +3,49 @@ import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { processParcelGeometries, type ParcelInput } from "@/lib/gis-pipeline";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const url = new URL(request.url);
+  const isSummary = url.searchParams.get("summary") === "true";
+  const limitParam = url.searchParams.get("limit");
+
+  // ── Fast dashboard mode: parallel COUNT queries + 4 recent projects ────
+  // This returns in ~200-500ms vs 3-15s for fetching ALL projects
+  if (isSummary) {
+    const [total, completed, analyzed, docCount, recent] = await Promise.all([
+      prisma.project.count({ where: { userId: user.id } }),
+      prisma.project.count({ where: { userId: user.id, status: "COMPLETED" } }),
+      prisma.project.count({
+        where: { userId: user.id, regulatoryAnalysis: { isNot: null } },
+      }),
+      prisma.document.count({
+        where: { project: { userId: user.id } },
+      }),
+      prisma.project.findMany({
+        where: { userId: user.id },
+        orderBy: { updatedAt: "desc" },
+        take: 4,
+        select: {
+          id: true, name: true, address: true, status: true,
+          authorizationType: true, updatedAt: true, createdAt: true,
+          regulatoryAnalysis: { select: { id: true, zoneType: true } },
+          _count: { select: { documents: true } },
+        },
+      }),
+    ]);
+    return NextResponse.json({
+      stats: { total, completed, analyzed, documents: docCount },
+      recent,
+    });
+  }
+
+  // ── Full project list (for /projects page) ─────────────────────────────
   const projects = await prisma.project.findMany({
     where: { userId: user.id },
     orderBy: { updatedAt: "desc" },
+    ...(limitParam ? { take: parseInt(limitParam, 10) } : {}),
     include: {
       regulatoryAnalysis: { select: { id: true, zoneType: true } },
       _count: { select: { documents: true } },

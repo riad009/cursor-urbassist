@@ -54,7 +54,7 @@ import {
     generateSingleDocument,
 } from "@/lib/pdf/dossier-assembler";
 import type { CapturedImages as DossierCapturedImages } from "@/lib/pdf/types";
-import { sanitizeFilename } from "@/lib/pdf/shared";
+import { sanitizeFilename, savePdfDoc } from "@/lib/pdf/shared";
 import {
     calculateDpPc,
     estimateFloorAreaCreated,
@@ -62,6 +62,7 @@ import {
     type SubmitterType,
 } from "@/lib/dp-pc-calculator";
 import { useUrbAssistProjectStore } from "@/store/useUrbAssistProjectStore";
+import { useEditorStore } from "@/store/editorStore";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -283,19 +284,34 @@ export default function ProjectDescriptionPage({
 
     // ── Captured document images (Blob URLs from site-plan editor) ─────────────
     // Blob URLs are memory-safe and live in the Zustand store.
-    // They do NOT survive sessionStorage (Blob URLs are opaque references).
+    // They do NOT survive page reload (Blob URLs are opaque references).
+    // Fix #6: Fall back to DB-persisted pc2ImageBase64 for PC2 image survival.
     const [capturedImages, setCapturedImages] = useState<Record<string, string | null>>({});
     useEffect(() => {
         if (step !== 8) return;
         const docs = useUrbAssistProjectStore.getState().generatedDocuments;
         setCapturedImages({ ...docs });
 
+        // If the Zustand store doesn't have a PC2 blob URL (page was reloaded),
+        // fetch the persisted base64 image from the site-plan API
+        if (!docs['PC2'] && projectId) {
+            fetch(`/api/projects/${projectId}/site-plan`)
+                .then(r => r.json())
+                .then(data => {
+                    const dbPc2 = data?.sitePlan?.pc2ImageBase64 as string | null;
+                    if (dbPc2) {
+                        setCapturedImages(prev => ({ ...prev, PC2: prev['PC2'] || dbPc2 }));
+                    }
+                })
+                .catch(() => { /* silent — DB image is optional */ });
+        }
+
         // MANDATE 3: Cleanup blob URLs when leaving Step 8 or unmounting
         return () => {
             // Don't revoke if user might return — only revoke store copies
             // The store's revokeGeneratedDocuments handles its own cleanup
         };
-    }, [step]);
+    }, [step, projectId]);
 
     // ── Detect return from Intelligence Editor (designed=1 URL param) ─────────
     useEffect(() => {
@@ -856,8 +872,40 @@ export default function ProjectDescriptionPage({
         setAnalysisComplete(false);
         setGenerationError(null);
 
+        // ── Re-fetch PDF URL if lost after page reload ──────────────────
+        // pluDocUrl lives in React state → lost on reload. The page loads it
+        // from the DB or re-fetches async, but the user may click "Start Analysis"
+        // before that async fetch completes. Fix: synchronously re-fetch here.
+        let effectivePdfUrl = pluDocUrl;
+        if (!pluFile && useAutoDoc && !effectivePdfUrl && projectData?.coordinates) {
+            try {
+                const coords = JSON.parse(projectData.coordinates);
+                const coordArray = Array.isArray(coords)
+                    ? coords
+                    : [coords.lng ?? coords.longitude, coords.lat ?? coords.latitude];
+                if (coordArray.length >= 2 && (coordArray[0] !== 0 || coordArray[1] !== 0)) {
+                    console.log("[PLU] pluDocUrl is null after reload — re-fetching from PLU detection API...");
+                    const pluRes = await fetch("/api/plu-detection", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ coordinates: coordArray }),
+                    });
+                    if (pluRes.ok) {
+                        const pluData = await pluRes.json();
+                        if (pluData?.plu?.pdfUrl) {
+                            effectivePdfUrl = pluData.plu.pdfUrl;
+                            setPluDocUrl(effectivePdfUrl); // Cache for future use
+                            console.log(`[PLU] ✓ Re-fetched PDF URL: ${effectivePdfUrl?.slice(0, 80)}`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("[PLU] Failed to re-fetch PDF URL:", e);
+            }
+        }
+
         // Validate: need either a PDF file or auto-fetched URL
-        const hasDoc = !!pluFile || (useAutoDoc && !!pluDocUrl);
+        const hasDoc = !!pluFile || (useAutoDoc && !!effectivePdfUrl);
         if (!hasDoc) {
             setGenerationError("Veuillez uploader un document PLU en PDF ou utiliser le document auto-détecté.");
             setAnalysisProgress(100);
@@ -883,8 +931,8 @@ export default function ProjectDescriptionPage({
             // a) PLU document: user-uploaded file takes priority over auto-detected URL
             if (pluFile) {
                 formData.append("pluPdfFile", pluFile);
-            } else if (useAutoDoc && pluDocUrl) {
-                formData.append("pluPdfUrl", pluDocUrl);
+            } else if (useAutoDoc && effectivePdfUrl) {
+                formData.append("pluPdfUrl", effectivePdfUrl);
             }
 
             // b) Optional lotissement (subdivision rules) file
@@ -907,7 +955,10 @@ export default function ProjectDescriptionPage({
             const res = await fetch("/api/analyze-plu", {
                 method: "POST",
                 body: formData,
-                signal: AbortSignal.timeout(130_000), // 130s — slightly above Vercel's 120s maxDuration
+                // No aggressive client timeout — the server manages its own deadline via MASTER_DEADLINE_MS.
+                // The server will ALWAYS return a response (success, fallback, or error) within its deadline.
+                // A generous 5min safety net prevents truly hung connections (e.g., network drop).
+                signal: AbortSignal.timeout(300_000), // 300s safety net — server returns well before this
             });
             // Safe JSON parsing — backend might return HTML on crash
             const contentType = res.headers.get("content-type") || "";
@@ -919,11 +970,12 @@ export default function ProjectDescriptionPage({
             if (!res.ok) {
                 const isDownloadFailed = (data as Record<string, unknown>).downloadFailed === true;
                 if (isDownloadFailed) {
-                    // PDF URL was provided but the file doesn't exist (404) — tell user to upload manually
+                    // PDF URL was provided but download failed OR placeholder detected
                     clearInterval(interval);
+                    // Use the backend's specific error message (distinguishes placeholder vs 404 vs timeout)
                     setGenerationError(
-                        "⚠ Le document PLU automatique n'a pas pu être téléchargé (fichier introuvable sur le serveur national). " +
-                        "Veuillez télécharger le règlement depuis le site de votre mairie et l'importer manuellement via le bouton « Importer un fichier PDF » ci-dessus, puis relancer l'analyse."
+                        (data.error as string) ||
+                        "⚠ Le document PLU automatique n'a pas pu être téléchargé. Veuillez importer le règlement manuellement."
                     );
                     setAnalysisProgress(100);
                     setAnalysisComplete(true);
@@ -981,8 +1033,8 @@ export default function ProjectDescriptionPage({
                     const feasFormData = new FormData();
                     if (pluFile) {
                         feasFormData.append("pdfFile", pluFile);
-                    } else if (useAutoDoc && pluDocUrl) {
-                        feasFormData.append("pdfUrl", pluDocUrl);
+                    } else if (useAutoDoc && effectivePdfUrl) {
+                        feasFormData.append("pdfUrl", effectivePdfUrl);
                     }
                     feasFormData.append("pluZone", projectZoneType || "non spécifiée");
                     feasFormData.append("projectIntent", intent);
@@ -1055,47 +1107,96 @@ export default function ProjectDescriptionPage({
                 <div className="min-h-screen bg-[#f5f6fa] p-4 lg:p-8">
                     <div className="max-w-6xl mx-auto">
 
-                        {/* ── Top stepper ── */}
+                        {/* ── Top stepper — clickable navigation ── */}
                         <div className="flex items-start justify-between mb-6 px-2">
                             {[
-                                { n: 1, label: isEn ? "Description" : "Description" },
-                                { n: 2, label: isEn ? "Regulation Analysis" : "Analyse Réglementation" },
-                                { n: 3, label: isEn ? "3D Design" : "Conception 3D" },
-                                { n: 4, label: isEn ? "Complete File" : "Dossier Complet" },
-                            ].map((s, i) => (
-                                <React.Fragment key={s.n}>
-                                    <div className="flex flex-col items-center gap-1">
-                                        <div className={cn(
-                                            "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all",
-                                            stepperPhase >= s.n
-                                                ? "bg-indigo-600 border-indigo-600 text-white"
-                                                : "bg-white border-slate-300 text-slate-400"
-                                        )}>
-                                            {s.n}
-                                        </div>
-                                        <span className={cn(
-                                            "text-xs font-medium",
-                                            stepperPhase >= s.n ? "text-indigo-600" : "text-slate-400"
-                                        )}>{s.label}</span>
-                                    </div>
-                                    {i < 3 && (
-                                        <div className="flex-1 h-px bg-slate-200 mt-4 mx-3" />
-                                    )}
-                                </React.Fragment>
-                            ))}
+                                { n: 1, label: isEn ? "Description" : "Description", targetStep: 0 as WizardStep, subLabel: isEn ? "Steps 1–4" : "Étapes 1–4" },
+                                { n: 2, label: isEn ? "Regulation Analysis" : "Analyse Réglementation", targetStep: 4 as WizardStep, subLabel: isEn ? "PLU & Feasibility" : "PLU & Faisabilité" },
+                                { n: 3, label: isEn ? "3D Design" : "Conception 3D", targetStep: 6 as WizardStep, subLabel: isEn ? "Site plan editor" : "Éditeur plan de masse" },
+                                { n: 4, label: isEn ? "Complete File" : "Dossier Complet", targetStep: 7 as WizardStep, subLabel: isEn ? "Generate & export" : "Générer & exporter" },
+                            ].map((s, i) => {
+                                const isCompleted = stepperPhase > s.n;
+                                const isCurrent = stepperPhase === s.n;
+                                const isClickable = stepperPhase >= s.n;
+                                return (
+                                    <React.Fragment key={s.n}>
+                                        <button
+                                            type="button"
+                                            disabled={!isClickable}
+                                            onClick={() => isClickable && setStep(s.targetStep)}
+                                            className={cn(
+                                                "flex flex-col items-center gap-1 group transition-all",
+                                                isClickable ? "cursor-pointer" : "cursor-default"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all",
+                                                isCompleted
+                                                    ? "bg-emerald-500 border-emerald-500 text-white shadow-sm shadow-emerald-200"
+                                                    : isCurrent
+                                                        ? "bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-200 ring-4 ring-indigo-100"
+                                                        : "bg-white border-slate-300 text-slate-400",
+                                                isClickable && "group-hover:scale-110"
+                                            )}>
+                                                {isCompleted ? <Check className="w-4 h-4" /> : s.n}
+                                            </div>
+                                            <span className={cn(
+                                                "text-xs font-semibold transition-colors",
+                                                isCompleted ? "text-emerald-600" : isCurrent ? "text-indigo-600" : "text-slate-400",
+                                                isClickable && "group-hover:text-indigo-700"
+                                            )}>{s.label}</span>
+                                            <span className={cn(
+                                                "text-[10px] text-slate-400 transition-colors",
+                                                isClickable && "group-hover:text-slate-500"
+                                            )}>{s.subLabel}</span>
+                                        </button>
+                                        {i < 3 && (
+                                            <div className={cn(
+                                                "flex-1 h-[2px] mt-4 mx-3 rounded-full transition-all",
+                                                stepperPhase > s.n + 1
+                                                    ? "bg-emerald-400"
+                                                    : stepperPhase > s.n
+                                                        ? "bg-gradient-to-r from-emerald-400 to-indigo-400"
+                                                        : stepperPhase === s.n
+                                                            ? "bg-gradient-to-r from-indigo-400 to-slate-200"
+                                                            : "bg-slate-200"
+                                            )} />
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
                         </div>
 
                         {/* ── Progress bar ── */}
                         <div className="mb-6">
                             <div className="flex items-center justify-between mb-1">
                                 <span className="text-xs text-slate-500">{isEn ? "Progress of the case" : "Avancement du dossier"}</span>
-                                <span className="text-xs font-semibold text-slate-700">{progressPercent} %</span>
+                                <span className="text-xs font-bold text-indigo-600">{progressPercent}%</span>
                             </div>
-                            <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                            <div className="h-2.5 rounded-full bg-slate-200 overflow-hidden">
                                 <div
-                                    className="h-full rounded-full bg-indigo-600 transition-all duration-500"
-                                    style={{ width: `${progressPercent}%` }}
+                                    className={cn(
+                                        "h-full rounded-full transition-all duration-700",
+                                        progressPercent >= 100
+                                            ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-green-400"
+                                            : "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-400"
+                                    )}
+                                    style={{ width: `${Math.max(3, progressPercent)}%` }}
                                 />
+                            </div>
+                            <div className="flex justify-between mt-1.5">
+                                <span className="text-[10px] text-slate-400">
+                                    {isEn ? `Step ${step + 1} of 9` : `Étape ${step + 1} sur 9`}
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                    {step <= 4
+                                        ? (isEn ? "Phase 1: Description" : "Phase 1 : Description")
+                                        : step <= 6
+                                            ? (isEn ? "Phase 2: Analysis" : "Phase 2 : Analyse")
+                                            : step === 7
+                                                ? (isEn ? "Phase 3: Design" : "Phase 3 : Conception")
+                                                : (isEn ? "Phase 4: Complete" : "Phase 4 : Complet")}
+                                </span>
                             </div>
                         </div>
 
@@ -3083,13 +3184,23 @@ export default function ProjectDescriptionPage({
                                                                 disabled={dossierGenerating}
                                                                 onClick={async () => {
                                                                     try {
+                                                                        // Fix #5: Block download if site plan has unsaved changes
+                                                                        const editorState = useEditorStore.getState();
+                                                                        if (editorState.isDirty && editorState.projectId === projectId) {
+                                                                            const msg = isEn
+                                                                                ? 'Your site plan has unsaved changes. Please save before downloading.'
+                                                                                : 'Modifications non sauvegardées. Veuillez sauvegarder avant de télécharger.';
+                                                                            alert(msg);
+                                                                            return;
+                                                                        }
                                                                         setDossierGenerating(true);
                                                                         const baseUrl = window.location.origin;
                                                                         const data = await fetchDossierData(projectId, baseUrl);
                                                                         const docCode = selectedDoc === 'PC4 / DPC 8-1' ? 'PC4' : selectedDoc.replace('.', '');
                                                                         const normalizedCode = docCode === 'PC51' ? 'PC5' : docCode === 'PC52' ? 'PC5' : docCode;
                                                                         const imgs: DossierCapturedImages = {
-                                                                            PC2: capturedImages['PC2'] || undefined,
+                                                                            // Fix #6: fall back to DB-persisted pc2ImageBase64 if blob URL is gone
+                                                                            PC2: capturedImages['PC2'] || (data.sitePlanData as any)?.pc2ImageBase64 || undefined,
                                                                             PC3: capturedImages['PC3'] || undefined,
                                                                             'PC5.2': capturedImages['PC5.2'] || undefined,
                                                                         };
@@ -3099,7 +3210,7 @@ export default function ProjectDescriptionPage({
                                                                             baseUrl,
                                                                             imgs
                                                                         );
-                                                                        doc.save(`${selectedDoc.replace(/[^a-zA-Z0-9.]/g, '_')}_${sanitizeFilename(projectData?.address || 'projet')}.pdf`);
+                                                                        savePdfDoc(doc, `${selectedDoc.replace(/[^a-zA-Z0-9.]/g, '_')}_${sanitizeFilename(projectData?.address || 'projet')}.pdf`);
                                                                     } catch (err) {
                                                                         console.error('[PDF] Single doc generation failed:', err);
                                                                         alert(isEn ? 'PDF generation failed.' : 'Échec de la génération PDF.');
@@ -3332,7 +3443,8 @@ export default function ProjectDescriptionPage({
 
                                         {/* ── MANDATE 4 & 5: Navigation + Print/Download ── */}
                                         {/* Save reminder banner */}
-                                        <div className="mt-4 mb-2 px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 flex items-center gap-2">
+                                        <div className="sticky bottom-0 z-20 bg-white/95 backdrop-blur-sm border-t border-slate-200 -mx-6 px-6 pt-3 pb-4 mt-4">
+                                        <div className="mb-2 px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 flex items-center gap-2">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-amber-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
                                             <p className="text-xs text-amber-800">
                                                 {isEn
@@ -3365,50 +3477,8 @@ export default function ProjectDescriptionPage({
                                                     {isEn ? "Re-open Site Plan Editor" : "Rouvrir l'éditeur de plan de masse"}
                                                 </button>
                                             </div>
-                                            {/* Download Full Dossier */}
-                                            <button
-                                                type="button"
-                                                disabled={dossierGenerating}
-                                                onClick={async () => {
-                                                    try {
-                                                        setDossierGenerating(true);
-                                                        setDossierProgress({ msg: isEn ? "Fetching project data..." : "Chargement des données...", pct: 5 });
-                                                        const baseUrl = window.location.origin;
-                                                        const data = await fetchDossierData(projectId, baseUrl);
-                                                        const imgs: DossierCapturedImages = {
-                                                            PC2: capturedImages['PC2'] || undefined,
-                                                            PC3: capturedImages['PC3'] || undefined,
-                                                            'PC5.2': capturedImages['PC5.2'] || undefined,
-                                                        };
-                                                        const doc = await assembleDossier(data, {
-                                                            projectId,
-                                                            baseUrl,
-                                                            capturedImages: imgs,
-                                                            onProgress: (msg, pct) => setDossierProgress({ msg, pct }),
-                                                        });
-                                                        const filename = `Dossier_PC_${sanitizeFilename(projectData?.address || projectName || 'projet')}.pdf`;
-                                                        doc.save(filename);
-                                                    } catch (err) {
-                                                        console.error('[Dossier] Generation failed:', err);
-                                                        alert(isEn ? 'PDF generation failed. Please try again.' : 'La génération du PDF a échoué. Veuillez réessayer.');
-                                                    } finally {
-                                                        setDossierGenerating(false);
-                                                        setDossierProgress({ msg: '', pct: 0 });
-                                                    }
-                                                }}
-                                                className={cn(
-                                                    "inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md",
-                                                    dossierGenerating
-                                                        ? "bg-slate-300 text-slate-500 cursor-wait"
-                                                        : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white hover:shadow-lg"
-                                                )}
-                                            >
-                                                {dossierGenerating ? (
-                                                    <><Loader2 className="w-4 h-4 animate-spin" /> {dossierProgress.msg || (isEn ? "Generating..." : "Génération...")}</>
-                                                ) : (
-                                                    <><Download className="w-4 h-4" /> {isEn ? "Download Complete Dossier (PDF)" : "Télécharger le dossier complet"}</>
-                                                )}
-                                            </button>
+
+                                        </div>
                                         </div>
 
 

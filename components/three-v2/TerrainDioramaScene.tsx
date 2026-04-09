@@ -222,12 +222,23 @@ interface SceneObjectProps {
   obj: ProjectObject;
 }
 
+/**
+ * Epsilon for position-change detection.
+ * Raycasting is ONLY performed when the 2D (X, Z) coordinates change
+ * by more than this threshold. Position lerping still runs every frame
+ * for smooth animation.
+ */
+const POSITION_EPSILON = 0.01;
+
 const SceneObject = memo(function SceneObject({ obj }: SceneObjectProps) {
-  const groupRef    = useRef<THREE.Group>(null);
+  const groupRef     = useRef<THREE.Group>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const rayOriginRef = useRef(new THREE.Vector3());
   const rayDirRef    = useRef(new THREE.Vector3(0, -1, 0));
   const targetYRef   = useRef(0);
+  // Track previous 2D coordinates to avoid raycasting every frame
+  const prevXRef     = useRef(NaN);
+  const prevZRef     = useRef(NaN);
 
   useFrame(({ scene }) => {
     const group = groupRef.current;
@@ -236,14 +247,26 @@ const SceneObject = memo(function SceneObject({ obj }: SceneObjectProps) {
     const worldX = obj.fabricProps.x - CANVAS_ORIGIN_X;
     const worldZ = obj.fabricProps.y - CANVAS_ORIGIN_Z;
 
-    const terrainMesh = scene.getObjectByName("TERRAIN_SURFACE");
-    if (terrainMesh) {
-      rayOriginRef.current.set(worldX, 200, worldZ);
-      raycasterRef.current.set(rayOriginRef.current, rayDirRef.current);
-      const hits = raycasterRef.current.intersectObject(terrainMesh);
-      if (hits.length > 0) targetYRef.current = hits[0].point.y;
+    // ── Conditional Raycasting (performance optimisation) ──────────────
+    // Only cast a ray when the 2D position actually changed.
+    // This avoids 60+ intersection tests per frame per object.
+    const dx = Math.abs(worldX - prevXRef.current);
+    const dz = Math.abs(worldZ - prevZRef.current);
+
+    if (dx > POSITION_EPSILON || dz > POSITION_EPSILON || Number.isNaN(prevXRef.current)) {
+      prevXRef.current = worldX;
+      prevZRef.current = worldZ;
+
+      const terrainMesh = scene.getObjectByName("TERRAIN_SURFACE");
+      if (terrainMesh) {
+        rayOriginRef.current.set(worldX, 200, worldZ);
+        raycasterRef.current.set(rayOriginRef.current, rayDirRef.current);
+        const hits = raycasterRef.current.intersectObject(terrainMesh);
+        if (hits.length > 0) targetYRef.current = hits[0].point.y;
+      }
     }
 
+    // ── Smooth position lerp (runs every frame for animation) ─────────
     group.position.x += (worldX - group.position.x) * 0.15;
     group.position.y += (targetYRef.current - group.position.y) * 0.15;
     group.position.z += (worldZ - group.position.z) * 0.15;
@@ -272,7 +295,10 @@ const SceneObject = memo(function SceneObject({ obj }: SceneObjectProps) {
   prev.obj.fabricProps.y     === next.obj.fabricProps.y     &&
   prev.obj.fabricProps.angle === next.obj.fabricProps.angle &&
   prev.obj.meshPath          === next.obj.meshPath          &&
-  prev.obj.type              === next.obj.type
+  prev.obj.type              === next.obj.type              &&
+  prev.obj.realWorldProps.widthMeters  === next.obj.realWorldProps.widthMeters  &&
+  prev.obj.realWorldProps.heightMeters === next.obj.realWorldProps.heightMeters &&
+  prev.obj.realWorldProps.lengthMeters === next.obj.realWorldProps.lengthMeters
 );
 
 // ─── Scene Objects Layer ──────────────────────────────────────────────────────

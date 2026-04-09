@@ -13,6 +13,7 @@ import { existsSync, readFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { extractZonePages, extractZoneText } from "@/lib/pdf-zone-extractor";
+import { detectPlaceholderPdf } from "@/lib/pdf-placeholder-detector";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -30,7 +31,9 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     // Accept both legacy and unified field names
     const pdfFile = (formData.get("pluPdfFile") as File | null) || (formData.get("pdfFile") as File | null);
-    const pdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";
+    const rawPdfUrl = (formData.get("pluPdfUrl") as string) || (formData.get("pdfUrl") as string) || "";
+    // Strip page anchors (e.g., "reglement.pdf#page=205") — GPU API adds these for navigation, breaks downloads
+    const pdfUrl = rawPdfUrl.split("#")[0];
     const pluZone = (formData.get("pluZone") as string)?.trim() || "non spécifiée";
     const projectIntent =
       (formData.get("projectIntent") as string)?.trim() || "";
@@ -94,16 +97,16 @@ export async function POST(request: NextRequest) {
       const sanitizedUrl = pdfUrl.replace(/"/g, '').replace(/'/g, '');
 
       const curlStrategies = [
-        `curl -sS -L --max-time 120 --retry 3 --retry-delay 3 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
-        `curl -sS -L --max-time 120 --retry 2 --retry-delay 5 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
-        `curl -sS -L -k --max-time 120 -o "${tmpFile}" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 30 --retry 1 --retry-delay 2 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 25 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
+        `curl -sS -L -k --max-time 20 -o "${tmpFile}" "${sanitizedUrl}"`,
       ];
 
       for (let i = 0; i < curlStrategies.length; i++) {
         try {
           try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
           console.log(`[generate-feasibility] ➤ Strategy ${i + 1}/${curlStrategies.length}...`);
-          execSync(curlStrategies[i], { timeout: 130_000, stdio: ['pipe', 'pipe', 'pipe'] });
+          execSync(curlStrategies[i], { timeout: 35_000, stdio: ['pipe', 'pipe', 'pipe'] });
 
           if (existsSync(tmpFile)) {
             const buf = readFileSync(tmpFile);
@@ -129,7 +132,7 @@ export async function POST(request: NextRequest) {
           const fetchRes = await fetch(sanitizedUrl, {
             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/pdf,*/*" },
             redirect: "follow",
-            signal: AbortSignal.timeout(120_000),
+            signal: AbortSignal.timeout(25_000),
           });
           if (fetchRes.ok) {
             const nodeBuf = Buffer.from(await fetchRes.arrayBuffer());
@@ -141,6 +144,16 @@ export async function POST(request: NextRequest) {
         } catch (e) {
           console.warn(`[generate-feasibility] ✗ Node.js fetch failed:`, (e as Error).message?.slice(0, 200));
         }
+      }
+    }
+
+    // ── Detect placeholder/redirect/tiny PDFs ──────────────────────────
+    if (rawPdfBuffer) {
+      const isFromUrl = !hasPdfFile; // URL-fetched PDFs get strict size checks
+      const phCheck = await detectPlaceholderPdf(rawPdfBuffer, isFromUrl);
+      if (phCheck.isPlaceholder) {
+        console.warn(`[generate-feasibility] ⚠ Placeholder/tiny PDF detected — discarding. ${phCheck.reason}`);
+        rawPdfBuffer = null;
       }
     }
 
@@ -241,7 +254,10 @@ export async function POST(request: NextRequest) {
       model: MODEL_NAME,
       systemInstruction: systemPrompt,
       generationConfig,
-    });
+      // Disable thinking for gemini-2.5-flash — saves 20-40s per call
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(MODEL_NAME.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } as any : {}),
+    } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
     let rawText: string | null = null;
     try {

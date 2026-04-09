@@ -190,6 +190,7 @@ model SitePlanData {
   terrainData        Json?    @map("terrain_data")
   complianceResults  Json?    @map("compliance_results")
   building3D         Json?    @map("building_3d")
+  pc2ImageBase64     String?  @map("pc2_image_base64") @db.Text
   updatedAt          DateTime @updatedAt @map("updated_at")
   project            Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

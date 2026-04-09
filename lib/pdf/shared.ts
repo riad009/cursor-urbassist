@@ -273,3 +273,38 @@ export function sanitizeFilename(s: string): string {
     .replace(/\s+/g, "_")
     .slice(0, 80);
 }
+
+// ─── Reliable PDF download ─────────────────────────────────────────────────
+/**
+ * Reliably saves a jsPDF document with the given filename.
+ *
+ * jsPDF v4's built-in `doc.save()` often falls back to `window.open(blobUrl)`
+ * which produces downloads with UUID filenames (e.g. `ac99e80a-fefb-...`).
+ * This helper bypasses that by manually creating a hidden `<a>` tag with the
+ * `download` attribute set, guaranteeing the filename is preserved.
+ */
+export function savePdfDoc(doc: jsPDF, filename: string): void {
+  try {
+    // Generate the PDF as a Blob
+    const blob = doc.output("blob");
+    const url = URL.createObjectURL(blob);
+
+    // Create a hidden anchor and trigger download
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 200);
+  } catch (err) {
+    // Fallback to jsPDF's built-in save if our method fails
+    console.warn("[savePdfDoc] Manual download failed, falling back to doc.save():", err);
+    doc.save(filename);
+  }
+}
