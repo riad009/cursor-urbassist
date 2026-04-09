@@ -126,7 +126,7 @@ export default function ProjectsPage() {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const getStatusConfig = (status: string) => {
-    const map: Record<string, { labelEn: string; labelFr: string; color: string; icon: React.ElementType; bgColor: string }> = {
+    const map: Record<string, { labelEn: string; labelFr: string; color: string; icon: React.ComponentType<{ className?: string }>; bgColor: string }> = {
       DRAFT: { labelEn: "Draft", labelFr: "Brouillon", color: "text-slate-600", icon: AlertCircle, bgColor: "bg-slate-100" },
       IN_PROGRESS: { labelEn: "In Progress", labelFr: "En cours", color: "text-blue-600", icon: Clock, bgColor: "bg-blue-100" },
       REVIEW: { labelEn: "Review", labelFr: "En revue", color: "text-amber-600", icon: Eye, bgColor: "bg-amber-100" },
