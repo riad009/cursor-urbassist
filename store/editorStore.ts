@@ -56,6 +56,8 @@ export interface EditorState {
   projectData: ProjectDataCache | null;
   /** Fully pre-processed GIS site data (boundary, edges, elevations) — persisted for refresh survival */
   processedSiteData: ProcessedSiteData | null;
+  /** Current view mode — persisted so 3D mode survives refresh */
+  viewMode: "2d" | "3d";
 
   // ── Tracking ────────────────────────────────────────────────────────────
   /** Timestamp of last persistence to this store */
@@ -76,6 +78,8 @@ export interface EditorState {
   setProcessedSiteData: (data: ProcessedSiteData | null) => void;
   /** Update project metadata */
   setProjectData: (data: ProjectDataCache) => void;
+  /** Set the current view mode (2D or 3D) */
+  setViewMode: (mode: "2d" | "3d") => void;
   /** Mark as dirty (unsaved changes) */
   markDirty: () => void;
   /** Mark as clean (just saved) */
@@ -99,6 +103,7 @@ const INITIAL_STATE = {
   elevationPoints: [] as ElevationPoint[],
   projectData: null as ProjectDataCache | null,
   processedSiteData: null as ProcessedSiteData | null,
+  viewMode: "2d" as "2d" | "3d",
   _lastSavedAt: 0,
   isDirty: false,
 };
@@ -156,6 +161,8 @@ export const useEditorStore = create<EditorState>()(
           _lastSavedAt: Date.now(),
         }),
 
+      setViewMode: (mode) => set({ viewMode: mode }),
+
       markDirty: () => set({ isDirty: true }),
       markClean: () => set({ isDirty: false }),
 
@@ -172,16 +179,46 @@ export const useEditorStore = create<EditorState>()(
             removeItem: () => {},
           };
         }
-        return localStorage;
+        // Quota-safe wrapper: if canvasJSON pushes us over the
+        // localStorage limit (~5MB), log a warning and strip it.
+        // The DB auto-save is the primary persistence layer.
+        return {
+          getItem: (name: string) => localStorage.getItem(name),
+          setItem: (name: string, value: string) => {
+            try {
+              localStorage.setItem(name, value);
+            } catch (e) {
+              // QuotaExceededError — canvasJSON may be very large
+              console.warn("[editorStore] localStorage quota exceeded, stripping canvasJSON");
+              try {
+                const parsed = JSON.parse(value);
+                if (parsed?.state?.canvasJSON) {
+                  parsed.state.canvasJSON = null;
+                  localStorage.setItem(name, JSON.stringify(parsed));
+                }
+              } catch {
+                // Last resort: clear and write minimal
+                localStorage.removeItem(name);
+              }
+            }
+          },
+          removeItem: (name: string) => localStorage.removeItem(name),
+        };
       }),
-      // Only persist essential data — skip transient UI state
+      // Only persist essential data — skip transient UI state.
+      // CRITICAL: processedSiteData is EXCLUDED — it can be tens of MB
+      // (topography grids, elevation arrays, boundary geometry) which
+      // exceeds localStorage's ~5MB limit and causes silent persist failure
+      // that kills ALL persistence. It's always fetched fresh from DB on load.
       partialize: (state) => ({
         projectId: state.projectId,
         canvasJSON: state.canvasJSON,
         buildingDetails: state.buildingDetails,
         elevationPoints: state.elevationPoints,
+        // projectData is small (parcel area, coords) — safe to persist
         projectData: state.projectData,
-        processedSiteData: state.processedSiteData,
+        // processedSiteData: EXCLUDED — too large for localStorage
+        viewMode: state.viewMode,
         _lastSavedAt: state._lastSavedAt,
       }),
     }

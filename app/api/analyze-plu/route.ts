@@ -128,7 +128,7 @@ function listFoundFields(rules: PluRules): string[] {
 // ─── Vercel Timeout ──────────────────────────────────────────────────────────
 // Large PDF upload to Google File API + Gemini processing can take 30-90s.
 // Without this, Vercel kills the request at 10s (Hobby) or 60s (Pro).
-export const maxDuration = 120;
+export const maxDuration = 240;
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -136,9 +136,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_NAME = "gemini-2.5-flash"; // 2.5-flash — fastest available model (2.0-flash was deprecated)
 const MAX_PDF_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB — File API handles large files natively
 const FILE_API_POLL_INTERVAL_MS = 2_000; // Poll every 2s while waiting for file to become ACTIVE
-const FILE_API_MAX_POLL_ATTEMPTS = 22; // Max 44s of polling (22 * 2s) — leave time for Gemini calls
-const GEMINI_CALL_TIMEOUT_MS = 90_000; // 90s max per individual Gemini call
-const MASTER_DEADLINE_MS = 180_000; // 180s — generous deadline (Vercel Pro allows 300s, local has no limit)
+const FILE_API_MAX_POLL_ATTEMPTS = 15; // Max 30s of polling (15 * 2s) — tightened to leave time for Gemini calls
+const GEMINI_CALL_TIMEOUT_MS = 60_000; // 60s max per individual Gemini call — tightened from 90s to fit within deadline
+const MASTER_DEADLINE_MS = 240_000; // 240s — total pipeline budget (Vercel Pro allows 300s, local has no limit)
 
 // ─── Gemini responseSchema for PluRules ──────────────────────────────────────
 // This guarantees the output JSON matches our TypeScript interface exactly.
@@ -248,17 +248,20 @@ export async function POST(request: NextRequest) {
       const tmpFile = join(tmpDir, `plu_${Date.now()}.pdf`);
       const sanitizedUrl = pdfUrl.replace(/"/g, '').replace(/'/g, '');
 
+      // Tightened timeouts: if a gov server doesn't respond in 12s, retrying the same URL won't help.
+      // Total download budget: ~35s max (vs previous ~130s worst case).
       const curlStrategies = [
-        `curl -sS -L --max-time 30 --retry 1 --retry-delay 2 --retry-all-errors -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
-        `curl -sS -L --max-time 25 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
-        `curl -sS -L -k --max-time 20 -o "${tmpFile}" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 12 --retry 0 -o "${tmpFile}" -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -H "Accept: application/pdf,*/*" "${sanitizedUrl}"`,
+        `curl -sS -L --max-time 10 -o "${tmpFile}" -H "User-Agent: UrbAssist/2.0 (Linux)" "${sanitizedUrl}"`,
+        `curl -sS -L -k --max-time 8 -o "${tmpFile}" "${sanitizedUrl}"`,
       ];
 
       for (let i = 0; i < curlStrategies.length; i++) {
+        if (!hasTimeLeft(60_000)) { console.warn(`[analyze-plu] ⚠ Skipping download strategy ${i + 1} — time budget low`); break; }
         try {
           try { if (existsSync(tmpFile)) unlinkSync(tmpFile); } catch { /* ok */ }
           console.log(`[analyze-plu] ➤ Strategy ${i + 1}/${curlStrategies.length}...`);
-          execSync(curlStrategies[i], { timeout: 35_000, stdio: ['pipe', 'pipe', 'pipe'] });
+          execSync(curlStrategies[i], { timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'] });
 
           if (existsSync(tmpFile)) {
             const buf = readFileSync(tmpFile);
@@ -286,7 +289,7 @@ export async function POST(request: NextRequest) {
           const fetchRes = await fetch(sanitizedUrl, {
             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/pdf,*/*" },
             redirect: "follow",
-            signal: AbortSignal.timeout(25_000),
+            signal: AbortSignal.timeout(12_000), // Tightened from 25s — if server doesn't respond in 12s, it won't
           });
           if (fetchRes.ok) {
             const nodeBuf = Buffer.from(await fetchRes.arrayBuffer());
@@ -411,20 +414,44 @@ export async function POST(request: NextRequest) {
         console.warn(`[analyze-plu] ⚠ Zone text pre-extraction failed:`, (e as Error).message);
       }
 
-      console.log(`[analyze-plu] ▶ Uploading ${sizeMB}MB PDF to Google File API...`);
-
-      try {
-        const uploadResult = await uploadToFileApi(
-          fileManager, rawPdfBuffer, `plu_regulation_${Date.now()}.pdf`, tmpFilesToCleanup
-        );
-        if (uploadResult) {
-          uploadedFileUris.push({
-            fileData: { fileUri: uploadResult.uri, mimeType: uploadResult.mimeType },
-          });
-          console.log(`[analyze-plu] ✓ Primary PDF uploaded to File API: ${uploadResult.uri}`);
-        } else {
-          // File API upload failed — fall back to cached text or re-extract
-          console.warn(`[analyze-plu] ⚠ File API upload failed — trying text extraction fallback`);
+      console.log(`[analyze-plu] ▶ Uploading ${sizeMB}MB PDF to Google File API... (${(remainingMs() / 1000).toFixed(0)}s remaining)`);
+      // Guard: skip File API upload if insufficient time remains for upload + Gemini calls
+      if (!hasTimeLeft(80_000)) {
+        console.warn(`[analyze-plu] ⚠ Skipping File API upload — only ${(remainingMs() / 1000).toFixed(0)}s remaining, need ≥80s for upload+AI`);
+        if (cachedFullText && cachedFullText.length > 100) {
+          degradedModeText = cachedFullText;
+          console.log(`[analyze-plu] ✓ Using text fallback (cached): ${cachedFullText.length} chars`);
+        }
+      } else {
+        try {
+          const uploadResult = await uploadToFileApi(
+            fileManager, rawPdfBuffer, `plu_regulation_${Date.now()}.pdf`, tmpFilesToCleanup
+          );
+          if (uploadResult) {
+            uploadedFileUris.push({
+              fileData: { fileUri: uploadResult.uri, mimeType: uploadResult.mimeType },
+            });
+            console.log(`[analyze-plu] ✓ Primary PDF uploaded to File API: ${uploadResult.uri}`);
+          } else {
+            // File API upload failed — fall back to cached text or re-extract
+            console.warn(`[analyze-plu] ⚠ File API upload failed — trying text extraction fallback`);
+            if (cachedFullText && cachedFullText.length > 100) {
+              degradedModeText = cachedFullText;
+              console.log(`[analyze-plu] ✓ Text fallback (cached): ${cachedFullText.length} chars`);
+            } else {
+              try {
+                const textResult = await extractZoneText(rawPdfBuffer!, pluZone);
+                if (textResult.text.length > 100) {
+                  degradedModeText = textResult.text;
+                  cachedFullText = textResult.text;
+                  console.log(`[analyze-plu] ✓ Text fallback: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
+                }
+              } catch { /* truly degraded */ }
+            }
+          }
+        } catch (err) {
+          console.warn(`[analyze-plu] ✗ File API upload error:`, (err as Error).message);
+          // Fall back to cached text or re-extract
           if (cachedFullText && cachedFullText.length > 100) {
             degradedModeText = cachedFullText;
             console.log(`[analyze-plu] ✓ Text fallback (cached): ${cachedFullText.length} chars`);
@@ -439,23 +466,7 @@ export async function POST(request: NextRequest) {
             } catch { /* truly degraded */ }
           }
         }
-      } catch (err) {
-        console.warn(`[analyze-plu] ✗ File API upload error:`, (err as Error).message);
-        // Fall back to cached text or re-extract
-        if (cachedFullText && cachedFullText.length > 100) {
-          degradedModeText = cachedFullText;
-          console.log(`[analyze-plu] ✓ Text fallback (cached): ${cachedFullText.length} chars`);
-        } else {
-          try {
-            const textResult = await extractZoneText(rawPdfBuffer!, pluZone);
-            if (textResult.text.length > 100) {
-              degradedModeText = textResult.text;
-              cachedFullText = textResult.text;
-              console.log(`[analyze-plu] ✓ Text fallback: ${textResult.pageCount} pages, ${textResult.text.length} chars`);
-            }
-          } catch { /* truly degraded */ }
-        }
-      }
+      } // end else (hasTimeLeft guard)
     }
 
     // ── Check if we have any usable data ─────────────────────────────────
@@ -537,7 +548,7 @@ export async function POST(request: NextRequest) {
     // If the zone is unknown but we have a PDF, ask Gemini to identify zones
     // from the document. This eliminates the edge case where Gemini has a
     // real PLU PDF but doesn't know which zone to extract rules for.
-    if ((!pluZone || pluZone === "non spécifiée") && uploadedFileUris.length > 0 && hasTimeLeft(70_000)) {
+    if ((!pluZone || pluZone === "non spécifiée") && uploadedFileUris.length > 0 && hasTimeLeft(90_000)) {
       console.log(`[analyze-plu] ▶ Zone unknown — running zone detection pre-pass... (${(remainingMs() / 1000).toFixed(0)}s remaining)`);
       try {
         const zoneDetectionResult = await callGeminiWithFileApi(

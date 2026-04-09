@@ -21,6 +21,24 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  return _upsertSitePlan(request, params);
+}
+
+/**
+ * POST handler — required for navigator.sendBeacon() which ALWAYS sends POST.
+ * Without this, the beforeunload auto-save silently returns 405 and data is lost.
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return _upsertSitePlan(request, params);
+}
+
+async function _upsertSitePlan(
+  request: NextRequest,
+  params: Promise<{ id: string }>
+) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
@@ -59,3 +77,4 @@ export async function PUT(
   });
   return NextResponse.json({ sitePlan });
 }
+

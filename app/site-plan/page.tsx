@@ -182,12 +182,12 @@ const SCALES = [
 
 const templatesList = [
   { id: "access", label: "Access", icon: Triangle, color: "#f59e0b", width: 0, height: 0 }, // Site access: triangle + label
-  { id: "house", label: "House", icon: Home, color: "#3b82f6", width: 12, height: 8 },
-  { id: "garage", label: "Garage", icon: Car, color: "#8b5cf6", width: 6, height: 5 },
-  { id: "parking", label: "Parking 2.5×5 m", icon: Car, color: "#6b7280", width: 2.5, height: 5 },
-  { id: "pool", label: "Pool", icon: Droplets, color: "#06b6d4", width: 10, height: 5 },
-  { id: "garden", label: "Garden", icon: Trees, color: "#22c55e", width: 8, height: 8 },
-  { id: "terrace", label: "Terrace", icon: Hexagon, color: "#ec4899", width: 6, height: 4 },
+  { id: "house", label: "House", icon: Home, color: "#60a5fa", width: 12, height: 8 },
+  { id: "garage", label: "Garage", icon: Car, color: "#a78bfa", width: 6, height: 5 },
+  { id: "parking", label: "Parking 2.5×5 m", icon: Car, color: "#94a3b8", width: 2.5, height: 5 },
+  { id: "pool", label: "Pool", icon: Droplets, color: "#22d3ee", width: 10, height: 5 },
+  { id: "garden", label: "Garden", icon: Trees, color: "#4ade80", width: 8, height: 8 },
+  { id: "terrace", label: "Terrace", icon: Hexagon, color: "#f472b6", width: 6, height: 4 },
 ];
 
 /**
@@ -274,8 +274,7 @@ function SitePlanContent() {
     if (projectIdFromUrl) editorStoreInit(projectIdFromUrl);
   }, [projectIdFromUrl, editorStoreInit]);
 
-  // ── Auto-save hook: debounced 2s push to DB ──
-  useAutoSave(projectIdFromUrl);
+
 
   // ── Store hydration: pre-populate component state from persisted store ──
   // The persist middleware hydrates the store from sessionStorage synchronously.
@@ -295,6 +294,10 @@ function SitePlanContent() {
       if (state.processedSiteData) {
         setProcessedSiteData(state.processedSiteData);
       }
+      // Restore view mode (2D/3D) from persisted store
+      if (state.viewMode === "3d") {
+        setViewMode("3d");
+      }
       storeHydratedRef.current = true;
     }
   }, [projectIdFromUrl]);
@@ -303,6 +306,10 @@ function SitePlanContent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
+
+  // ── Auto-save hook: debounced 1.5s push to DB ──
+  // Pass fabricRef so beforeunload can read LIVE canvas state directly
+  useAutoSave(projectIdFromUrl, fabricRef);
   const measurementLabelsRef = useRef<Map<string, fabric.FabricObject[]>>(new Map());
   const placeGuidedBuildingAtRef = useRef<(x: number, y: number) => void>(() => { });
   const projectDataRef = useRef<ProjectData | null>(null);
@@ -314,7 +321,12 @@ function SitePlanContent() {
 
   // State
   const [activeTool, setActiveTool] = useState<Tool>("select");
-  const [viewMode, setViewMode] = useState<ViewMode>("2d");
+  const [viewMode, setViewModeLocal] = useState<ViewMode>("2d");
+  // Wrapper that syncs viewMode changes to the persisted editor store
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeLocal(mode);
+    useEditorStore.getState().setViewMode(mode);
+  }, []);
 
   const setbackSegmentsRef = useRef<SetbackSegment[]>([]);
   const [scene3dVersion, setScene3dVersion] = useState(0);
@@ -539,6 +551,41 @@ function SitePlanContent() {
     [pixelsToMeters]
   );
 
+  // ─── Centered Element Label ─────────────────────────────────────────────────
+  // Reusable helper: creates a centered name label inside any element (rect).
+  // Called from addTemplate, addBuildingToCanvasAt, and placeGuidedBuildingAt.
+
+  const addCenteredLabel = useCallback(
+    (rect: fabric.FabricObject, id: string, name: string, color: string) => {
+      const canvas = fabricRef.current;
+      if (!canvas) return;
+      const center = rect.getCenterPoint();
+      const w = (rect.width ?? 0) * (rect.scaleX ?? 1);
+      const h = (rect.height ?? 0) * (rect.scaleY ?? 1);
+      const labelText = new fabric.Text(name, {
+        left: center.x, top: center.y,
+        fontSize: Math.max(12, Math.min(16, Math.min(w * 0.18, h * 0.28))),
+        fontFamily: "'Inter', system-ui, sans-serif",
+        fontWeight: "700",
+        fill: "#ffffff",
+        textAlign: "center",
+        backgroundColor: color + "DD",
+        padding: 4,
+        originX: "center", originY: "center",
+        angle: rect.angle ?? 0,
+        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.5)', blur: 3, offsetX: 0, offsetY: 1 }),
+        selectable: false, evented: false,
+      });
+      (labelText as any).isMeasurement = true;
+      (labelText as any).parentId = id;
+      canvas.add(labelText);
+      const existing = measurementLabelsRef.current.get(id) || [];
+      existing.push(labelText);
+      measurementLabelsRef.current.set(id, existing);
+    },
+    []
+  );
+
   // ─── Dimension lines ───────────────────────────────────────────────────────
 
   const createDimensionLine = useCallback(
@@ -583,10 +630,10 @@ function SitePlanContent() {
       ], { fill: color, selectable: false, evented: false }));
       const textAngle = (angle * 180) / Math.PI;
       const adjusted = textAngle > 90 || textAngle < -90 ? textAngle + 180 : textAngle;
-      // Compact label with subtle pill background
+      // Compact label with sleek dark pill background
       const text = mkM(new fabric.Text(label, {
         left: dimMidX, top: dimMidY - 6, fontSize: 9, fontFamily: "'Inter', system-ui, sans-serif",
-        fill: "#fef3c7", backgroundColor: "rgba(120, 53, 15, 0.75)", padding: 2,
+        fill: "#e2e8f0", backgroundColor: "rgba(15, 23, 42, 0.78)", padding: 2,
         originX: "center", originY: "center", angle: adjusted,
         selectable: false, evented: false,
       }));
@@ -604,9 +651,12 @@ function SitePlanContent() {
       const width = (rect.width || 0) * (rect.scaleX || 1);
       const height = (rect.height || 0) * (rect.scaleY || 1);
       const m: fabric.FabricObject[] = [];
-      m.push(...createDimensionLine(left, top + height, left + width, top + height, id, 18, "rgba(251, 191, 36, 0.7)"));
-      m.push(...createDimensionLine(left + width, top, left + width, top + height, id, 18, "rgba(251, 191, 36, 0.7)"));
-      measurementLabelsRef.current.set(id, m);
+      m.push(...createDimensionLine(left, top + height, left + width, top + height, id, 18, "rgba(148, 163, 184, 0.5)"));
+      m.push(...createDimensionLine(left + width, top, left + width, top + height, id, 18, "rgba(148, 163, 184, 0.5)"));
+      // Append to any existing entries (e.g. centered label) instead of replacing
+      const existing = measurementLabelsRef.current.get(id) || [];
+      existing.push(...m);
+      measurementLabelsRef.current.set(id, existing);
     },
     [createDimensionLine]
   );
@@ -621,7 +671,7 @@ function SitePlanContent() {
         const p1 = points[i], p2 = points[(i + 1) % points.length];
         const t1 = fabric.util.transformPoint(new fabric.Point(p1.x, p1.y), matrix);
         const t2 = fabric.util.transformPoint(new fabric.Point(p2.x, p2.y), matrix);
-        measurements.push(...createDimensionLine(t1.x, t1.y, t2.x, t2.y, id, 18, "rgba(34, 197, 94, 0.7)"));
+        measurements.push(...createDimensionLine(t1.x, t1.y, t2.x, t2.y, id, 18, "rgba(148, 163, 184, 0.5)"));
       }
       measurementLabelsRef.current.set(id, measurements);
     },
@@ -630,7 +680,7 @@ function SitePlanContent() {
 
   const addLineMeasurement = useCallback(
     (line: fabric.Line, id: string) => {
-      const m = createDimensionLine(line.x1 || 0, line.y1 || 0, line.x2 || 0, line.y2 || 0, id, 15, "rgba(251, 191, 36, 0.7)");
+      const m = createDimensionLine(line.x1 || 0, line.y1 || 0, line.x2 || 0, line.y2 || 0, id, 15, "rgba(148, 163, 184, 0.5)");
       measurementLabelsRef.current.set(id, m);
     },
     [createDimensionLine]
@@ -676,39 +726,16 @@ function SitePlanContent() {
       else if (obj.type === "polygon") addPolygonMeasurements(obj as fabric.Polygon, id);
       else if (obj.type === "line") addLineMeasurement(obj as fabric.Line, id);
       else if (obj.type === "circle") addCircleMeasurements(obj as fabric.Circle, id);
-      // Re-add template name label if this is a template element — centered with pill background
-      const tType = (obj as any).templateType;
+      // Re-add centered name label for any named element (template or guided placement)
       const eName = (obj as any).elementName;
-      if (tType && eName && obj.type === "rect") {
-        const canvas = fabricRef.current;
-        if (canvas) {
-          const tpl = templatesList.find((t) => t.id === tType);
-          const color = tpl?.color || "#888";
-          const l = obj.left ?? 0;
-          const t2 = obj.top ?? 0;
-          const w = (obj.width ?? 0) * (obj.scaleX ?? 1);
-          const h = (obj.height ?? 0) * (obj.scaleY ?? 1);
-          const labelText = new fabric.Text(eName, {
-            left: l + w / 2, top: t2 + h / 2,
-            fontSize: Math.max(9, Math.min(11, h * 0.22)),
-            fontFamily: "'Inter', system-ui, sans-serif",
-            fontWeight: "600",
-            fill: "#ffffff",
-            backgroundColor: color + "CC",
-            padding: 3,
-            originX: "center", originY: "center",
-            selectable: false, evented: false,
-          });
-          (labelText as any).isMeasurement = true;
-          (labelText as any).parentId = id;
-          canvas.add(labelText);
-          const existing = measurementLabelsRef.current.get(id) || [];
-          existing.push(labelText);
-          measurementLabelsRef.current.set(id, existing);
-        }
+      if (eName && obj.type === "rect") {
+        const tType = (obj as any).templateType;
+        const tpl = tType ? templatesList.find((t) => t.id === tType) : null;
+        const color = tpl?.color || (obj.stroke as string) || "#888";
+        addCenteredLabel(obj, id, eName, color);
       }
     },
-    [removeMeasurements, addRectMeasurements, addPolygonMeasurements, addLineMeasurement, addCircleMeasurements]
+    [removeMeasurements, addRectMeasurements, addPolygonMeasurements, addLineMeasurement, addCircleMeasurements, addCenteredLabel]
   );
 
   // ─── Real-time compliance ──────────────────────────────────────────────────
@@ -987,7 +1014,7 @@ function SitePlanContent() {
             elevationPoints.map((p) => ({ id: p.id, x: p.x, y: p.y, value: p.value }))
           );
         } catch { /* serialization error — skip this sync cycle */ }
-      }, 800) as unknown as number;
+      }, 500) as unknown as number;
     };
 
     canvas.on("object:added", syncToStore);
@@ -1021,11 +1048,11 @@ function SitePlanContent() {
         canvas.add(l); canvas.sendObjectToBack(l);
       };
 
-      for (let x = startX; x <= startX + extW; x += gridSize) addGridLine([x, startY, x, startY + extH], "#1e293b", 0.5);
-      for (let y = startY; y <= startY + extH; y += gridSize) addGridLine([startX, y, startX + extW, y], "#1e293b", 0.5);
+      for (let x = startX; x <= startX + extW; x += gridSize) addGridLine([x, startY, x, startY + extH], "rgba(30, 41, 59, 0.4)", 0.3);
+      for (let y = startY; y <= startY + extH; y += gridSize) addGridLine([startX, y, startX + extW, y], "rgba(30, 41, 59, 0.4)", 0.3);
       const major = gridSize * 5;
-      for (let x = startX; x <= startX + extW; x += major) addGridLine([x, startY, x, startY + extH], "#334155", 1);
-      for (let y = startY; y <= startY + extH; y += major) addGridLine([startX, y, startX + extW, y], "#334155", 1);
+      for (let x = startX; x <= startX + extW; x += major) addGridLine([x, startY, x, startY + extH], "rgba(51, 65, 85, 0.5)", 0.6);
+      for (let y = startY; y <= startY + extH; y += major) addGridLine([startX, y, startX + extW, y], "rgba(51, 65, 85, 0.5)", 0.6);
     },
     [currentScale, canvasSize]
   );
@@ -1968,8 +1995,9 @@ function SitePlanContent() {
       const rect = new fabric.Rect({
         left: centerX - wPx / 2, top: centerY - dPx / 2,
         width: wPx, height: dPx,
-        fill: isExisting ? "rgba(107, 114, 128, 0.15)" : "rgba(59, 130, 246, 0.25)",
-        stroke: isExisting ? "#6b7280" : "#3b82f6", strokeWidth: 1.5,
+        fill: isExisting ? "rgba(100, 116, 139, 0.12)" : "rgba(96, 165, 250, 0.15)",
+        stroke: isExisting ? "#64748b" : "#60a5fa", strokeWidth: 1.5,
+        shadow: isExisting ? undefined : new fabric.Shadow({ color: 'rgba(0,0,0,0.2)', blur: 6, offsetX: 0, offsetY: 2 }),
         ...(isExisting ? { strokeDashArray: [6, 3] } : {}),
       });
       (rect as any).id = b.id;
@@ -1980,9 +2008,12 @@ function SitePlanContent() {
       if (!isExisting) (rect as any).templateType = "house";
       canvas.add(rect);
       addRectMeasurements(rect, b.id);
+      // Add centered name label immediately on placement
+      const labelColor = isExisting ? "#64748b" : "#60a5fa";
+      addCenteredLabel(rect, b.id, b.name, labelColor);
       canvas.renderAll();
     },
-    [metersToPixels, addRectMeasurements]
+    [metersToPixels, addRectMeasurements, addCenteredLabel]
   );
 
   const buildingDetailFromPreset = useCallback((preset: ProjectPreset): BuildingDetail => {
@@ -2033,6 +2064,8 @@ function SitePlanContent() {
         (rect as any).buildingDetailId = shapeId;
         canvas.add(rect);
         addRectMeasurements(rect as fabric.Rect, shapeId);
+        // Add centered name label immediately on placement
+        addCenteredLabel(rect, shapeId, selectedPreset.shortLabel, stroke);
         canvas.renderAll();
         updateLayers(canvas);
 
@@ -2070,7 +2103,7 @@ function SitePlanContent() {
       setPlacementMode(false);
       setGuidedStep(3);
     },
-    [selectedPreset, customDimensions, buildingDetailFromPreset, metersToPixels, addRectMeasurements, updateLayers, addBuildingToCanvasAt]
+    [selectedPreset, customDimensions, buildingDetailFromPreset, metersToPixels, addRectMeasurements, updateLayers, addBuildingToCanvasAt, addCenteredLabel]
   );
 
   useEffect(() => {
@@ -2873,7 +2906,8 @@ function SitePlanContent() {
     const rect = new fabric.Rect({
       left: center.x - wPx / 2, top: center.y - hPx / 2,
       width: wPx, height: hPx,
-      fill: template.color + "35", stroke: template.color, strokeWidth: 1.5,
+      fill: template.color + "18", stroke: template.color, strokeWidth: 1.5,
+      shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.2)', blur: 6, offsetX: 0, offsetY: 2 }),
       ...(templateId === "parking" ? { strokeDashArray: [6, 3] } : {}),
     });
     (rect as any).id = shapeId;
@@ -2905,26 +2939,9 @@ function SitePlanContent() {
         canvas.add(wheel);
       });
     }
-    // Place label centered inside the rect with a pill background for readability
-    const labelText = new fabric.Text(template.label, {
-      left: center.x, top: center.y,
-      fontSize: Math.max(9, Math.min(11, hPx * 0.22)),
-      fontFamily: "'Inter', system-ui, sans-serif",
-      fontWeight: "600",
-      fill: "#ffffff",
-      backgroundColor: template.color + "CC",
-      padding: 3,
-      originX: "center", originY: "center",
-      selectable: false, evented: false,
-    });
-    (labelText as any).isMeasurement = true;
-    (labelText as any).parentId = shapeId;
-    canvas.add(labelText);
+    // Add dimension measurements first, THEN the centered label (order matters — label appends)
     addRectMeasurements(rect, shapeId);
-    // Store the label alongside measurements so it gets repositioned on move/resize
-    const existing = measurementLabelsRef.current.get(shapeId) || [];
-    existing.push(labelText);
-    measurementLabelsRef.current.set(shapeId, existing);
+    addCenteredLabel(rect, shapeId, template.label, template.color);
     canvas.setActiveObject(rect);
 
     // For all renderable templates, create a BuildingDetail so they appear in the 3D viewer.
@@ -3780,22 +3797,22 @@ function SitePlanContent() {
 
         {/* Left Toolbar (2D only) — Free wall drawing + tools (always visible) */}
         {viewMode === "2d" && (
-          <div className="w-56 bg-white border-r border-slate-200 flex flex-col py-2 overflow-y-auto shrink-0">
+          <div className="w-56 bg-slate-950/90 backdrop-blur-md border-r border-slate-800/60 flex flex-col py-3 overflow-y-auto shrink-0">
             {/* ─── Add Elements (Templates) ─── */}
-            <div className="px-2 pt-1 pb-1">
-              <p className="text-[9px] font-bold uppercase text-amber-600 tracking-widest py-1">Add Elements</p>
+            <div className="px-3 pt-1 pb-1">
+              <p className="text-[9px] font-bold uppercase text-slate-500 tracking-[0.15em] py-1">Add Elements</p>
             </div>
-            <div className="px-1.5 space-y-0.5">
+            <div className="px-2 space-y-0.5">
               {templatesList.map((t) => {
                 const Icon = t.icon;
                 return (
                   <button key={t.id} onClick={() => addTemplate(t.id)}
-                    className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all border border-transparent hover:border-slate-200"
+                    className="w-full h-9 rounded-lg flex items-center gap-2.5 px-2.5 text-slate-400 hover:bg-slate-800/70 hover:text-slate-200 transition-all border border-transparent hover:border-slate-700/50"
                     title={t.id === "access" ? "Site access point" : `${t.label}${t.width && t.height ? ` (${t.width}×${t.height} m)` : ""}`}>
                     <Icon className="w-4 h-4 shrink-0" style={{ color: t.color }} />
                     <span className="text-[11px] font-medium">{t.label}</span>
                     {t.width > 0 && t.height > 0 && (
-                      <span className="text-[9px] text-slate-400 ml-auto font-mono">{t.width}×{t.height}m</span>
+                      <span className="text-[9px] text-slate-600 ml-auto font-mono">{t.width}×{t.height}m</span>
                     )}
                   </button>
                 );

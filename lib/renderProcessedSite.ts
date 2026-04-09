@@ -38,45 +38,45 @@ import {
 } from "@/lib/polygon-offset";
 import { polygonToSetbackSegments, type SetbackSegment } from "@/lib/setback-snap";
 
-// ─── Clean Professional Styles (French PC2 permit standard) ─────────────────
+// ─── Premium CAD Styles (French PC2 permit standard) ────────────────────────
 
-/** Parcel boundary: refined red dashed "Limite de propriété" */
+/** Parcel boundary: refined architectural "Limite de propriété" */
 const PARCEL_BORDER = {
-  stroke: "#ef4444",             // Red-500 — clear but not overpowering
-  strokeWidth: 1.8,
-  strokeDashArray: [10, 5],
+  stroke: "#94a3b8",             // Slate-400 — professional, clear against dark canvas
+  strokeWidth: 1.6,
+  strokeDashArray: [8, 4],
   strokeLineJoin: "miter" as const,
   strokeLineCap: "butt" as const,
   miterLimit: 12,
 };
 
 /** Parcel fill: very subtle tint so shapes stand out */
-const PARCEL_FILL = "rgba(134, 239, 172, 0.12)";
+const PARCEL_FILL = "rgba(148, 163, 184, 0.06)";
 
-/** Per-parcel dimension label: compact red pill with background */
+/** Per-parcel dimension label: compact dark pill with crisp white text */
 const DIMENSION_LABEL = {
   fontSize: 9,
   fontFamily: "'Inter', system-ui, sans-serif",
-  fontWeight: "600" as const,
+  fontWeight: "500" as const,
   fontStyle: "italic" as const,
-  fill: "#fecaca",
-  backgroundColor: "rgba(127, 29, 29, 0.7)",
+  fill: "#e2e8f0",
+  backgroundColor: "rgba(15, 23, 42, 0.72)",
   padding: 2,
 };
 
 /** Vertex marker style — subtle small dots */
 const VERTEX_MARKER = {
-  radius: 2.5,
-  fill: "#ef4444",
-  stroke: "#ef4444",
-  strokeWidth: 0,
+  radius: 2,
+  fill: "#64748b",
+  stroke: "#94a3b8",
+  strokeWidth: 0.5,
 };
 
 /** NGF elevation label */
 const ELEVATION_LABEL = {
   fontSize: 8,
   fontFamily: "'Inter', system-ui, sans-serif",
-  fontWeight: "600" as const,
+  fontWeight: "500" as const,
   fill: "#94a3b8",
   backgroundColor: "rgba(15, 23, 42, 0.55)",
   padding: 2,
@@ -88,7 +88,7 @@ const BOUNDARY_LABEL = {
   fontFamily: "'Inter', system-ui, sans-serif",
   fontWeight: "400" as const,
   fontStyle: "italic" as const,
-  fill: "rgba(252, 165, 165, 0.6)",
+  fill: "rgba(148, 163, 184, 0.5)",
 };
 
 // ─── Tag names for selective clearing ────────────────────────────────────────

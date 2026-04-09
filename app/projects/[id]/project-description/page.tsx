@@ -955,7 +955,10 @@ export default function ProjectDescriptionPage({
             const res = await fetch("/api/analyze-plu", {
                 method: "POST",
                 body: formData,
-                signal: AbortSignal.timeout(130_000), // 130s — slightly above Vercel's 120s maxDuration
+                // No aggressive client timeout — the server manages its own deadline via MASTER_DEADLINE_MS.
+                // The server will ALWAYS return a response (success, fallback, or error) within its deadline.
+                // A generous 5min safety net prevents truly hung connections (e.g., network drop).
+                signal: AbortSignal.timeout(300_000), // 300s safety net — server returns well before this
             });
             // Safe JSON parsing — backend might return HTML on crash
             const contentType = res.headers.get("content-type") || "";

@@ -76,9 +76,9 @@ function createSkyDome(scene: THREE.Scene): void {
         float y = dir.y;
 
         // Sky gradient: deep blue zenith -> light blue horizon
-        vec3 zenith = vec3(0.30, 0.55, 0.92);  // Deep sky blue
-        vec3 horizon = vec3(0.68, 0.80, 0.92); // Pale blue-grey horizon
-        vec3 belowHorizon = vec3(0.75, 0.82, 0.90); // Below horizon fade
+        vec3 zenith = vec3(0.32, 0.52, 0.88);  // Deep muted blue
+        vec3 horizon = vec3(0.72, 0.82, 0.90); // Soft haze horizon
+        vec3 belowHorizon = vec3(0.78, 0.84, 0.90); // Pale horizon fade
 
         float t = max(y, 0.0);
         vec3 skyColor = mix(horizon, zenith, pow(t, 0.5));
@@ -1051,8 +1051,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     // ═══════════════════════════════════════════════════════════════════════
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xc8ddf0);  // Sky-matching pale blue
-    scene.fog = null; // No fog — terrain must stay fully colored at all zoom distances
+    scene.background = new THREE.Color(0xd6e4f0);  // Soft atmospheric blue-grey
+    scene.fog = new THREE.FogExp2(0xd6e4f0, 0.0018);  // Subtle exponential fog for depth
 
     const far = Math.max(6000, tSpan * 12);
     const camera = new THREE.PerspectiveCamera(35, W / H, 0.3, far);
@@ -1067,7 +1067,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.5; // Brighter for vibrant satellite colors
+    renderer.toneMappingExposure = 1.35; // Natural balanced exposure
 
     container.innerHTML = "";
     const cvs = renderer.domElement;
@@ -1090,8 +1090,8 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     // Lighting
     const sd = Math.max(80, tSpan * 1.5);
-    const sun = new THREE.DirectionalLight(0xfff8e8, 2.5);  // Warm sunlight — boosted
-    sun.position.set(sd * 0.4, sd * 1.0, sd * 0.35);
+    const sun = new THREE.DirectionalLight(0xfff5e0, 2.2);  // Warm golden sunlight
+    sun.position.set(sd * 0.5, sd * 1.0, sd * 0.4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.camera.near = 0.5;
@@ -1102,9 +1102,9 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
     sun.shadow.camera.bottom = -sd;
     sun.shadow.bias = -0.0002;
     scene.add(sun);
-    scene.add(new THREE.DirectionalLight(0xc8d8e8, 0.5));  // Cool fill — boosted
-    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a7b4e, 0.55));
-    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.3));
+    scene.add(new THREE.DirectionalLight(0xd4e0f0, 0.45));  // Cool sky fill
+    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x4a6741, 0.50));  // Sky/ground ambient
+    scene.add(new THREE.AmbientLight(0xf0f0f0, 0.25));  // Soft base fill
 
     // ── SKY DOME ──
     createSkyDome(scene);
@@ -1223,7 +1223,7 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
 
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.65,
+      roughness: 0.78,
       metalness: 0.0,
       side: THREE.DoubleSide,
     });
@@ -1358,11 +1358,11 @@ export default function Terrain3DViewer({ processedSiteData, parcelGeoJSON, widt
         const tubeCurve = new THREE.CatmullRomCurve3(smoothPts, false, 'catmullrom', 0.1);
         const tubeGeo = new THREE.TubeGeometry(tubeCurve, smoothPts.length, 0.12, 6, false);
         const tubeMat = new THREE.MeshStandardMaterial({
-          color: 0x10b981,
-          roughness: 0.55,
-          metalness: 0.15,
-          emissive: 0x10b981,
-          emissiveIntensity: 0.25,
+          color: 0xcbd5e1,
+          roughness: 0.45,
+          metalness: 0.08,
+          emissive: 0xcbd5e1,
+          emissiveIntensity: 0.12,
         });
         const boundaryTube = new THREE.Mesh(tubeGeo, tubeMat);
         boundaryTube.castShadow = true;
